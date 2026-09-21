@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日志分析中心</title>
+    <style>
+  :root { --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d; --text: #e6edf3; --text2: #8b949e; --info: #58a6ff; --success: #3fb950; --warn: #d29922; --error: #f85149; --heading: #f0f6fc; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; }
+        .header { background: var(--surface); padding: 10px 16px; position: sticky; top: 0; z-index: 10;
+            display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .header a { color: var(--info); text-decoration: none; font-size: 14px; }
+        .header h1 { font-size: 18px; color: var(--heading); flex: 1; }
+        .layout { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: calc(100vh - 46px); }
+        @media (max-width: 768px) { .layout { grid-template-columns: 1fr; } }
+        .sidebar { background: var(--surface); padding: 16px; overflow-y: auto; }
+        .sidebar h3 { font-size: 14px; color: var(--text2); margin-bottom: 12px; }
+        .file-tree { font-size: 13px; }
+        .tree-dir { color: var(--info); font-weight: 600; cursor: pointer; padding: 3px 0; display: flex; align-items: center; gap: 4px; }
+        .tree-dir:hover { color: #79c0ff; }
+        .tree-dir .arrow { font-size: 10px; width: 12px; display: inline-block; transition: transform 0.15s; }
+        .tree-dir .arrow.open { transform: rotate(90deg); }
+        .tree-file { color: var(--text2); padding: 2px 0 2px 20px; font-family: "SF Mono", "Fira Code", monospace; font-size: 12px;
+            display: flex; justify-content: space-between; }
+        .tree-file .cat { font-size: 10px; padding: 1px 6px; border-radius: 8px; }
+        .cat-events { background: #0d2b4e; color: var(--info); }
+        .cat-dump { background: #490202; color: var(--error); }
+        .cat-hardware { background: #0d3320; color: var(--success); }
+        .cat-siolog { background: #2e1e00; color: var(--warn); }
+        .cat-text { background: var(--surface2); color: var(--text2); }
+        .tree-children { display: none; padding-left: 12px; }
+        .tree-children.open { display: block; }
+        .file-count { font-size: 11px; color: var(--text2); }
+        .main { padding: 24px; }
+        .tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; border-bottom: 1px solid var(--surface2); padding-bottom: 12px; }
+        .tab { padding: 8px 20px; border-radius: 6px 6px 0 0; font-size: 14px; cursor: pointer; background: var(--surface2); color: var(--text2);
+            border: 1px solid transparent; transition: all 0.15s; white-space: nowrap; }
+        .tab:hover { color: #c9d1d9; border-color: var(--border); }
+        .tab.active { background: var(--bg); color: var(--info); border-color: var(--info); border-bottom-color: var(--bg); font-weight: 600; }
+        .tab-content { min-height: 300px; }
+        .loading { text-align: center; padding: 60px; color: var(--text2); }
+        .loading .spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--surface2); border-top-color: var(--info);
+            border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        /* Report styles (inherited from report.html) */
+        .card { background: var(--surface); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+        .card h3 { font-size: 16px; color: var(--text); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--surface2); }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--surface2); }
+        th { color: var(--text2); font-weight: 600; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .badge-critical { background: #490202; color: var(--error); }
+        .badge-error { background: #3d1e00; color: var(--warn); }
+        .badge-info { background: #0d2b4e; color: var(--info); }
+        .badge-ok { background: #0d3320; color: var(--success); }
+        .badge-warning { background: #3d1e00; color: var(--warn); }
+        .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
+        .alert-critical { background: #490202; border: 1px solid var(--error); color: var(--error); }
+        .alert-warning { background: #3d1e00; border: 1px solid var(--warn); color: var(--warn); }
+        .alert-info { background: #0d2b4e; border: 1px solid var(--info); color: var(--info); }
+        .alert-ok { background: #0d3320; border: 1px solid var(--success); color: var(--success); }
+        .alert-summary { padding: 20px; font-size: 15px; line-height: 1.8; }
+        .alert-summary h3 { font-size: 20px; margin-bottom: 16px; }
+        .event-list { max-height: 500px; overflow-y: auto; }
+        .event-item { padding: 8px 12px; border-bottom: 1px solid var(--surface2)36; font-size: 13px; font-family: "SF Mono", "Fira Code", monospace; }
+        .stat-box { text-align: center; padding: 16px; background: var(--bg); border-radius: 8px; }
+        .stat-box .number { font-size: 32px; font-weight: 700; color: var(--text); }
+        .stat-box .label { font-size: 13px; color: var(--text2); margin-top: 4px; }
+        .file-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .file-chip { background: var(--surface2); padding: 4px 12px; border-radius: 14px; font-size: 12px; color: var(--text2); }
+        /* File preview modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100;
+            justify-content: center; align-items: center; }
+        .modal-overlay.open { display: flex; }
+        .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; max-width: 900px; width: 90%; max-height: 85vh;
+            display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--surface2); }
+        .modal-header h2 { font-size: 16px; color: var(--heading); }
+        .modal-close { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+        .modal-close:hover { color: var(--text); background: var(--surface2); }
+        .modal-meta { font-size: 12px; color: var(--text2); padding: 8px 20px; background: var(--bg); border-bottom: 1px solid var(--surface2); }
+        .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+        .modal-body pre { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;
+            color: var(--text); line-height: 1.5; margin: 0; }
+        .tree-file.clickable { cursor: pointer; }
+        .tree-file.clickable:hover { color: var(--info); background: #1c2333; border-radius: 4px; }
+        /* Chat UI */
+        .chat-container { display: flex; flex-direction: column; height: calc(100vh - 160px); }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 8px 0; }
+        .chat-msg { margin-bottom: 12px; padding: 10px 14px; border-radius: 10px; max-width: 90%; font-size: 14px; line-height: 1.6; }
+        .chat-msg.user { background: var(--info); color: var(--text); margin-left: auto; border-bottom-right-radius: 4px; }
+        .chat-msg.assistant { background: var(--surface); color: var(--text); border: 1px solid var(--surface2); margin-right: auto; border-bottom-left-radius: 4px; }
+        .chat-msg p { margin: 4px 0; }
+        .chat-msg code { background: var(--surface2); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+        .chat-msg pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 8px 0; }
+        .chat-msg ul, .chat-msg ol { padding-left: 20px; margin: 4px 0; }
+        .chat-input-wrap { display: flex; gap: 8px; padding: 12px 0; border-top: 1px solid var(--surface2); }
+        .chat-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+            color: var(--text); font-size: 14px; font-family: inherit; resize: none; outline: none; }
+        .chat-input:focus { border-color: var(--info); }
+        .chat-send { background: var(--info); color: #fff; border: none; border-radius: 8px; padding: 10px 18px;
+            cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; }
+        .chat-send:hover { background: #388bfd; }
+        .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
+        .chat-typing { color: var(--text2); font-size: 13px; padding: 8px 14px; }
+        /* Chat mode switch */
+        .chat-mode-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-right: 8px; flex-shrink: 0; }
+        .mode-pill { padding: 6px 12px; font-size: 12px; cursor: pointer; color: var(--text2); background: var(--bg); user-select: none; white-space: nowrap; transition: all 0.15s; }
+        .mode-pill.active { background: var(--info); color: #fff; }
+        .mode-pill.hermes.active { background: #8957e5; }
+        .mode-pill:not(.active):hover { color: #c9d1d9; }
+        .chat-msg.hermes { border-left: 3px solid #8957e5; }
+        /* BMC/Other layout: file viewer + AI chat */
+        .other-layout { display: flex; flex-direction: column; height: calc(100vh - 52px); }
+        .other-viewer { flex: 1; display: flex; flex-direction: column; border-bottom: 1px solid var(--surface2); min-height: 200px; }
+        .other-viewer-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px;
+            background: var(--surface); border-bottom: 1px solid var(--surface2); font-size: 14px; color: var(--text); }
+        .other-viewer-body { flex: 1; overflow-y: auto; padding: 16px; }
+        .other-viewer-body pre { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; white-space: pre-wrap;
+            word-break: break-all; color: var(--text); line-height: 1.5; margin: 0; }
+        .other-viewer-body iframe { width: 100%; height: 100%; border: none; }
+        .other-chat { flex: 0 0 auto; min-height: 200px; height: 350px; display: flex; flex-direction: column;
+            border-top: 1px solid var(--surface2); resize: vertical; overflow: hidden; }
+        .other-chat .resize-handle { height: 6px; background: var(--surface2); cursor: row-resize;
+            flex-shrink: 0; transition: background 0.15s; }
+        .other-chat .resize-handle:hover { background: var(--info); }
+        .other-chat .chat-container { display: flex; flex-direction: column; height: 100%; }
+        .other-chat .chat-messages { flex: 1; overflow-y: auto; padding: 12px 16px; }
+        .other-chat .chat-input-wrap { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--surface2); }
+        .other-chat .chat-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+            padding: 8px 12px; color: var(--text); font-size: 14px; font-family: inherit; resize: none; outline: none; }
+        .other-chat .chat-input:focus { border-color: var(--info); }
+        .other-chat .chat-send { background: var(--info); color: #fff; border: none; border-radius: 8px;
+            padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; }
+        .other-chat .chat-send:hover { background: #388bfd; }
+        .other-chat .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
+        .other-chat .chat-msg { margin-bottom: 10px; padding: 8px 12px; border-radius: 10px;
+            max-width: 90%; font-size: 14px; line-height: 1.6; }
+        .other-chat .chat-msg.user { background: var(--info); color: var(--text); margin-left: auto; border-bottom-right-radius: 4px; }
+        .other-chat .chat-msg.assistant { background: var(--surface); color: var(--text); border: 1px solid var(--surface2);
+            margin-right: auto; border-bottom-left-radius: 4px; }
+        .other-chat .chat-msg p { margin: 4px 0; }
+        .other-chat .chat-msg code { background: var(--surface2); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+        .other-chat .chat-msg pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 8px 0; }
+        .other-chat .chat-msg ul, .other-chat .chat-msg ol { padding-left: 20px; margin: 4px 0; }
+        .other-chat .chat-typing { color: var(--text2); font-size: 13px; padding: 6px 12px; }
+
+        /* === Dynamic file tabs === */
+        .file-tabs-sep { display: inline-block; width: 1px; height: 24px; background: var(--border); margin: 0 6px; align-self: center; flex-shrink: 0; }
+        .file-tab { display: inline-flex; align-items: center; gap: 4px; padding: 8px 10px 8px 14px; border-radius: 6px 6px 0 0; font-size: 13px; cursor: pointer; background: var(--surface2); color: var(--text2); border: 1px solid transparent; transition: all 0.15s; white-space: nowrap; max-width: 180px; flex-shrink: 0; }
+        .file-tab:hover { color: #c9d1d9; border-color: var(--border); }
+        .file-tab.active { background: var(--bg); color: var(--info); border-color: #1f6feb; border-bottom-color: var(--bg); font-weight: 600; }
+        .file-tab .ft-name { overflow: hidden; text-overflow: ellipsis; font-family: "SF Mono", "Fira Code", monospace; font-size: 12px; }
+        .file-tab .ft-close { display: inline-block; width: 18px; height: 18px; line-height: 16px; text-align: center; border-radius: 3px; font-size: 12px; color: #484f58; cursor: pointer; flex-shrink: 0; }
+        .file-tab .ft-close:hover { color: var(--error); background: #490202; }
+        .file-tab.dirty .ft-name::after { content: ' ●'; color: var(--warn); font-size: 8px; }
+        .tab-content.file-view { padding: 0; }
+        .file-view-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--surface2); font-size: 13px; color: var(--text2); }
+        .file-view-body { padding: 16px; overflow-y: auto; height: calc(100vh - 160px); }
+        .file-view-body pre { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; color: var(--text); line-height: 1.5; margin: 0; }
+        .ai-tab-highlight { background: var(--info); color: #fff !important; border-color: var(--info); }
+        .ai-tab-highlight.active { background: var(--bg); color: var(--info) !important; }
+        .tab-content.no-pad { padding: 0; }
+        .deep-tab.active { background: var(--bg); color: #bc8cff; border-color: #8957e5; border-bottom-color: var(--bg); font-weight: 600; }
+        .deep-tab:not(.active):hover { color: #bc8cff; border-color: #8957e5; }
+
+    </style>
+</head>
+<body>
+<h1 id="page-title" style="display:none;">🔬 日志分析中心</h1>
+    <div class="layout">
+        <div class="sidebar" id="sidebar">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                <a href="/log-analyzer/" style="color:var(--info);text-decoration:none;font-size:13px;">← 返回主界面</a>
+                <span style="font-size:11px;color:var(--text2);" id="job-id-display"></span>
+            </div>
+            <h3>📁 诊断文件</h3>
+            <div class="file-tree" id="file-tree">
+                <div class="loading" style="padding:20px;"><div class="spinner"></div><p>加载中...</p></div>
+            </div>
+        </div>
+        <div class="main">
+    <div class="tabs" id="tabs">
+        {% if os_type in ('other', 'bmc') %}
+        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>
+        <div class="tab deep-tab" data-type="chat-hermes">🔬 深度分析</div>{% endif %}
+        <span id="file-tabs"></span>
+        {% else %}
+        {% if os_type == 'linux' %}
+        <div class="tab" data-type="linux_overview">📄 系统概览</div>
+        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>
+        <div class="tab deep-tab" data-type="chat-hermes">🔬 深度分析</div>{% endif %}
+        <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
+        <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
+        <span id="file-tabs"></span>
+        {% elif os_type == 'windows' %}
+        <div class="tab" data-type="overview">📄 系统概览</div>
+        <div class="tab" data-type="diagnostics">📋 系统诊断</div>
+        <div class="tab" data-type="dump">💾 Dump 分析</div>
+        <div class="tab" data-type="siolog">📋 SIOlog</div>
+        <div class="tab" data-type="summary">📊 整体总结</div>
+        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>
+        <div class="tab deep-tab" data-type="chat-hermes">🔬 深度分析</div>{% endif %}
+        <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
+        <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
+        <span id="file-tabs"></span>
+        {% endif %}
+        {% endif %}
+    </div>
+            {% if os_type in ('other', 'bmc') %}
+            <div class="tab-content" id="tab-content">
+            <div class="tab-content" id="tab-content">
+                <div style="text-align:center;color:var(--text2);padding:60px 20px;">
+                    <div style="font-size:48px;margin-bottom:16px;">📂</div>
+                    <p style="font-size:16px;margin-bottom:8px;">选择左侧文件并点击文件名查看内容</p>
+                    <p style="font-size:13px;">或点击上方「🤖 AI 分析」开始对话</p>
+                </div>
+            </div>
+            {% else %}
+            <div class="tab-content" id="tab-content">
+            <div class="tab-content" id="tab-content">
+                <div class="loading" id="loading"><div class="spinner"></div><p>加载中...</p></div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <!-- File Preview Modal -->
+    <div class="modal-overlay" id="file-modal" onclick="if(event.target===this)closeFileModal()">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="modal-title">📄 文件预览</h2>
+                <button class="modal-close" onclick="closeFileModal()">✕</button>
+            </div>
+            <div class="modal-meta" id="modal-meta"></div>
+            <div class="modal-body"><pre id="modal-content">加载中...</pre></div>
+        </div>
+    </div>
+    <script>
+        const urlParts = window.location.pathname.split('/');
+        const jobId = '{{ job_id }}';
+        document.getElementById('job-id-display').textContent = 'ID: ' + jobId;
+        const osType = '{{ os_type }}';
+        const isOtherLayout = osType === 'other' || osType === 'bmc';
+        // 2026-09-08 主人要求：默认视图 = 系统概览（本地快）——AI 整体总结不自动跑（点击才触发）
+        let currentType = isOtherLayout ? 'chat' : '{{ "linux_overview" if os_type in ("linux", "bmc") else "overview" }}';
+        // For other layout, activate AI tab by default
+        if (isOtherLayout) {
+            setTimeout(function() {
+                document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+                var aiTab = document.querySelector('.tab[data-type="chat"]');
+                if (aiTab) aiTab.classList.add('active');
+                renderChat('api');
+            }, 100);
+        }
+        let analysisCache = {};
+        // Chat mode: 'api' (DeepSeek) or 'hermes' (local agent bridge)
+        let chatMode = 'api';
+        // Cache: preserve chat history across tab switches
+        const chatHistory = { api: null, hermes: null };
+        function saveChatState() {
+            var msgs = document.getElementById('chat-messages');
+            if (msgs) chatHistory[chatMode] = msgs.innerHTML;
+        }
+        function setChatMode(mode) {
+            chatMode = mode;
+            document.querySelectorAll('#chat-mode-switch .mode-pill').forEach(function(el) {
+                el.classList.toggle('active', el.dataset.mode === mode);
+            });
+            var inp = document.getElementById('chat-input');
+            if (inp) {
+                inp.placeholder = mode === 'hermes' ? '🔬 深度分析模式：Agent 将直接读取日志文件分析...' : '输入问题，按 Enter 发送...';
+                inp.focus();
+            }
+        }
+        // Polling for hermes bridge responses
+        let hermesPollTimer = null;
+        let hermesQuickShown = false;
+        async function pollHermesResponse(requestId) {
+            var msgs = document.getElementById('chat-messages');
+            var typingEl = document.getElementById('hermes-typing');
+            if (!typingEl) {
+                typingEl = document.createElement('div');
+                typingEl.id = 'hermes-typing';
+                typingEl.className = 'chat-typing';
+                typingEl.textContent = '🔬 Hermes Agent 正在深度分析...';
+                msgs.appendChild(typingEl);
+            }
+            var startTime = Date.now();
+            var maxWait = 300000;
+            var quickWait = 180000;  // keep polling for 3min after quick result (was 60s)
+            var quickReceivedAt = 0;
+            hermesPollTimer = setInterval(async function() {
+                try {
+                    var r = await fetch('../api/chat-hermes/' + jobId + '/poll?rid=' + encodeURIComponent(requestId));
+                    var d = await r.json();
+                    if (d.status === 'done') {
+                        clearInterval(hermesPollTimer);
+                        if (typingEl && typingEl.parentNode) typingEl.remove();
+                        // Remove quick placeholder if exists
+                        var qp = document.getElementById('hermes-quick-' + requestId);
+                        if (qp && qp.parentNode) qp.remove();
+                        appendMessage('assistant', d.reply, 'hermes');
+                        var inp = document.getElementById('chat-input');
+                        var btn = document.getElementById('chat-send-btn');
+                        if (inp) inp.disabled = false;
+                        if (btn) btn.disabled = false;
+                    } else if (d.status === 'quick' && !hermesQuickShown) {
+                        // Show quick result but KEEP polling for the full version
+                        hermesQuickShown = true;
+                        quickReceivedAt = Date.now();
+                        if (typingEl && typingEl.parentNode) typingEl.remove();
+                        var quickReply = '⚡ **快速诊断** · AI 深度分析更新中...\n\n' + (d.reply || '');
+                        appendMessage('assistant', quickReply, 'hermes');
+                        // Tag the last message so we can replace it later
+                        var allMsgs = document.getElementById('chat-messages').children;
+                        if (allMsgs.length > 0) {
+                            allMsgs[allMsgs.length - 1].id = 'hermes-quick-' + requestId;
+                        }
+                    } else if (d.status === 'quick' && hermesQuickShown) {
+                        // Already showing quick, check if we should stop waiting
+                        if (Date.now() - quickReceivedAt > quickWait) {
+                            clearInterval(hermesPollTimer);
+                            // Update badge to indicate final
+                            var qp = document.getElementById('hermes-quick-' + requestId);
+                            if (qp) {
+                                qp.innerHTML = qp.innerHTML.replace('AI 深度分析更新中...', '（AI 分析未及时响应）');
+                            }
+                            var inp = document.getElementById('chat-input');
+                            var btn = document.getElementById('chat-send-btn');
+                            if (inp) inp.disabled = false;
+                            if (btn) btn.disabled = false;
+                        }
+                    } else if (Date.now() - startTime > maxWait) {
+                        clearInterval(hermesPollTimer);
+                        if (typingEl && typingEl.parentNode) typingEl.remove();
+                        if (!hermesQuickShown) {
+                            appendMessage('assistant', '⏰ 深度分析超时（5分钟），请稍后重试或切换 AI 对话模式。');
+                        }
+                        var inp = document.getElementById('chat-input');
+                        var btn = document.getElementById('chat-send-btn');
+                        if (inp) inp.disabled = false;
+                        if (btn) btn.disabled = false;
+                    }
+                } catch(e) {
+                    // Keep polling on transient errors
+                }
+            }, 2000);
+        }
+        // Load file tree
+        fetch('../api/files/' + jobId)
+            .then(r => r.json())
+            .then(buildTree)
+            .catch(err => {
+                document.getElementById('file-tree').innerHTML = '<p style="color:var(--error)">加载失败</p>';
+            });
+        function buildTree(data) {
+            const el = document.getElementById('file-tree');
+            let html = `<p style="font-size:11px;color:var(--text2);margin-bottom:8px;">${data.total_files} 个文件</p>`;
+            function render(items, depth) {
+                for (const item of items) {
+                    if (item.type === 'dir') {
+                        const id = 'dir-' + item.name + '-' + Math.random().toString(36).slice(2,6);
+                        html += `<div class="tree-dir" onclick="toggleDir('${id}')"><span class="arrow" id="${id}-arrow">▶</span> 📁 ${esc(item.name)}</div>`;
+                        html += `<div class="tree-children" id="${id}">`;
+                        if (item.children) render(item.children, depth + 1);
+                        html += '</div>';
+                    } else {
+                        const kb = item.size ? (item.size/1024).toFixed(1) : 0;
+                        const cat = item.category || '';
+                        const catClass = cat ? 'cat-' + cat : '';
+                        // Determine if file is clickable
+                        const parts = (item.name || '').split('.');
+                        const ext = parts.length > 1 ? parts.pop().toLowerCase() : '';
+                        const readable = ['txt','log','rom','csv','xml','ini','cfg','inf','html','htm'].includes(ext) || ext === '' && item.size > 0;
+                        const isDump = ext === 'dmp' && item.size > 0;
+                        const clickable = readable || isDump;
+                        const cls = clickable ? 'tree-file clickable' : 'tree-file';
+                        const handler = isDump
+                            ? `onclick="event.stopPropagation();openDumpDetail('${escAttr(item.path)}','${escAttr(item.name)}')"`
+                            : readable ? `onclick="event.stopPropagation();openFile('${escAttr(item.path)}','${escAttr(item.name)}')"` : '';
+                        html += `<div class="${cls}"${handler ? ' ' + handler : ''}>`;
+                        html += `<span>📄 ${esc(item.name)}</span>`;
+                        html += `<span style="display:flex;align-items:center;gap:6px;">`;
+                        if (cat) html += `<span class="cat ${catClass}">${cat}</span>`;
+                        html += `<span class="file-count">${kb}KB</span></span></div>`;
+                    }
+                }
+            }
+            render(data.tree || [], 0);
+            el.innerHTML = html;
+            // Open first level dirs
+            setTimeout(() => {
+                document.querySelectorAll('.tree-dir').forEach(d => {
+                    const childId = d.nextElementSibling ? d.nextElementSibling.id : null;
+                    if (childId) toggleDir(childId, true);
+                });
+            }, 100);
+        }
+        function toggleDir(id, force) {
+            const el = document.getElementById(id);
+            const arrow = document.getElementById(id + '-arrow');
+            if (!el || !arrow) return;
+            const isOpen = el.classList.contains('open');
+            if (force !== undefined ? force : !isOpen) {
+                el.classList.add('open');
+                arrow.classList.add('open');
+            } else {
+                el.classList.remove('open');
+                arrow.classList.remove('open');
+            }
+        }
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const newType = this.dataset.type;
+                if (newType === currentType && !activeFileTab) return;
+                currentType = newType;
+                // Deactivate all tabs including file tabs
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.file-tab').forEach(t => t.classList.remove('active'));
+                activeFileTab = null;
+                this.classList.add('active');
+                tabContent.className = 'tab-content';
+                if (newType === 'chat') {
+                    renderChat('api');
+                } else if (newType === 'chat-hermes') {
+                    renderChat('hermes');
+                } else {
+                    saveChatState();
+                    tabContent.innerHTML = '<div class="loading"><div class="spinner"></div><p>分析中...</p></div>';
+                    runAnalysis(newType);
+                }
+            });
+        });
+        // 初始化:激活默认 tab 并加载——优先直接读已有报告(立即出数据),报告不存在才触发分析
+        (function () {
+            var dt = document.querySelector('.tab[data-type="' + currentType + '"]');
+            if (dt) {
+                dt.classList.add('active');
+                if (!isOtherLayout) loadReportData(currentType);
+            }
+        })();
+        async function runAnalysis(type) {
+            if (type === 'chat') return;
+            // Check cache
+            const cacheKey = jobId + '_' + type;
+            if (analysisCache[cacheKey]) {
+                renderResult(type, analysisCache[cacheKey]);
+                return;
+            }
+            try {
+                // Trigger analysis
+                const resp = await fetch('../api/analyze/' + jobId + '?analysis_type=' + type, { method: 'POST' });
+                const data = await resp.json();
+                if (data.status === 'started') {
+                    await pollAnalysis(type);
+                } else if (data.status === 'ready') {
+                    loadReportData(type);
+                }
+            } catch (err) {
+                document.getElementById('tab-content').innerHTML =
+                    '<div class="alert alert-critical">分析失败: ' + err.message + '</div>';
+            }
+        }
+        async function pollAnalysis(type) {
+            for (let i = 0; i < 180; i++) {
+                await new Promise(r => setTimeout(r, 2000));
+                try {
+                    const resp = await fetch('../api/status/' + jobId);
+                    const data = await resp.json();
+                    if (data.status === 'done') { loadReportData(type); return; }
+                    if (data.status === 'error') {
+                        document.getElementById('tab-content').innerHTML =
+                            '<div class="alert alert-critical">' + (data.error || '分析失败') + '</div>';
+                        return;
+                    }
+                } catch (e) {}
+            }
+            document.getElementById('tab-content').innerHTML = '<div class="alert alert-warning">分析超时，请重试</div>';
+        }
+        function loadReportData(type, onMissing) {
+            document.getElementById('tab-content').innerHTML = '<div class="loading"><div class="spinner"></div><p>加载报告...</p></div>';
+            fetch('../api/report/' + jobId + '?type=' + type)
+                .then(r => { if (!r.ok) throw { missing: true, status: r.status }; return r.json(); })
+                .then(data => {
+                    analysisCache[jobId + '_' + type] = data;
+                    renderResult(type, data);
+                })
+                .catch(err => {
+                    if (err && err.missing) {
+                        // 报告不存在(首次分析)→ 触发分析
+                        if (typeof onMissing === 'function') { onMissing(type); return; }
+                        runAnalysis(type);
+                    } else {
+                        document.getElementById('tab-content').innerHTML =
+                            '<div class="alert alert-critical">加载失败: ' + (err && err.message ? err.message : err) + '</div>';
+                    }
+                });
+        }
+        function renderResult(type, data) {
+            document.getElementById('page-title').textContent = data.title || '分析报告';
+            switch(type) {
+                case 'summary': renderSummary(data); break;
+                case 'dump': renderDump(data); break;
+                case 'diagnostics': renderDiagnostics(data); break;
+                case 'siolog': renderSiolog(data); break;
+                case 'overview': renderOverview(data); break;
+                case 'linux_overview': renderLinuxOverview(data); break;
+                case 'linux_kernel': renderLinuxKernel(data); break;
+                case 'linux_syslog': renderLinuxSyslog(data); break;
+                case 'linux_summary': renderLinuxSummary(data); break;
+                case 'chat': break;
+            }
+        }
+        // ── Renderers ──
+        function renderSummary(data) {
+            const el = document.getElementById('tab-content');
+            const sev = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)', normal:'var(--info)'};
+            const sevBg = {critical:'#490202', warning:'#3d1e00', ok:'#0d3320', normal:'#0d2b4e'};
+            const sevBorder = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)', normal:'var(--info)'};
+            const icons = {critical:'🔴', warning:'🟡', ok:'🟢', normal:'🔵'};
+            const s = sev[data.severity] || 'var(--info)';
+            let html = `<div class="alert alert-summary" style="background:${sevBg[data.severity]};border:2px solid ${sevBorder[data.severity]};color:${s}">`;
+            html += `<h3>${icons[data.severity]||'🔵'} ${data.title}</h3>`;
+            html += '<ul style="list-style:none;padding:0;">';
+            for (const f of data.findings || []) {
+                html += `<li style="padding:6px 0;font-size:15px;">${f}</li>`;
+            }
+            html += '</ul></div>';
+            // Detail links
+            html += '<div class="grid-2">';
+            for (const [k, v] of Object.entries(data.detail || {})) {
+                html += `<div class="card" style="cursor:pointer" onclick="document.querySelector('.tab[data-type=\\'${k}\\']').click()">
+                    <h3>${v.title || k}</h3>
+                    <p style="color:var(--text2);font-size:13px;">${v.summary || '点击查看详情 →'}</p>
+                </div>`;
+            }
+            html += '</div>';
+            el.innerHTML = html;
+        }
+        function renderOverview(data) {
+            const el = document.getElementById('tab-content');
+            let html = '';
+            const sys = data.system || {};
+            const gpu = data.gpu || {};
+            const disks = data.disks || [];
+            const sio = data.sio || {};
+            // ── System info card ──
+            html += '<div class="card"><h3>🖥️ 系统信息</h3><div class="grid-2">';
+            const sysRows = [
+                ['主机名', sys.hostname], ['OS', sys.os_name], ['OS 版本', sys.os_version],
+                ['系统制造商', sys.manufacturer], ['系统型号', sys.model], ['系统类型', sys.system_type],
+                ['BIOS', sys.bios_version], ['安装日期', sys.install_date], ['启动时间', sys.boot_time],
+                ['物理内存', sys.total_memory ? sys.total_memory + ' MB' : ''], ['可用内存', sys.available_memory ? sys.available_memory + ' MB' : ''],
+                ['域/工作组', sys.domain], ['注册用户', sys.registered_owner], ['注册组织', sys.registered_org],
+            ];
+            for (const [l, v] of sysRows) {
+                if (v) html += `<div style="padding:4px 0;font-size:13px;"><span style="color:var(--text2);">${l}:</span> <strong>${esc(v)}</strong></div>`;
+            }
+            html += '</div></div>';
+            // ── CPU card ──
+            if (sys.cpu) {
+                html += `<div class="card"><h3>🔲 处理器</h3><p style="font-size:14px;"><strong>${esc(sys.cpu)}</strong></p></div>`;
+            }
+            // ── GPU card ──
+            if (Object.keys(gpu).length > 0) {
+                html += '<div class="card"><h3>🎮 显卡</h3><div class="grid-2">';
+                for (const [l, v] of [['显卡', gpu.name], ['芯片', gpu.chip],
+                    ['专用显存', gpu.dedicated_memory], ['当前分辨率', gpu.current_mode],
+                    ['驱动版本', gpu.driver_version], ['驱动日期', gpu.driver_date]]) {
+                    if (v) html += `<div style="padding:4px 0;font-size:13px;"><span style="color:var(--text2);">${l}:</span> <strong>${esc(v)}</strong></div>`;
+                }
+                html += '</div></div>';
+            }
+            // ── Disks card ──
+            if (disks.length > 0) {
+                html += `<div class="card"><h3>💿 磁盘 (${disks.length} 个)</h3>`;
+                for (const d of disks) {
+                    html += '<div style="background:var(--bg);padding:12px;border-radius:6px;margin-bottom:8px;">';
+                    html += `<strong>${esc(d.model || d.vendor || '未知磁盘')}</strong>`;
+                    if (d.capacity) html += `<span style="color:var(--text2);font-size:12px;margin-left:8px;">${esc(d.capacity)}</span>`;
+                    if (d.rpm) html += `<span style="color:var(--text2);font-size:12px;margin-left:8px;">${esc(d.rpm)}</span>`;
+                    html += '<div style="font-size:12px;color:var(--text2);margin-top:4px;">';
+                    if (d.serial) html += `SN: ${esc(d.serial)} &nbsp;`;
+                    if (d.firmware) html += `固件: ${esc(d.firmware)} &nbsp;`;
+                    if (d.smart) html += `SMART: ${esc(d.smart)}`;
+                    html += '</div></div>';
+                }
+                html += '</div>';
+            }
+            // ── NICs card ──
+            const nics = sys.nics || [];
+            if (nics.length > 0) {
+                html += `<div class="card"><h3>🌐 网卡 (${nics.length} 个)</h3>`;
+                for (const n of nics) {
+                    html += '<div style="background:var(--bg);padding:10px;border-radius:6px;margin-bottom:6px;font-size:13px;">';
+                    html += `<strong>${esc(n.name)}</strong>`;
+                    html += `<span style="color:var(--text2);margin-left:8px;">${esc(n.status)}</span>`;
+                    if (n.ips && n.ips.length > 0) {
+                        html += `<div style="color:var(--info);font-size:12px;margin-top:2px;">${n.ips.map(ip => esc(ip)).join(', ')}</div>`;
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            // ── SIO info ──
+            if (Object.keys(sio).length > 0) {
+                html += '<div class="card"><h3>🔌 SIO/EC 控制器</h3><div class="grid-2">';
+                for (const [l, v] of [['产品', sio.product_id], ['固件', sio.firmware], ['事件数', sio.event_count]]) {
+                    if (v) html += `<div style="padding:4px 0;font-size:13px;"><span style="color:var(--text2);">${l}:</span> <strong>${esc(v)}</strong></div>`;
+                }
+                html += '</div></div>';
+            }
+            // ── File list ──
+            const files = data.text_files || {};
+            html += `<div class="card"><h3>📁 诊断文件 (${data.text_file_count || 0} 个 + ${data.evtx_count || 0} 个 evtx)</h3><div class="file-list">`;
+            for (const [name, info] of Object.entries(files)) {
+                const kb = info.size ? (info.size/1024).toFixed(1) : 0;
+                html += `<span class="file-chip" style="cursor:pointer" onclick="var _f=document.querySelector('.tree-file.clickable'); if(_f) _f.click()">${esc(name)} (${kb}KB)</span>`;
+            }
+            html += '</div></div>';
+            el.innerHTML = html || '<div class="alert alert-info">无数据</div>';
+        }
+        function renderDiagnostics(data) {
+            const el = document.getElementById('tab-content');
+            let html = '';
+            // ═══ Severity Banner ═══
+            const icons = {critical:'🔴', warning:'🟡', ok:'🟢', normal:'🔵'};
+            const sevBg = {critical:'#490202', warning:'#3d1e00', ok:'#0d3320', normal:'#0d2b4e'};
+            const sevBorder = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)', normal:'var(--info)'};
+            const sevColor = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)', normal:'var(--info)'};
+            const s = data.severity || 'normal';
+            // ═══ Stats Row ═══
+            html += '<div class="grid-2" style="margin-bottom:16px;">';
+            const stats = [
+                ['💾 蓝屏', data.bugcheck_count || 0, (data.bugcheck_count>0?'var(--error)':'var(--success)')],
+                ['⚡ 意外断电', data.unexpected_shutdowns_count || 0, (data.unexpected_shutdowns_count>0?'var(--error)':'var(--success)')],
+                ['🔧 硬件告警', data.hardware_error_count || 0, (data.hardware_error_count>0?'var(--warn)':'var(--success)')],
+                ['📝 LiveKernelEvent', data.lke_count || 0, (data.lke_count>0?'var(--warn)':'var(--text2)')],
+                ['⚠️ 安装后崩溃', data.correlated_count || 0, (data.correlated_count>0?'var(--error)':'var(--success)')],
+                ['📊 System 事件', data.syst_total || 0, 'var(--info)'],
+            ];
+            for (const [l, n, c] of stats) {
+                html += `<div class="stat-box"><div class="number" style="color:${c};font-size:24px;">${n}</div><div class="label">${l}</div></div>`;
+            }
+            html += '</div>';
+            // ═══ Section 1: BugCheck / Blue Screen ═══
+            const bugchecks = data.bugchecks || [];
+            if (bugchecks.length > 0) {
+                html += `<div class="card" style="border-left:3px solid var(--error);"><h3>💾 BugCheck 蓝屏事件 (${bugchecks.length} 次)</h3>`;
+                html += '<table><thead><tr><th>时间</th><th>代码</th><th>名称</th><th>参数</th></tr></thead><tbody>';
+                for (const bc of bugchecks.slice(0, 30)) {
+                    const bi = bc.bugcheck || {};
+                    html += `<tr>
+                        <td style="font-family:monospace;font-size:12px;">${fmtTime(bc.time)}</td>
+                        <td><span class="badge badge-critical">${escHtml(bi.code || '?')}</span></td>
+                        <td style="font-size:13px;"><strong>${escHtml(bi.name || '?')}</strong></td>
+                        <td style="font-family:monospace;font-size:11px;color:var(--text2);">${bc.param1 || ''}</td>
+                    </tr>`;
+                    html += `<tr><td></td><td colspan="3" style="color:var(--warn);font-size:12px;padding-top:0;">📖 ${escHtml(bi.description || '')}</td></tr>`;
+                }
+                html += '</tbody></table></div>';
+            }
+            // ═══ Section 2: Unexpected Shutdown Timeline ═══
+            const shutdowns = data.shutdowns || [];
+            if (shutdowns.length > 0) {
+                html += `<div class="card"><h3>⚡ 意外关机/断电事件 (${shutdowns.length} 次)</h3>`;
+                html += '<div class="event-list">';
+                for (const ev of shutdowns.slice(0, 50)) {
+                    const cls = ev.id === 41 ? 'color:var(--error);font-weight:bold;' : 'color:var(--warn);';
+                    html += `<div class="event-item" style="${cls}">
+                        <strong>Event ${ev.id}</strong> | ${fmtTime(ev.time)} | ${escHtml(ev.source||'')} | ${escHtml(ev.description||'')}
+                    </div>`;
+                }
+                html += '</div></div>';
+            }
+            // ═══ Section 3: Crash-Install Correlation ═══
+            const correlated = data.correlated || [];
+            if (correlated.length > 0) {
+                html += `<div class="card" style="border-left:3px solid var(--warn);"><h3>⚠️ 安装/服务变更后发生崩溃 — 关联分析</h3>`;
+                html += `<p style="color:var(--text2);font-size:13px;margin-bottom:12px;">以下事件显示在崩溃/断电前 10 分钟内有服务安装或更新记录（Event 7045 / 19）</p>`;
+                for (const item of correlated) {
+                    const crash = item.crash;
+                    html += `<div style="background:var(--bg);border-radius:6px;padding:12px;margin-bottom:8px;">`;
+                    html += `<div style="margin-bottom:8px;"><span class="badge badge-critical">崩溃</span> <strong>Event ${crash.id}</strong> | ${fmtTime(crash.time)} | ${escHtml(crash.description||'')}`;
+                    if (crash.service_name) html += ` — ${escHtml(crash.service_name)}`;
+                    html += '</div>';
+                    html += '<div style="font-size:12px;color:var(--text2);">⬆️ 崩溃前发生：</div>';
+                    for (const inst of (item.preceding_installs || [])) {
+                        html += `<div style="font-size:12px;padding:4px 0 4px 16px;font-family:monospace;">
+                            <span class="badge badge-warning" style="font-size:10px;">${escHtml(inst.source||'')}</span>
+                            Event ${inst.id} | ${fmtTime(inst.time)} | ${escHtml(inst.service_name || inst.description || inst.update_kb || '')}
+                        </div>`;
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            // ═══ Section 4: Hardware Warnings ═══
+            const hwErrs = data.hardware_errors || [];
+            if (hwErrs.length > 0) {
+                // Group by type
+                const grouped = {};
+                for (const e of hwErrs) {
+                    const key = `Event ${e.id} — ${e.description||''}`;
+                    if (!grouped[key]) grouped[key] = [];
+                    if (grouped[key].length < 10) grouped[key].push(e);
+                }
+                html += `<div class="card"><h3>🔧 硬件告警详情 (${hwErrs.length} 条，${Object.keys(grouped).length} 种类型)</h3>`;
+                for (const [grp, evts] of Object.entries(grouped)) {
+                    const cls = evts[0].level <= 2 ? 'badge-critical' : 'badge-warning';
+                    html += `<div style="margin-bottom:12px;">
+                        <h4 style="font-size:14px;color:var(--text);margin-bottom:6px;">${grp} <span class="badge ${cls}" style="font-size:11px;">${evts.length} 条</span></h4>`;
+                    html += '<div style="font-size:12px;color:var(--text2);padding-left:12px;">';
+                    for (const evt of evts.slice(0, 5)) {
+                        html += `<div style="padding:2px 0;"><span style="font-family:monospace;color:var(--text2);">${fmtTime(evt.time)}</span>
+                            ${(evt.details||[]).slice(0,2).map(d => `<code style="color:var(--text);font-size:11px;">${escHtml(d.substring(0,80))}</code>`).join(' | ')}
+                        </div>`;
+                    }
+                    if (evts.length > 5) html += `<div style="color:var(--text2);">… 还有 ${evts.length - 5} 条</div>`;
+                    html += '</div></div>';
+                }
+                html += '</div>';
+            }
+            // ═══ Section 5: LiveKernelEvent ═══
+            const lke = data.lke_events || [];
+            if (lke.length > 0) {
+                html += `<div class="card"><h3>📝 LiveKernelEvent 内核硬件事件 (${lke.length} 个)</h3>`;
+                html += '<table><thead><tr><th>代码</th><th>描述</th><th>时间</th></tr></thead><tbody>';
+                for (const e of lke) {
+                    html += `<tr><td><span class="badge badge-warning">${e.code}</span></td><td>${escHtml(e.description)}</td><td style="font-family:monospace">${fmtTime(e.time)}</td></tr>`;
+                }
+                html += '</tbody></table></div>';
+            }
+            // ═══ Section 6: System.evtx Event Distribution ═══
+            const systDist = data.syst_dist || {};
+            if (Object.keys(systDist).length > 0) {
+                html += `<div class="card"><h3>📊 System.evtx 事件分布 (${data.syst_total} 条记录，Top 20)</h3>`;
+                html += '<table><thead><tr><th>Event ID</th><th>次数</th><th>类型</th></tr></thead><tbody>';
+                for (const [eid, cnt] of Object.entries(systDist).slice(0, 20)) {
+                    // Color code based on severity implication
+                    const kw = ['41','1001','6008'].includes(eid) ? 'badge-critical' :
+                               ['7','11','51','55','137','153','219'].includes(eid) ? 'badge-warning' : 'badge-info';
+                    html += `<tr><td><span class="badge ${kw}">${eid}</span></td><td>${cnt}</td><td style="font-size:12px;color:var(--text2);">—</td></tr>`;
+                }
+                html += '</tbody></table></div>';
+            }
+            // ═══ Section 7: Application.evtx Event Distribution ═══
+            const appDist = data.app_dist || {};
+            if (Object.keys(appDist).length > 0) {
+                html += `<div class="card"><h3>📊 Application.evtx 事件分布 (${data.app_total} 条记录，Top 20)</h3>`;
+                html += '<table><thead><tr><th>Event ID</th><th>次数</th></tr></thead><tbody>';
+                for (const [eid, cnt] of Object.entries(appDist).slice(0, 20)) {
+                    html += `<tr><td><span class="badge badge-info">${eid}</span></td><td>${cnt}</td></tr>`;
+                }
+                html += '</tbody></table></div>';
+            }
+            // ═══ Section 8: Full Restart Timeline ═══
+            const allRestart = data.restart_events || [];
+            if (allRestart.length > 0) {
+                html += `<div class="card"><h3>🕐 完整重启/关机时间线 (最近 ${Math.min(allRestart.length, 150)} 条)</h3>`;
+                html += `<p style="color:var(--text2);font-size:12px;margin-bottom:8px;">
+                    按 Microsoft 诊断标准追踪 Event 12/13/19/41/1001/1074/6005/6008/6009/7045</p>`;
+                html += '<div class="event-list">';
+                for (const ev of allRestart.slice(0, 150)) {
+                    let style = '';
+                    if (ev.id === 41 || ev.id === 1001) style = 'color:var(--error);font-weight:bold;';
+                    else if (ev.id === 6008) style = 'color:var(--warn);';
+                    else if (ev.id === 1074) style = 'color:var(--info);';
+                    else if (ev.id === 7045 || ev.id === 19) style = 'color:var(--warn);';
+                    html += `<div class="event-item" style="${style}">
+                        <strong>Event ${ev.id}</strong> | ${fmtTime(ev.time)} | ${escHtml(ev.source||'')} | ${escHtml(ev.description||'')}
+                        ${ev.process ? ' — 进程: ' + escHtml(ev.process) : ''}
+                        ${ev.service_name ? ' — ' + escHtml(ev.service_name) : ''}
+                        ${ev.update_kb ? ' — ' + escHtml(ev.update_kb) : ''}
+                    </div>`;
+                }
+                if (allRestart.length > 150) html += `<div class="event-item" style="color:var(--text2);">… 还有 ${allRestart.length - 150} 条</div>`;
+                html += '</div></div>';
+            }
+            if (!html) html = '<div class="alert alert-ok">✅ 未发现异常事件</div>';
+            el.innerHTML = html;
+        }
+        function renderDump(data) {
+            const el = document.getElementById('tab-content');
+            const dumps = data.dumps || {};
+            if (Object.keys(dumps).length === 0) {
+                el.innerHTML = `<div class="alert alert-info">📭 ${data.message || '未包含 Dump 文件'}</div>`;
+                return;
+            }
+            let html = '';
+            const unique = data.unique_bugchecks || [];
+            if (unique.length > 0) {
+                html += '<div class="card"><h3>🔍 蓝屏概览</h3>';
+                html += `<p style="color:var(--text2);font-size:14px;margin-bottom:12px;">${data.summary || ''}</p>`;
+                for (const bc of unique) {
+                    html += `<div class="alert alert-critical" style="margin-bottom:8px;">`;
+                    html += `<strong>${bc.code}</strong> — ${esc(bc.name)}`;
+                    html += `<p style="font-size:13px;margin-top:4px;opacity:0.9;">${esc(bc.description)}</p>`;
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            html += `<div class="card"><h3>💾 转储文件详情 (${Object.keys(dumps).length} 个)</h3>`;
+            for (const [name, info] of Object.entries(dumps)) {
+                const typeColor = (info.dump_type||'').includes('完整') ? 'var(--warn)' : 'var(--info)';
+                html += `<div style="background:var(--bg);padding:16px;border-radius:8px;margin-bottom:12px;border-left:3px solid ${typeColor};">`;
+                html += `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">`;
+                html += `<strong style="font-size:15px;">📁 ${esc(name)}</strong>`;
+                html += `<span style="font-size:12px;color:var(--text2);">${(info.size_mb||0).toFixed(1)} MB</span>`;
+                html += `</div>`;
+                html += `<p style="font-size:12px;color:var(--text2);margin-top:4px;">📋 类型：<span style="color:${typeColor}">${esc(info.dump_type || '未知')}</span>`;
+                if (info.mtime) html += ` &nbsp;|&nbsp; 🕐 ${esc(info.mtime)}`;
+                html += '</p>';
+                if (info.bugcheck) {
+                    const bc = info.bugcheck;
+                    html += `<div style="background:#1a121d;border:1px solid #3d1e00;border-radius:6px;padding:10px;margin-top:8px;">`;
+                    html += `<strong style="color:var(--error);">🔴 Bug Check: ${bc.code}</strong>`;
+                    html += `<span style="color:var(--text);margin-left:8px;">${esc(bc.name)}</span>`;
+                    html += `<p style="color:var(--warn);font-size:13px;margin-top:4px;">📖 ${esc(bc.description)}</p>`;
+                    if (info.bugcheck_params && info.bugcheck_params.length > 0) {
+                        html += `<p style="font-size:12px;color:var(--text2);margin-top:4px;">参数: <code style="color:var(--text)">${info.bugcheck_params.join(', ')}</code></p>`;
+                    }
+                    html += '</div>';
+                }
+                if (info.drivers && info.drivers.length > 0) {
+                    html += `<p style="font-size:12px;color:var(--text2);margin-top:6px;">📦 已加载驱动: `;
+                    html += info.drivers.slice(0, 12).map(d => `<code style="color:var(--text);font-size:11px;">${esc(d)}</code>`).join(', ');
+                    html += '</p>';
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+            el.innerHTML = html;
+        }
+        function renderSiolog(data) {
+            const el = document.getElementById('tab-content');
+            if (!data.found) {
+                el.innerHTML = `<div class="alert alert-info">📭 ${data.message || '未找到 SIO_Events.log'}</div>`;
+                return;
+            }
+            let html = `<div class="card"><h3>📋 Lenovo SIO/EC 事件日志</h3>`;
+            const hdr = data.header || {};
+            html += '<div class="grid-2">';
+            for (const [k, v] of Object.entries(hdr)) {
+                const label = {product_id:'产品ID', firmware_version:'固件版本', event_count:'事件总数', last_event_id:'最后事件ID', mtm:'机型', serial:'序列号', util_version:'工具版本'}[k] || k;
+                html += `<div class="stat-box"><div class="number" style="font-size:16px;">${esc(v||'?')}</div><div class="label">${label}</div></div>`;
+            }
+            html += '</div></div>';
+            // Official code lookup reference
+            html += `<div class="card" style="background:var(--bg);border:1px solid var(--border);">
+                <p style="margin:0;font-size:13px;color:var(--text2);">
+                    💡 如需查询 SIO 事件代码的官方完整说明，请访问
+                    <a href="https://www.thinkworkstationsoftware.com/codes" target="_blank" rel="noopener"
+                       style="color:var(--info);">thinkworkstationsoftware.com/codes</a>
+                </p>
+            </div>`;
+            // Issues
+            const issues = data.issue_events || [];
+            if (issues.length > 0) {
+                html += `<div class="card"><h3>⚠️ 异常事件 (${issues.length} 个)</h3><table><thead><tr><th>#</th><th>时间</th><th>代码</th><th>数据</th></tr></thead><tbody>`;
+                for (const e of issues) {
+                    html += `<tr><td>${e.index}</td><td style="font-family:monospace">${e.time}</td><td><span class="badge badge-warning">${e.code}</span></td><td style="font-family:monospace;font-size:11px;">${esc(e.data)}</td></tr>`;
+                }
+                html += '</tbody></table></div>';
+            }
+            // All events summary
+            html += `<div class="card"><h3>📊 事件统计</h3>`;
+            html += `<p style="color:var(--text2);">${data.summary || ''}</p>`;
+            html += `<p style="font-size:13px;margin-top:8px;">启动记录: <strong>${data.boot_count}</strong> 次 | 事件代码类型: ${(data.unique_codes||[]).map(c => `<span class="badge badge-info" style="margin:2px;">${c}</span>`).join(' ')}</p>`;
+            html += '</div>';
+            // Timeline
+            const all = data.all_events || [];
+            if (all.length > 0) {
+                html += `<div class="card"><h3>🕐 事件时间线 (最近 ${all.length} 条)</h3><div class="event-list">`;
+                for (const e of all.reverse()) {
+                    const cls = e.code !== 'N000' ? 'color:var(--warn);' : '';
+                    html += `<div class="event-item" style="${cls}"><strong>#${e.index}</strong> | ${e.time} | <strong>${e.code}</strong> | ${esc(e.data)}</div>`;
+                }
+                html += '</div></div>';
+            }
+            el.innerHTML = html;
+        }
+        // Initial load: show file tree, wait for user to click a tab
+        var loadingEl = document.getElementById('loading');
+        if (loadingEl) loadingEl.innerHTML = `
+            <div style="text-align:center;padding:60px 20px;">
+                <div style="font-size:64px;margin-bottom:16px;">🔬</div>
+                <h2 style="color:var(--text);font-size:20px;margin-bottom:8px;">文件已就绪</h2>
+                <p style="color:var(--text2);font-size:14px;">点击上方标签开始诊断分析</p>
+            </div>`;
+        function fmtTime(ts) {
+            if (!ts) return '-';
+            try { return new Date(ts).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai',hour12:false}); }
+            catch { return ts; }
+        }
+        function esc(s) { const d = document.createElement('div'); d.textContent = s||''; return d.innerHTML; }
+        function escAttr(s) { return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        // File preview modal
+        // === Dynamic file tab system ===
+        const openFileTabs = {};  // path -> {el, name, content, meta}
+        const fileTabOrder = [];  // ordered list of paths
+        let activeFileTab = null;
+        const tabContent = document.getElementById('tab-content');
+        const fileTabsContainer = document.getElementById('file-tabs');
+        const fileTabsSep = document.getElementById('file-tabs-sep');
+
+        function activateAnalysisTab(type) {
+            Object.values(openFileTabs).forEach(function(t) { t.el.classList.remove('active'); });
+            activeFileTab = null;
+            document.getElementById('tab-content').className = 'tab-content';
+            switchAnalysisTab(type);
+        }
+        function switchAnalysisTab(type) {
+            document.querySelectorAll('#tabs > .tab').forEach(function(t) {
+                t.classList.toggle('active', t.dataset.type === type);
+            });
+            if (type === 'chat') {
+                renderChat('api');
+            } else if (type === 'chat-hermes') {
+                renderChat('hermes');
+            } else {
+                tabContent.innerHTML = '<div class="loading"><div class="spinner"></div><p>分析中...</p></div>';
+                runAnalysis(type);
+            }
+        }
+
+        async function openFile(filePath, fileName) {
+            // Check if tab already exists
+            if (openFileTabs[filePath]) {
+                focusFileTab(filePath);
+                return;
+            }
+            // 替换模式（2026-08-30 主人设计）：右侧是左侧文件树的展示窗口——
+            // 点击新文件替换当前文件 tab（始终最多 1 个——不累积）
+            while (fileTabOrder.length > 0) closeFileTab(fileTabOrder[0]);
+            // Create new file tab
+            var tabEl = document.createElement('div');
+            tabEl.className = 'file-tab active';
+            tabEl.innerHTML = '<span class="ft-name">' + escHtml(fileName) + '</span><span class="ft-close" onclick="event.stopPropagation();closeFileTab(\'' + escAttr(filePath) + '\')">×</span>';
+            tabEl.onclick = function() { focusFileTab(filePath); };
+            fileTabsContainer.appendChild(tabEl);
+            if (fileTabsSep) fileTabsSep.style.display = 'inline-block';
+
+            // Deactivate previous tabs
+            Object.values(openFileTabs).forEach(function(t) { t.el.classList.remove('active'); });
+            document.querySelectorAll('#tabs > .tab').forEach(function(t) { t.classList.remove('active'); });
+            activeFileTab = filePath;
+
+            // Store
+            openFileTabs[filePath] = { el: tabEl, name: fileName, content: null, meta: null };
+            fileTabOrder.push(filePath);
+
+            // Save chat state before switching to file view
+            saveChatState();
+            // Show loading in tab content
+            tabContent.className = 'tab-content file-view no-pad';
+            tabContent.innerHTML = '<div class="file-view-header"><span>📄 ' + escHtml(fileName) + '</span><span style="color:var(--text2);">加载中...</span></div><div class="file-view-body"><pre>加载中...</pre></div>';
+
+            // HTML 文件：iframe 渲染显示（2026-08-30——主人要求显示渲染页面而非源码）
+            var _parts = (fileName || '').split('.');
+            var _fext = _parts.length > 1 ? _parts.pop().toLowerCase() : '';
+            if (_fext === 'html' || _fext === 'htm') {
+                var _meta = (0).toFixed(1) + ' KB | ' + filePath;
+                tabContent.querySelector('.file-view-header span:last-child').textContent = _meta;
+                tabContent.querySelector('.file-view-body').style.padding = '0';
+                tabContent.querySelector('.file-view-body').innerHTML = '<iframe src="../api/file-raw/' + jobId + '?path=' + encodeURIComponent(filePath) + '" style="width:100%;height:100%;border:none;background:#fff;" sandbox="allow-scripts"></iframe>';
+                openFileTabs[filePath].content = '';
+                return;
+            }
+
+            // Fetch file content
+            try {
+                var resp = await fetch('../api/file-content/' + jobId + '?path=' + encodeURIComponent(filePath));
+                var data = await resp.json();
+                if (data.error) {
+                    tabContent.querySelector('pre').textContent = '❌ ' + data.error;
+                } else {
+                    var metaText = (data.size/1024).toFixed(1) + ' KB | 编码: ' + (data.encoding || '?') + ' | ' + filePath;
+                    if (data.truncated) metaText += ' | ⚠️ ' + data.truncated_note;
+                    tabContent.querySelector('.file-view-header span:last-child').textContent = metaText;
+                    tabContent.querySelector('pre').textContent = data.content;
+                    openFileTabs[filePath].content = data.content;
+                    openFileTabs[filePath].meta = metaText;
+                }
+            } catch (err) {
+                tabContent.querySelector('pre').textContent = '❌ 加载失败: ' + err.message;
+            }
+        }
+
+        function focusFileTab(filePath) {
+            var t = openFileTabs[filePath];
+            if (!t) return;
+            // Deactivate all
+            Object.values(openFileTabs).forEach(function(ft) { ft.el.classList.remove('active'); });
+            document.querySelectorAll('#tabs > .tab').forEach(function(ft) { ft.classList.remove('active'); });
+            // Activate this one
+            t.el.classList.add('active');
+            activeFileTab = filePath;
+            // Save chat state before switching to file view
+            saveChatState();
+            // Render content
+            tabContent.className = 'tab-content file-view no-pad';
+            if (t.content !== null) {
+                tabContent.innerHTML = '<div class="file-view-header"><span>📄 ' + escHtml(t.name) + '</span><span style="color:var(--text2);">' + (t.meta || '') + '</span></div><div class="file-view-body"><pre>' + escHtml(t.content) + '</pre></div>';
+            } else {
+                tabContent.innerHTML = '<div class="file-view-header"><span>📄 ' + escHtml(t.name) + '</span></div><div class="file-view-body"><pre>加载中...</pre></div>';
+            }
+        }
+
+        function closeFileTab(filePath) {
+            var t = openFileTabs[filePath];
+            if (!t) return;
+            // Remove from DOM
+            if (t.el.parentNode) t.el.remove();
+            var wasActive = (activeFileTab === filePath);
+            // Remove from tracking
+            delete openFileTabs[filePath];
+            var idx = fileTabOrder.indexOf(filePath);
+            if (idx >= 0) fileTabOrder.splice(idx, 1);
+            // Hide separator if no file tabs left
+            if (fileTabOrder.length === 0) {
+                if (fileTabsSep) fileTabsSep.style.display = 'none';
+            }
+            // Switch to nearest tab or AI tab
+            if (wasActive) {
+                if (fileTabOrder.length > 0) {
+                    focusFileTab(fileTabOrder[fileTabOrder.length - 1]);
+                } else {
+                    activateAnalysisTab('chat');
+                }
+            }
+        }
+        function closeFileModal() {
+            // Keep for backward compat (dump viewer still uses modal)
+            document.getElementById('file-modal').classList.remove('open');
+        }
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeFileModal(); } });
+        // Dump file detail viewer
+        async function openDumpDetail(filePath, fileName) {
+            const modal = document.getElementById('file-modal');
+            document.getElementById('modal-title').textContent = '💾 ' + fileName;
+            document.getElementById('modal-meta').textContent = '解析中...';
+            document.getElementById('modal-content').textContent = '解析中...';
+            modal.classList.add('open');
+            try {
+                const resp = await fetch('../api/dump-detail/' + jobId + '?file=' + encodeURIComponent(filePath));
+                const info = await resp.json();
+                if (info.error) {
+                    document.getElementById('modal-content').textContent = '❌ ' + info.error;
+                    document.getElementById('modal-meta').textContent = '';
+                    return;
+                }
+                // Render dump info in modal
+                let meta = (info.size_mb||0).toFixed(1) + ' MB | ' + (info.dump_type || '?');
+                if (info.mtime) meta += ' | ' + info.mtime;
+                document.getElementById('modal-meta').textContent = meta;
+                let html = '';
+                if (info.bugcheck) {
+                    html += '<div style="background:#1a121d;border:1px solid #3d1e00;border-radius:6px;padding:12px;margin-bottom:12px;">';
+                    html += `<strong style="color:var(--error);font-size:18px;">🔴 Bug Check: ${escHtml(info.bugcheck.code)}</strong>`;
+                    html += `<div style="color:var(--text);font-size:15px;margin-top:4px;">${escHtml(info.bugcheck.name)}</div>`;
+                    html += `<p style="color:var(--warn);font-size:13px;margin-top:6px;">📖 ${escHtml(info.bugcheck.description)}</p>`;
+                    if (info.bugcheck_params && info.bugcheck_params.length > 0) {
+                        html += `<p style="font-size:12px;color:var(--text2);margin-top:4px;">参数: <code style="color:var(--text)">${info.bugcheck_params.map(escHtml).join(', ')}</code></p>`;
+                    }
+                    html += '</div>';
+                }
+                if (info.drivers && info.drivers.length > 0) {
+                    html += '<div style="margin-top:8px;"><strong style="color:var(--text2);">📦 已加载驱动 (' + info.driver_count + ' 个)</strong>';
+                    html += '<div style="font-size:12px;color:var(--text);margin-top:4px;line-height:1.8;">';
+                    html += info.drivers.map(d => `<code style="background:var(--surface2);padding:2px 6px;border-radius:4px;margin:2px;">${escHtml(d)}</code>`).join(' ');
+                    html += '</div></div>';
+                }
+                if (info.parse_error) {
+                    html += `<p style="color:var(--warn);font-size:12px;margin-top:8px;">⚠️ ${escHtml(info.parse_error)}</p>`;
+                }
+                if (!html) html = '<p style="color:var(--text2);">无法提取更多信息（文件可能损坏或为空）</p>';
+                document.getElementById('modal-content').innerHTML = '<div style="font-family: -apple-system, sans-serif;">' + html + '</div>';
+            } catch (err) {
+                document.getElementById('modal-content').textContent = '❌ 加载失败: ' + err.message;
+            }
+        }
+        function escHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+        // ═══ Linux Renderers ═══
+        function renderLinuxOverview(data) {
+            const el = document.getElementById('tab-content');
+            const os = data.os_info || {};
+            const sw = os.software || {};
+            let html = '';
+
+            // ── 🖥️ 系统信息 ──
+            html += '<div class="card"><h3>🖥️ 系统信息</h3><div style="font-size:13px;line-height:1.9;">';
+            const osRows = [
+                ['操作系统', (os.name || os.pretty_name || '') + (os.lts ? ' ' + esc(os.lts) : '')],
+                ['内核', os.kernel ? esc(os.kernel) + (os.os_release ? '（' + esc(os.os_release) + '）' : '') : ''],
+                ['主机名', os.hostname],
+                ['桌面环境', sw.desktop],
+                ['安全启动', os.secureboot === 'disabled' ? '已禁用（Secure boot disabled）' : (os.secureboot ? esc(os.secureboot) : '')],
+                ['时区', os.timezone === 'UTC+08:00' ? 'UTC+8（东八区）' : (os.timezone ? esc(os.timezone) : '')],
+                ['架构', os.arch],
+            ];
+            for (const [l, v] of osRows) if (v) html += `<div><span style="color:var(--text2);">${l}：</span><strong>${v}</strong></div>`;
+            html += '</div></div>';
+
+            // ── 🔩 硬件信息(表格)──
+            const hw = [];
+            if (data.cpu) hw.push(['CPU', `${esc(data.cpu)} × ${data.cpu_cores || '?'} 核${os.cpu_freq ? '，' + esc(os.cpu_freq) : ''}${os.bogo ? '（' + esc(os.bogo) + ' BogoMIPS）' : ''}`]);
+            if (data.memory && data.memory.MemTotal) hw.push(['内存', `约 ${esc(data.memory.MemTotal)}${data.memory.slots ? '（插槽 ' + esc(data.memory.slots) + '）' : ''}`]);
+            if (os.gpu) hw.push(['显卡', esc(os.gpu) + (os.nvidia_driver ? '，驱动 ' + esc(os.nvidia_driver) : '')]);
+            if (data.disks && data.disks.length) hw.push(['数据盘', `${data.disks.map(d => esc(d)).join(' / ')}${os.disk_interface ? '（' + esc(os.disk_interface) + '）' : ''}`]);
+            if (data.nics && data.nics.length) hw.push(['网络', data.nics.map(n => esc(n)).join(' / ')]);
+            if (os.usb && os.usb.length) hw.push(['USB 设备', os.usb.map(u => esc(u)).join(' / ')]);
+            if (hw.length) {
+                html += '<div class="card"><h3>🔩 硬件信息</h3><table><thead><tr><th style="width:110px;">部件</th><th>详情</th></tr></thead><tbody>';
+                for (const [k, v] of hw) html += `<tr><td style="font-weight:600;white-space:nowrap;">${k}</td><td>${v}</td></tr>`;
+                html += '</tbody></table></div>';
+            }
+
+            // ── 📦 软件信息 ──
+            if (Object.keys(sw).length) {
+                const labels = { docker: 'Docker', desktop: '桌面环境', user: '主要用户' };
+                html += '<div class="card"><h3>📦 软件信息</h3><div style="font-size:13px;line-height:1.9;">';
+                for (const [k, v] of Object.entries(sw)) html += `<div><span style="color:var(--text2);">${labels[k] || k}：</span><strong>${esc(v)}</strong></div>`;
+                html += '</div></div>';
+            }
+
+            // ── 📁 日志文件 ──
+            html += `<div class="card"><h3>📁 日志文件 (${data.file_count || 0} 个)</h3><div class="file-list">`;
+            for (const [name, info] of Object.entries(data.files || {}).slice(0, 30))
+                html += `<span class="file-chip">${esc(name)} (${info.kb}KB)</span>`;
+            html += '</div></div>';
+            el.innerHTML = html;
+        }
+        function renderLinuxKernel(data) {
+            const el = document.getElementById('tab-content');
+            const sevBg = {critical:'#490202', warning:'#3d1e00', ok:'#0d3320'};
+            const sevBd = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)'};
+            let html = `<div class="alert" style="background:${sevBg[data.severity]};border:2px solid ${sevBd[data.severity]}">`;
+            html += `<h3>🔧 ${data.title}</h3><p style="color:var(--text2);font-size:13px;">${data.summary || ''}</p></div>`;
+            html += '<div class="grid-2" style="margin-bottom:16px;">';
+            for (const [l, n, c] of [['OOM Killer', data.oom_count||0, 'var(--error)'], ['Kernel Panic', data.panic_count||0, 'var(--error)'], ['硬件错误', data.hw_error_count||0, 'var(--warn)'], ['段错误', data.segfault_count||0, 'var(--warn)']])
+                html += `<div class="stat-box"><div class="number" style="color:${c};font-size:24px;">${n}</div><div class="label">${l}</div></div>`;
+            html += '</div>';
+            if (data.findings && data.findings.length) {
+                html += '<div class="card"><h3>⚠️ 发现</h3><ul>';
+                for (const f of data.findings) html += `<li style="padding:6px 0;">${esc(f)}</li>`;
+                html += '</ul></div>';
+            }
+            if (data.timeline && data.timeline.length) {
+                html += '<div class="card"><h3>📅 关键事件时间线</h3><div class="event-list">';
+                for (const e of data.timeline.slice(0, 50)) html += `<div class="event-item" style="font-size:11px;">${esc(e)}</div>`;
+                html += '</div></div>';
+            }
+            el.innerHTML = html;
+        }
+        function renderLinuxSyslog(data) {
+            const el = document.getElementById('tab-content');
+            let html = '<div class="grid-2" style="margin-bottom:16px;">';
+            const s = data.stats || {};
+            for (const [l, n] of [['服务失败', s.service_failures], ['认证失败', s.auth_failures], ['磁盘错误', s.disk_errors], ['网络错误', s.network_errors]])
+                html += `<div class="stat-box"><div class="number" style="color:var(--info);font-size:24px;">${n||0}</div><div class="label">${l}</div></div>`;
+            html += '</div>';
+            if (data.findings && data.findings.length) {
+                html += '<div class="card"><h3>⚠️ 发现</h3><ul>';
+                for (const f of data.findings) html += `<li style="padding:6px 0;">${esc(f)}</li>`;
+                html += '</ul></div>';
+            }
+            el.innerHTML = html || '<div class="alert alert-info">无数据</div>';
+        }
+        function renderLinuxSummary(data) {
+            const el = document.getElementById('tab-content');
+            const sevBg = {critical:'#490202', warning:'#3d1e00', ok:'#0d3320'};
+            const sevBd = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)'};
+            const icons = {critical:'🔴', warning:'🟡', ok:'🟢'};
+            let html = `<div class="alert" style="background:${sevBg[data.severity]};border:2px solid ${sevBd[data.severity]};color:${sevBd[data.severity]}">`;
+            html += `<h3>${icons[data.severity]||'🔵'} ${data.title}</h3><ul style="list-style:none;padding:0;">`;
+            for (const f of data.findings||[]) html += `<li style="padding:6px 0;font-size:15px;">${f}</li>`;
+            html += '</ul></div>';
+            html += '<div class="grid-2">';
+            for (const [k, v] of Object.entries(data.detail||{}))
+                html += `<div class="card" style="cursor:pointer" onclick="document.querySelector('.tab[data-type=\\'${k}\\']').click()"><h3>${v.title||k}</h3><p style="color:var(--text2);">${v.summary||'点击查看详情 →'}</p></div>`;
+            html += '</div>';
+            el.innerHTML = html;
+        }
+        // ═══ Chat functions ═══
+        function renderChat(mode) { mode = mode || 'api';
+            // Save current chat before switching away
+            saveChatState();
+            document.getElementById('page-title').textContent = (mode === 'hermes' ? '🔬 深度分析' : '🤖 AI 分析');
+            const el = document.getElementById('tab-content');
+            el.innerHTML = `
+                <div class="chat-container">
+                    <div class="chat-messages" id="chat-messages">
+                    </div>
+                    <div class="chat-input-wrap">
+                        <input class="chat-input" id="chat-input" placeholder="输入你的问题..." onkeydown="onChatKey(event)">
+                        <button class="chat-send" id="chat-send-btn" onclick="chatSend()">发送</button>
+                    </div>
+                </div>`;
+            // Restore history or show welcome
+            if (chatHistory[mode]) {
+                document.getElementById('chat-messages').innerHTML = chatHistory[mode];
+            } else {
+                document.getElementById('chat-messages').innerHTML = '<div class="chat-msg assistant" style="font-size:14px;"><p>👋 你好！我是诊断助手，可以帮你分析这个日志包。</p><p style="color:var(--text2);font-size:12px;margin-top:4px;">试试问我：<br>• 这台机器有什么严重问题？<br>• 频繁意外断电的原因？<br>• 帮我看看硬盘健康状态</p></div>';
+            }
+            document.getElementById('chat-input').focus();
+            setChatMode(mode);
+        }
+        function onChatKey(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                chatSend();
+            }
+        }
+        async function chatSend() {
+            const inp = document.getElementById('chat-input');
+            const btn = document.getElementById('chat-send-btn');
+            const msg = inp.value.trim();
+            if (!msg) return;
+            inp.value = '';
+            inp.disabled = btn.disabled = true;
+            appendMessage('user', msg);
+            if (chatMode === 'hermes') {
+                hermesChatSend(msg, 'tab');
+                return;
+            }
+            appendTyping();
+            try {
+                const resp = await fetch('../api/chat/' + jobId, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: msg})
+                });
+                removeTyping();
+                const data = await resp.json();
+                if (data.error) {
+                    appendMessage('assistant', '❌ ' + data.error);
+                } else {
+                    appendMessage('assistant', data.reply);
+                }
+            } catch (err) {
+                removeTyping();
+                appendMessage('assistant', '❌ 网络错误: ' + err.message);
+            }
+            inp.disabled = btn.disabled = false;
+            inp.focus();
+        }
+        function appendMessage(role, content, extraClass) {
+            const msgs = document.getElementById('chat-messages');
+            const div = document.createElement('div');
+            div.className = 'chat-msg ' + role + (extraClass ? ' ' + extraClass : '');
+            let html = content
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/```(\w*)\n?([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n- /g, '\n• ')
+                .replace(/\n\d+\. /g, (m) => '\n' + m.trim() + ' ')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>');
+            html = '<p>' + html + '</p>';
+            div.innerHTML = html;
+            msgs.appendChild(div);
+            msgs.scrollTop = msgs.scrollHeight;
+        }
+        let typingEl = null;
+        function appendTyping() {
+            typingEl = document.createElement('div');
+            typingEl.className = 'chat-typing';
+            typingEl.textContent = '思考中...';
+            document.getElementById('chat-messages').appendChild(typingEl);
+            const msgs = document.getElementById('chat-messages');
+            msgs.scrollTop = msgs.scrollHeight;
+        }
+        function removeTyping() {
+            if (typingEl) { typingEl.remove(); typingEl = null; }
+        }
+        // ── Hermes Agent Bridge ──
+        async function hermesChatSend(msg, layout) {
+            try {
+                var resp = await fetch('../api/chat-hermes/' + jobId, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: msg, os_type: osType})
+                });
+                var data = await resp.json();
+                if (data.error) {
+                    appendMessage('assistant', '❌ ' + data.error);
+                    var inp = document.getElementById('chat-input');
+                    var btn = document.getElementById('chat-send-btn');
+                    if (inp) inp.disabled = false;
+                    if (btn) btn.disabled = false;
+                } else {
+                    pollHermesResponse(data.request_id);
+                }
+            } catch (err) {
+                appendMessage('assistant', '❌ 桥接错误: ' + err.message);
+                var inp = document.getElementById('chat-input');
+                var btn = document.getElementById('chat-send-btn');
+                if (inp) inp.disabled = false;
+                if (btn) btn.disabled = false;
+            }
+        }
+        // ═══ BMC/Other layout functions ═══
+        function openFileInViewer(path, name) {
+            document.getElementById('other-viewer-title').textContent = '📄 ' + name;
+            document.getElementById('other-viewer-path').textContent = path;
+            var body = document.getElementById('other-viewer-body');
+            body.innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;"><div class="spinner"></div><p>加载中...</p></div>';
+            fetch('../api/file-content/' + jobId + '?path=' + encodeURIComponent(path))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) {
+                        body.innerHTML = '<p style="color:var(--error);">' + esc(data.error) + '</p>';
+                    } else {
+                        var content = data.content || '';
+                        var isHtml = /\.(html|htm)$/i.test(name);
+                        if (isHtml) {
+                            body.innerHTML = '<iframe srcdoc="' + content.replace(/"/g, '&quot;') + '" style="width:100%;height:100%;min-height:400px;border:none;"></iframe>';
+                        } else {
+                            var escaped = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            body.innerHTML = '<pre>' + escaped + '</pre>';
+                        }
+                    }
+                })
+                .catch(function(err) {
+                    body.innerHTML = '<p style="color:var(--error);">加载失败: ' + err.message + '</p>';
+                });
+        }
+        function openDumpInViewer(path, name) {
+            document.getElementById('other-viewer-title').textContent = '💾 ' + name;
+            document.getElementById('other-viewer-path').textContent = path;
+            var body = document.getElementById('other-viewer-body');
+            body.innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;"><div class="spinner"></div><p>解析 Dump 中...</p></div>';
+            fetch('../api/file-content/' + jobId + '?path=' + encodeURIComponent(path))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) {
+                        body.innerHTML = '<p style="color:var(--error);">' + esc(data.error) + '</p>';
+                    } else {
+                        body.innerHTML = '<pre>' + esc(data.content || '无数据') + '</pre>';
+                    }
+                })
+                .catch(function(err) {
+                    body.innerHTML = '<p style="color:var(--error);">加载失败: ' + err.message + '</p>';
+                });
+        }
+        // ═══ BMC/Other chat: global send function (accessible from inline handlers) ═══
+        function renderBmcMarkdown(text) {
+            // Escape HTML first
+            text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Protect code blocks: ```...``` → placeholder
+            var codeBlocks = [];
+            text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+                codeBlocks.push('<pre><code>' + code.replace(/^\n|\n$/g, '') + '</code></pre>');
+                return '\x00CODE' + (codeBlocks.length - 1) + '\x00';
+            });
+            // Inline code: `text`
+            text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+            // Bold: **text**
+            text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            // Split into paragraphs (double newline)
+            var paras = text.split(/\n\n+/);
+            var out = [];
+            for (var i = 0; i < paras.length; i++) {
+                var p = paras[i].trim();
+                if (!p) continue;
+                // Heading: ### text
+                if (/^###\s/.test(p)) {
+                    out.push('<h3>' + p.replace(/^###\s+/, '') + '</h3>');
+                } else if (/^##\s/.test(p)) {
+                    out.push('<h2>' + p.replace(/^##\s+/, '') + '</h2>');
+                } else if (/^#\s/.test(p)) {
+                    out.push('<h1>' + p.replace(/^#\s+/, '') + '</h1>');
+                } else if (/^---+\s*$/.test(p)) {
+                    out.push('<hr>');
+                } else {
+                    // Check for list items or blockquotes inside this paragraph
+                    var lines = p.split('\n');
+                    var html = '';
+                    var inUl = false, inOl = false, inBq = false;
+                    for (var j = 0; j < lines.length; j++) {
+                        var line = lines[j].trim();
+                        if (!line) { html += '<br>'; continue; }
+                        // Blockquote: > text
+                        if (/^>\s?/.test(line)) {
+                            if (!inBq) { html += '<blockquote>'; inBq = true; }
+                            html += line.replace(/^>\s?/, '') + '<br>';
+                            continue;
+                        } else if (inBq) { html += '</blockquote>'; inBq = false; }
+                        // Unordered list: - item or * item
+                        if (/^[-*]\s/.test(line)) {
+                            if (inOl) { html += '</ol>'; inOl = false; }
+                            if (!inUl) { html += '<ul>'; inUl = true; }
+                            html += '<li>' + line.replace(/^[-*]\s+/, '') + '</li>';
+                            continue;
+                        } else if (inUl) { html += '</ul>'; inUl = false; }
+                        // Ordered list: 1. item
+                        if (/^\d+\.\s/.test(line)) {
+                            if (inUl) { html += '</ul>'; inUl = false; }
+                            if (!inOl) { html += '<ol>'; inOl = true; }
+                            html += '<li>' + line.replace(/^\d+\.\s+/, '') + '</li>';
+                            continue;
+                        } else if (inOl) { html += '</ol>'; inOl = false; }
+                        // Regular text line
+                        html += line + '<br>';
+                    }
+                    if (inUl) html += '</ul>';
+                    if (inOl) html += '</ol>';
+                    if (inBq) html += '</blockquote>';
+                    out.push('<p>' + html + '</p>');
+                }
+            }
+            var result = out.join('');
+            // Restore code blocks
+            result = result.replace(/\x00CODE(\d+)\x00/g, function(_, idx) {
+                return codeBlocks[parseInt(idx)];
+            });
+            return result;
+        }
+        function otherChatSend() {
+            var inp = document.getElementById('chat-input');
+            var btn = document.getElementById('chat-send-btn');
+            var msgs = document.getElementById('chat-messages');
+            if (!inp || !btn || !msgs) { console.error('otherChatSend: elements not found'); return; }
+            var msg = inp.value.trim();
+            if (!msg) return;
+            inp.value = '';
+            inp.disabled = true;
+            btn.disabled = true;
+            // User bubble
+            (function() {
+                var div = document.createElement('div');
+                div.className = 'chat-msg user';
+                div.textContent = msg;
+                msgs.appendChild(div);
+                msgs.scrollTop = msgs.scrollHeight;
+            })();
+            if (chatMode === 'hermes') {
+                hermesChatSend(msg, 'bmc');
+                return;
+            }
+            // Typing indicator
+            var typingEl = document.createElement('div');
+            typingEl.className = 'chat-typing';
+            typingEl.textContent = '分析中...';
+            msgs.appendChild(typingEl);
+            msgs.scrollTop = msgs.scrollHeight;
+            // Send to backend
+            fetch('../api/chat/' + jobId, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: msg})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (typingEl && typingEl.parentNode) typingEl.remove();
+                var div = document.createElement('div');
+                div.className = 'chat-msg assistant';
+                var content = data.error ? '❌ ' + data.error : (data.reply || '');
+                div.innerHTML = renderBmcMarkdown(content);
+                msgs.appendChild(div);
+                msgs.scrollTop = msgs.scrollHeight;
+            })
+            .catch(function(err) {
+                if (typingEl && typingEl.parentNode) typingEl.remove();
+                var div = document.createElement('div');
+                div.className = 'chat-msg assistant';
+                div.innerHTML = '<p>❌ 网络错误: ' + err.message + '</p>';
+                msgs.appendChild(div);
+                msgs.scrollTop = msgs.scrollHeight;
+            })
+            .finally(function() {
+                inp.disabled = false;
+                btn.disabled = false;
+                inp.focus();
+            });
+        }
+
+        // ═══ BMC/Other layout setup ═══
+        if (isOtherLayout) {
+            try {
+                document.getElementById('page-title').textContent = '🔬 文件分析平台';
+
+                // Resize handle: drag to adjust chat panel height
+                (function() {
+                    var handle = document.getElementById('chat-resize-handle');
+                    var chatPanel = document.getElementById('other-chat');
+                    if (!handle || !chatPanel) return;
+                    var startY, startHeight;
+                    handle.addEventListener('mousedown', function(e) {
+                        e.preventDefault();
+                        startY = e.clientY;
+                        startHeight = chatPanel.offsetHeight;
+                        document.addEventListener('mousemove', onDrag);
+                        document.addEventListener('mouseup', onDrop);
+                        handle.style.background = 'var(--info)';
+                    });
+                    function onDrag(e) {
+                        var newH = startHeight - (e.clientY - startY);
+                        if (newH < 150) newH = 150;
+                        if (newH > window.innerHeight - 200) newH = window.innerHeight - 200;
+                        chatPanel.style.height = newH + 'px';
+                    }
+                    function onDrop() {
+                        document.removeEventListener('mousemove', onDrag);
+                        document.removeEventListener('mouseup', onDrop);
+                        handle.style.background = '';
+                    }
+                })();
+
+                console.log('BMC chat setup complete');
+            } catch(e) {
+                console.error('BMC setup error:', e);
+            }
+        }
+    </script>
+</body>
+</html>

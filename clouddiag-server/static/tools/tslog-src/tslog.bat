@@ -1,0 +1,106 @@
+
+@echo off
+@CLS
+@ECHO.
+@chcp 936 >nul
+@ECHO =========================
+@ECHO ThinkStation Log Collection
+@ECHO =========================
+@ECHO This tool collects fault info for diagnosis only.
+
+
+@:init
+@setlocal DisableDelayedExpansion
+@set "batchPath=%~0"
+@for %%k in (%0) do set batchName=%%~nk
+@set "vbsGetPrivileges=%temp%\OEgetPriv_%batchName%.vbs"
+@setlocal EnableDelayedExpansion
+
+@:checkPrivileges
+@NET FILE 1>NUL 2>NUL
+@if '%errorlevel%' == '0' ( goto gotPrivileges ) else ( goto getPrivileges )
+
+@:getPrivileges
+@if '%1'=='ELEV' (echo ELEV & shift /1 & goto gotPrivileges)
+@ECHO.
+@ECHO **************************************
+@ECHO Requesting Administrator privileges...
+@ECHO **************************************
+
+@ECHO Set UAC = CreateObject^("Shell.Application"^) > "%vbsGetPrivileges%"
+@ECHO args = "ELEV " >> "%vbsGetPrivileges%"
+@ECHO For Each strArg in WScript.Arguments >> "%vbsGetPrivileges%"
+@ECHO args = args ^& strArg ^& " "  >> "%vbsGetPrivileges%"
+@ECHO Next >> "%vbsGetPrivileges%"
+@ECHO UAC.ShellExecute "!batchPath!", args, "", "runas", 1 >> "%vbsGetPrivileges%"
+@"%SystemRoot%\System32\WScript.exe" "%vbsGetPrivileges%" %*
+@exit /B
+
+@:gotPrivileges
+@setlocal & pushd .
+@cd /d %~dp0
+@if '%1'=='ELEV' (del "%vbsGetPrivileges%" 1>nul 2>nul  &  shift /1)
+
+@::::::::::::::::::::::::::::
+@::START
+@::::::::::::::::::::::::::::
+@mkdir "%cd%"\tslog
+@set workpath="%cd%"\tslog
+@set toolpath="%cd%"\tools
+@echo Collecting software list...
+@wmic product get name,version >%workpath%\SoftwareList.txt
+@echo Collecting BIOS info...
+%cd%\tools\AMIDEWINx64.exe>nul 2>nul /DUMPALL %cd%\tslog\AMI_BIOS_DUMP.txt
+%cd%\tools\AMIDEWINx64.exe>nul 2>nul /DMS %cd%\tslog\DMS.txt
+%cd%\tools\bios\CFGWIN_x64.exe>nul 2>nul /c /path:%workpath%\bios_settings.txt
+%cd%\tools\bios\SRWINx64.exe>nul 2>nul /b %workpath%\bios_settings_raw.txt
+%cd%\tools\AFUWINx64.exe>nul 2>nul %workpath%\bios.rom /o
+@cd %toolpath%
+@.\HwDiagWin.exe>nul 2>nul /dumplog  >>%workpath%\SIO_Events.log
+@cd ..
+@echo Collecting OS info...
+@systeminfo >%workpath%\Systeminfo.txt
+@echo Collecting power settings...
+@powercfg /L >%workpath%\powercfg.txt
+@powercfg /Q >>%workpath%\powercfg.txt
+@echo Collecting system logs...
+@mkdir %cd%\tslog\oslog
+xcopy>nul 2>nul %SystemRoot%\System32\winevt\Logs\* %workpath%\oslog /E/C
+@echo Collecting dump files...
+@mkdir %cd%\tslog\osdump
+copy>nul 2>nul %SystemRoot%\MEMORY.DMP %workpath%\osdump
+xcopy>nul 2>nul %SystemRoot%\Minidump\* %workpath%\osdump /E/C
+@echo Collecting processes...
+@tasklist /V >%workpath%\Tasklist.txt
+@echo Collecting disk info...
+@wmic DISKDRIVE get model^,interfacetype^,size^,totalsectors^,partitions /value >%workpath%\Partitions.txt
+@echo Collecting hardware info...
+@%cd%\tools\Devcon.exe findall * >%workpath%\Devicesinfo.txt
+@echo Collecting RAID info...
+@%cd%\tools\IntelVROCCli.exe>nul 2>nul -V >%workpath%\Intel_RAID_Info_VROC.txt
+@%cd%\tools\IntelVROCCli.exe>nul 2>nul -I >>%workpath%\Intel_RAID_Info_VROC.txt
+@%cd%\tools\rstcli64.exe>nul 2>nul -V >%workpath%\Intel_RAID_Info_RSTe.txt
+@%cd%\tools\rstcli64.exe>nul 2>nul -I >>%workpath%\Intel_RAID_Info_RSTe.txt
+@%cd%\tools\storcli64.exe >nul 2>nul /call/eall/sall show all >%workpath%\BCM_RAID_Info.txt
+@%cd%\tools\storcli64.exe >nul 2>nul /call show events file=%workpath%\BCM_RAID_EVENT.txt
+@%cd%\tools\storcli64.exe >nul 2>nul /call show termlog >>%workpath%\BCM_termlog.txt
+@echo Collecting SMART info...
+@%cd%\tools\smartctl.exe --scan >%cd%\tools\SMART.txt
+@for /f  "tokens=1-3" %%i in (%cd%\tools\SMART.txt) do %cd%\tools\smartctl.exe -a %%i >>%workpath%\SMARTINFO.txt
+@echo Collecting NVIDIA info...
+@%cd%\tools\nvidia-smi.exe>nul 2>nul  >%workpath%\NVIDIA_INFO.txt
+@%cd%\tools\nvidia-smi.exe>nul 2>nul -a  >>%workpath%\NVIDIA_INFO.txt
+@%cd%\tools\nvdebugdump.exe>nul 2>nul -D
+@copy>nul 2>nul %cd%\dump.zip %workpath%\NVIDIA_dump.zip
+@echo Collecting DirectX info...
+@dxdiag /t %workpath%\dxdiag.txt
+@echo Packing logs...
+@set date_str=%date:~,4%%date:~5,2%%date:~8,2%
+@set time_str=%time:~,2%%time:~3,2%%time:~6,2%
+@set name=%date_str%%time_str%
+%cd%\tools\7-Zip\7z.exe a %cd%\%name%.7z %workpath%\
+@rd /S/Q "%workpath%"
+@rd /S/Q "%cd%\tools"
+@del %cd%\dump.zip
+@del %cd%\storcli.log
+@del %0

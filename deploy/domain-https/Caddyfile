@@ -1,0 +1,32 @@
+# CloudDiag Suite · Caddy 反向代理配置（HTTPS 自动证书）
+# 用法：改 your-domain.com 为你的域名 → sudo cp 到 /etc/caddy/Caddyfile → systemctl reload caddy
+
+your-domain.com {
+    # 大文件上传支持（日志包可能较大）
+    request_body {
+        max_size 500MB
+    }
+
+    # 日志分析服务（挂在 /log-analyzer/* 路径下）
+    handle_path /log-analyzer/* {
+        reverse_proxy 127.0.0.1:8082
+    }
+
+    # 诊断服务（主站）
+    reverse_proxy 127.0.0.1:8000
+
+    # 证书：Caddy 自动向 Let's Encrypt 申请并续期，无需手工配置
+}
+
+# ── 备选端口 8443（可选）─────────────────────────────
+# 用途：某些企业网络/中间设备会拦截 443 的 SNI，导致连接失败。
+#      开启 8443 可作为备用入口（客户机桥接器支持自动降级）。
+your-domain.com:8443 {
+    request_body {
+        max_size 500MB
+    }
+    handle_path /log-analyzer/* {
+        reverse_proxy 127.0.0.1:8082
+    }
+    reverse_proxy 127.0.0.1:8000
+}

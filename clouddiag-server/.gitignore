@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Logs & data
+logs/
+*.log
+*.db
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# PyInstaller temp
+*.tmp
+
+# Compiled binaries (source is in bridge.py)
+static/*.exe
+static/*.exe.tmp
+static/bridge-linux-*
+
+# Backup
+.git-backup-*/
+sntools/oa3/*.EXE
+static/downloads/

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云端 AI 远程运维助手 - 登录（UI 原型）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#0b1a2e; color:#fff; min-height:100vh; display:flex; }
+  /* ===== 左侧宣传区（仿 ServiceForce 左侧）===== */
+  .left { flex:1.2; background:linear-gradient(160deg,#0b1a2e 0%,#10233d 45%,#0e3a5f 100%); display:flex; flex-direction:column; padding:48px 56px; position:relative; overflow:hidden; }
+  .left::before { content:""; position:absolute; width:500px; height:500px; border-radius:50%; background:radial-gradient(circle,rgba(56,189,248,.15),transparent 60%); top:-120px; right:-120px; }
+  .left::after { content:""; position:absolute; width:350px; height:350px; border-radius:50%; background:radial-gradient(circle,rgba(96,165,250,.12),transparent 60%); bottom:-80px; left:-80px; }
+  .brand { display:flex; align-items:center; gap:12px; font-size:20px; font-weight:700; margin-bottom:80px; position:relative; z-index:1; }
+  .brand .logo { width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,#38bdf8,#2563eb); display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .hero { position:relative; z-index:1; }
+  .hero h2 { font-size:32px; font-weight:600; margin-bottom:12px; line-height:1.4; }
+  .hero p { font-size:16px; color:#93a9c7; line-height:1.8; max-width:420px; }
+  .slide-dots { display:flex; gap:8px; margin-top:40px; position:relative; z-index:1; }
+  .dot { width:28px; height:4px; border-radius:2px; background:rgba(255,255,255,.2); cursor:pointer; }
+  .dot.active { background:#38bdf8; }
+  .left footer { margin-top:auto; position:relative; z-index:1; font-size:12px; color:#5b7292; }
+  /* ===== 右侧登录区 ===== */
+  .right { width:440px; min-width:440px; background:#0e1c30; display:flex; flex-direction:column; padding:32px 40px; position:relative; }
+  .lang { position:absolute; top:20px; right:28px; font-size:13px; color:#93a9c7; cursor:pointer; border:1px solid #243b57; padding:4px 12px; border-radius:6px; }
+  .login-box { margin:auto 0; }
+  .login-title { display:flex; align-items:center; gap:12px; margin-bottom:4px; }
+  .login-title .logo { width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,#38bdf8,#2563eb); display:flex; align-items:center; justify-content:center; font-size:22px; }
+  .login-title .name { font-size:20px; font-weight:700; }
+  .login-sub { font-size:13px; color:#7d94b3; margin:4px 0 28px 56px; }
+  /* 登录方式 tab */
+  .tabs { display:flex; border-bottom:1px solid #243b57; margin-bottom:24px; }
+  .tab { padding:10px 18px; font-size:14px; color:#93a9c7; cursor:pointer; border-bottom:2px solid transparent; }
+  .tab.active { color:#38bdf8; border-bottom-color:#38bdf8; }
+  /* 表单 */
+  .field { margin-bottom:18px; }
+  .field label { display:block; font-size:13px; color:#93a9c7; margin-bottom:6px; }
+  .field input { width:100%; padding:12px 14px; background:#0b1a2e; border:1px solid #243b57; border-radius:8px; color:#fff; font-size:14px; outline:none; }
+  .field input:focus { border-color:#38bdf8; }
+  .cap-row { display:flex; gap:10px; }
+  .cap-row input { flex:1; }
+  .cap-img { width:120px; height:42px; background:#0b1a2e; border:1px solid #243b57; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:18px; letter-spacing:4px; color:#38bdf8; font-style:italic; cursor:pointer; user-select:none; }
+  .btn-login { width:100%; padding:13px; background:linear-gradient(135deg,#38bdf8,#2563eb); border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; }
+  .btn-login:hover { opacity:.9; }
+  .links { display:flex; justify-content:space-between; margin-top:16px; font-size:13px; }
+  .links a { color:#7d94b3; text-decoration:none; cursor:pointer; }
+  .links a:hover { color:#38bdf8; }
+  .hotline { margin-top:auto; font-size:12px; color:#5b7292; text-align:center; padding-top:24px; }
+  .hotline b { color:#93a9c7; }
+  .demo-tag { position:absolute; top:20px; left:28px; font-size:11px; background:rgba(56,189,248,.12); color:#38bdf8; padding:3px 10px; border-radius:12px; border:1px solid rgba(56,189,248,.3); }
+</style>
+</head>
+<body>
+
+<!-- 左侧宣传区 -->
+<div class="left">
+  <div class="brand"><div class="logo">🤖</div>云端 AI 远程运维助手</div>
+  <div class="hero">
+    <h2>智能服务升级<br>赋能多行业客户</h2>
+    <p>云端 AI 诊断 Windows / Linux 电脑问题，远程接入客户机，硬件工具全覆盖，诊断报告一键生成。</p>
+  </div>
+  <div class="slide-dots"><div class="dot active"></div><div class="dot"></div><div class="dot"></div></div>
+  <footer>© 2026 CloudDiag · 内部演示原型</footer>
+</div>
+
+<!-- 右侧登录区 -->
+<div class="right">
+  <span class="demo-tag">UI 原型演示</span>
+  <span class="lang">简体中文 ▾</span>
+  <div class="login-box">
+    <div class="login-title"><div class="logo">🤖</div><div class="name">云端 AI 远程运维助手</div></div>
+    <div class="login-sub">Cloud AI Remote Diagnostics</div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab(this,'pwd')">账号密码</div>
+      <div class="tab" onclick="switchTab(this,'lid')">LenovoID</div>
+      <div class="tab" onclick="switchTab(this,'itcode')">ITCode</div>
+    </div>
+
+    <!-- 账号密码登录 -->
+    <div id="pwd" class="form-panel">
+      <div class="field"><label>请输入账号</label><input type="text" placeholder="工号 / 邮箱"></div>
+      <div class="field"><label>请输入密码</label><input type="password" placeholder="密码"></div>
+      <div class="field"><label>验证码</label>
+        <div class="cap-row">
+          <input type="text" placeholder="Enter verification code">
+          <div class="cap-img" onclick="refreshCap(this)">3X7K</div>
+        </div>
+      </div>
+      <button class="btn-login" onclick="alert('演示页面——登录功能未实现')">Login</button>
+      <div class="links"><a>Forgot password</a><a>Activate account</a></div>
+    </div>
+
+    <!-- LenovoID 登录（模拟——展示即可）-->
+    <div id="lid" class="form-panel" style="display:none;">
+      <div class="field"><label>LenovoID</label><input type="text" placeholder="邮箱 / 手机号"></div>
+      <div class="field"><label>密码</label><input type="password" placeholder="密码"></div>
+      <button class="btn-login" onclick="alert('演示页面——LenovoID 登录跳转未实现')">Login</button>
+      <div class="links"><a>Forgot password</a><a>Activate LenovoID</a></div>
+      <div style="font-size:12px;color:#5b7292;margin-top:14px;line-height:1.7;">演示：实际会跳转联想统一认证（sdcsso.lenovo.com）完成登录</div>
+    </div>
+
+    <!-- ITCode 登录（模拟）-->
+    <div id="itcode" class="form-panel" style="display:none;">
+      <div class="field"><label>IT Code</label><input type="text" placeholder="IT 工号"></div>
+      <div class="field"><label>密码</label><input type="password" placeholder="密码"></div>
+      <button class="btn-login" onclick="alert('演示页面——ITCode 登录未实现')">Login</button>
+      <div class="links"><a>Forgot password</a></div>
+    </div>
+  </div>
+  <div class="hotline">Support hotline: <b>400-828-9001</b>（演示）</div>
+</div>
+
+<script>
+  function switchTab(el, id) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    document.querySelectorAll('.form-panel').forEach(p => p.style.display = 'none');
+    document.getElementById(id).style.display = 'block';
+  }
+  function refreshCap(el) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let s = '';
+    for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    el.textContent = s;
+  }
+</script>
+</body>
+</html>

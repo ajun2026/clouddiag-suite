@@ -1,0 +1,554 @@
+# ============================================================================
+#  Cloud AI Remote Diagnostics - PowerShell Bridge (ps-pipe)
+#  Version 1.3.0 (connect token support)
+#
+#  A file-less PowerShell client that connects to the cloud server and
+#  executes diagnostic commands on this Windows PC - no .exe needed.
+#
+#  Usage:
+#    1) One-line, no download (interactive room prompt):
+#         iex (iwr {{PUBLIC_URL}}/static/bridge.ps1 -UseBasicParsing).Content
+#
+#    2) One-line with room code pre-set (no prompt):
+#         $env:BRIDGE_ROOM = "ABC12345"; iex (iwr {{PUBLIC_URL}}/static/bridge.ps1 -UseBasicParsing).Content
+#
+#    3) Download to local file, then run:
+#         powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345
+#         powershell -ExecutionPolicy Bypass -File bridge.ps1 -Server {{WS_URL}} -Room ABC12345
+#
+#  Requirements: Windows PowerShell 5.1+ (built-in), .NET 4.5+
+#  Note: keep the window open while diagnosing. The bridge auto-reconnects.
+# ============================================================================
+
+param(
+    [string]$Server = $env:BRIDGE_SERVER,
+    [string]$Room   = $env:BRIDGE_ROOM
+)
+
+$Version   = "1.3.0"
+$ServerUrl = if ($Server) { $Server } else { "{{WS_URL}}" }
+$script:ws = $null
+$script:exiting = $false
+
+# ---- banner ----
+Write-Host "==================================================" -ForegroundColor Cyan
+Write-Host " Cloud AI Remote Diagnostics - PowerShell Bridge v$Version"
+Write-Host "--------------------------------------------------"
+
+if (-not $Room) {
+    $Room = Read-Host " Room code (8 chars, e.g. ABC12345)"
+}
+$Room = $Room.Trim().ToUpper()
+if (-not $Room) {
+    Write-Host "Error: room code is required." -ForegroundColor Red
+    exit 2
+}
+
+$ServerUrl = $ServerUrl.TrimEnd('/')
+$wsUri = "$ServerUrl/ws/bridge/$Room"
+# Connect token (one-click connect): BRIDGE_TOKEN env var, validated by server
+if ($env:BRIDGE_TOKEN) {
+    $wsUri += "?token=" + [uri]::EscapeDataString($env:BRIDGE_TOKEN)
+}
+Write-Host " Connecting to $wsUri"
+Write-Host "==================================================" -ForegroundColor Cyan
+
+# ---- audit log (local) ----
+$script:logDir = Join-Path $env:TEMP "clouddiag-ps"
+if (-not (Test-Path $script:logDir)) { New-Item -ItemType Directory -Path $script:logDir -Force | Out-Null }
+$script:logFile = Join-Path $script:logDir "bridge.log"
+function Write-Audit {
+    param($Msg)
+    try {
+        Add-Content -Path $script:logFile -Value ((Get-Date).ToString("yyyy-MM-dd HH:mm:ss") + "  " + $Msg) -Encoding UTF8
+    } catch {}
+}
+
+# ---- raw WebSocket layer (v1.1.0) ----
+# .NET Framework ClientWebSocket on some machines (esp. with VPN/proxy
+# virtual adapters) opens TCP but never sends the HTTP Upgrade request
+# while ConnectAsync falsely reports success -> "Connected. Waiting for
+# server..." + endless "Connection closed" reconnect loop. Raw TCP +
+# hand-rolled WS handshake/frame codec works on any machine with TCP.
+# NOTE: keep this section ASCII-only - Windows PowerShell 5.1 parses
+# the script with the system ANSI codepage (GBK), non-ASCII bytes in
+# comments/strings turn into garbage and break parsing.
+
+function Read-Exact {
+    param($Stream, $Count)
+    $buf = New-Object byte[] $Count
+    $off = 0
+    while ($off -lt $Count) {
+        $n = $Stream.Read($buf, $off, $Count - $off)
+        if ($n -le 0) { throw "Connection closed" }
+        $off += $n
+    }
+    return $buf
+}
+
+function Ws-Connect {
+    param($Uri)
+    $isTls = $Uri.Scheme -eq "wss"
+    if (-not $isTls -and $Uri.Scheme -ne "ws") { throw "Only ws:// or wss:// is supported (got: $($Uri.Scheme))" }
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $tcp.NoDelay = $true
+    $tcp.Connect($Uri.Host, $Uri.Port)
+    $stream = $tcp.GetStream()
+    if ($isTls) {
+        # TLS 1.2 handshake (wss). Default cert validation (Let's Encrypt CA is trusted).
+        $ssl = New-Object System.Net.Security.SslStream($stream, $false)
+        $ssl.AuthenticateAsClient($Uri.Host, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+        $stream = $ssl
+    }
+    $rng = New-Object byte[] 16
+    (New-Object System.Random).NextBytes($rng)
+    $key = [Convert]::ToBase64String($rng)
+    $path = $Uri.PathAndQuery
+    $CRLF = "`r`n"
+    $req = "GET $path HTTP/1.1" + $CRLF + "Host: $($Uri.Host):$($Uri.Port)" + $CRLF + "Upgrade: websocket" + $CRLF + "Connection: Upgrade" + $CRLF + "Sec-WebSocket-Key: $key" + $CRLF + "Sec-WebSocket-Version: 13" + $CRLF + "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" + $CRLF + $CRLF
+    $reqBytes = [System.Text.Encoding]::ASCII.GetBytes($req)
+    $stream.Write($reqBytes, 0, $reqBytes.Length)
+    $stream.Flush()
+    $resp = New-Object System.Text.StringBuilder
+    $one = New-Object byte[] 1
+    $found = $false
+    for ($i = 0; $i -lt 16384; $i++) {
+        $n = $stream.Read($one, 0, 1)
+        if ($n -le 0) { throw "Handshake failed: connection closed" }
+        [void]$resp.Append([char]$one[0])
+        if ($resp.ToString().EndsWith($CRLF + $CRLF)) { $found = $true; break }
+    }
+    if (-not $found) { throw "Handshake failed: no response header received" }
+    $respText = $resp.ToString()
+    if ($respText -notmatch "101") { throw "Handshake failed: server returned non-101" }
+    return [PSCustomObject]@{ Tcp = $tcp; Stream = $stream; Connected = $true }
+}
+
+function Ws-Send-Frame {
+    param($Conn, $Payload, $Opcode, $Fin)
+    $len = $Payload.Length
+    $ms = New-Object System.IO.MemoryStream
+    $b0 = [byte]($Opcode -bor 0x80)
+    if (-not $Fin) { $b0 = $b0 -band 0x7F }
+    $ms.WriteByte($b0)
+    $maskBit = 0x80
+    if ($len -le 125) {
+        $ms.WriteByte([byte]($maskBit -bor $len))
+    } elseif ($len -le 65535) {
+        $ms.WriteByte([byte]($maskBit -bor 126))
+        $lenBytes = [BitConverter]::GetBytes([uint16]$len)
+        [Array]::Reverse($lenBytes)  # WebSocket length is big-endian
+        $ms.Write($lenBytes, 0, 2)
+    } else {
+        $ms.WriteByte([byte]($maskBit -bor 127))
+        $lenBytes = [BitConverter]::GetBytes([uint64]$len)
+        [Array]::Reverse($lenBytes)  # big-endian
+        $ms.Write($lenBytes, 0, 8)
+    }
+    $mask = New-Object byte[] 4
+    (New-Object System.Random).NextBytes($mask)
+    $ms.Write($mask, 0, 4)
+    $masked = New-Object byte[] $len
+    for ($i = 0; $i -lt $len; $i++) { $masked[$i] = $Payload[$i] -bxor $mask[$i % 4] }
+    if ($len -gt 0) { $ms.Write($masked, 0, $len) }
+    $frame = $ms.ToArray()
+    $Conn.Stream.Write($frame, 0, $frame.Length)
+    $Conn.Stream.Flush()
+}
+
+function Ws-Send-Text {
+    param($Conn, $Text)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $frameSize = 32768
+    $total = $bytes.Length
+    for ($i = 0; $i -lt $total; $i += $frameSize) {
+        $len = [Math]::Min($frameSize, $total - $i)
+        $chunk = New-Object byte[] $len
+        [Array]::Copy($bytes, $i, $chunk, 0, $len)
+        $opcode = 0x1
+        if ($i -gt 0) { $opcode = 0x0 }
+        $fin = ($i + $len) -ge $total
+        Ws-Send-Frame $Conn $chunk $opcode $fin
+    }
+}
+
+function Ws-Read-Frame {
+    param($Conn)
+    $h = Read-Exact $Conn.Stream 2
+    $b0 = $h[0]; $b1 = $h[1]
+    $fin = ($b0 -band 0x80) -ne 0
+    $opcode = $b0 -band 0x0F
+    $masked = ($b1 -band 0x80) -ne 0
+    $len = [int]($b1 -band 0x7F)
+    if ($len -eq 126) {
+        $ext = Read-Exact $Conn.Stream 2
+        [Array]::Reverse($ext)  # big-endian -> little-endian
+        $len = [BitConverter]::ToUInt16($ext, 0)
+    } elseif ($len -eq 127) {
+        $ext = Read-Exact $Conn.Stream 8
+        [Array]::Reverse($ext)  # big-endian -> little-endian
+        $len = [int][BitConverter]::ToUInt64($ext, 0)
+    }
+    $mask = $null
+    if ($masked) { $mask = Read-Exact $Conn.Stream 4 }
+    $payload = New-Object byte[] $len
+    if ($len -gt 0) {
+        $payload = Read-Exact $Conn.Stream $len
+        if ($masked) {
+            for ($i = 0; $i -lt $len; $i++) { $payload[$i] = $payload[$i] -bxor $mask[$i % 4] }
+        }
+    }
+    return [PSCustomObject]@{ Fin = $fin; Opcode = $opcode; Payload = $payload }
+}
+
+function Ws-Receive-Text {
+    param($Conn)
+    $ms = New-Object System.IO.MemoryStream
+    while ($true) {
+        $frame = Ws-Read-Frame $Conn
+        if ($frame.Opcode -eq 0x8) { return $null }
+        if ($frame.Opcode -eq 0x9) {
+            Ws-Send-Frame $Conn (New-Object byte[] 0) 0xA $true
+            continue
+        }
+        if ($frame.Opcode -eq 0xA) { continue }
+        if ($frame.Opcode -eq 0x1 -or $frame.Opcode -eq 0x0) {
+            if ($frame.Payload.Length -gt 0) { $ms.Write($frame.Payload, 0, $frame.Payload.Length) }
+            if ($frame.Fin) { break }
+        }
+    }
+    return [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
+}
+
+# ---- send lock: no concurrent writes allowed (raw layer included) ----
+# NOTE: must be $script: scoped! Background tasks (heartbeat / command runner)
+# have no script scope chain - bare $sendLock resolves to $null there and
+# .WaitOne() throws, silently killing the task (heartbeat stops, command
+# results never sent). Same for $script:logFile above.
+$script:sendLock = New-Object System.Threading.Mutex
+
+
+
+function Handle-UploadFileRequest {
+    param($Msg)
+    $path = [string]$Msg.path
+    $id = [string]$Msg.id
+    if (-not $path -or -not (Test-Path $path)) {
+        Send-Json @{ type = "file_upload_error"; id = $id; error = "file not found: $path" }
+        Write-Audit "upload_request ERROR not found: $path"
+        return
+    }
+    try {
+        $fi = Get-Item $path
+        $size = $fi.Length
+        $name = [System.IO.Path]::GetFileName($path)
+        # HTTP multipart 直传（2026-09-09：几百 MB 一次传——与 IDG 上传页同款——不再 WS 分块）
+        # 协议转换：ws->http / wss->https（ServerUrl 是 WS 地址——上传走 HTTP——2026-09-10 修复）
+        $httpBase = $ServerUrl -replace '^wss://', 'https://' -replace '^ws://', 'http://'
+        $uploadUrl = "$httpBase/api/bridge/upload?room=$Room&token=$([uri]::EscapeDataString($env:BRIDGE_TOKEN))&fid=$id"
+        $tmpResp = Join-Path $env:TEMP "clouddiag_up_$([guid]::NewGuid().ToString('N')).txt"
+        $cp = Start-Process -FilePath "curl.exe" -ArgumentList @('-sk','-X','POST','-m','600','-F',"file=@`"$path`"",'-o',$tmpResp,$uploadUrl) -NoNewWindow -Wait -PassThru
+        $body = if (Test-Path $tmpResp) { Get-Content $tmpResp -Raw } else { "" }
+        if (Test-Path $tmpResp) { Remove-Item $tmpResp -Force -ErrorAction SilentlyContinue }
+        if ($cp.ExitCode -ne 0) {
+            Send-Json @{ type = "file_upload_error"; id = $id; error = "http upload failed (curl exit $($cp.ExitCode)): $body" }
+            Write-Audit "upload_request HTTP ERROR exit=$($cp.ExitCode) $path"
+            return
+        }
+        # 服务器返回 {job_id, analyze_url}——回传 WS（tools/upload 的 future 解析）
+        Send-Json @{ type = "file_upload_result"; id = $id; path = $path; body = $body }
+        Write-Audit "upload_request HTTP OK $path ($size bytes)"
+        Write-Host ("uploaded: $path ($($size) bytes)") -ForegroundColor DarkGray
+    } catch {
+        Send-Json @{ type = "file_upload_error"; id = $id; error = $_.Exception.Message }
+        Write-Audit "upload_request ERROR $path : $($_.Exception.Message)"
+    }
+}
+
+function Send-Json {
+    param($Obj)
+    $script:sendLock.WaitOne() | Out-Null
+    try {
+        if ($script:ws -eq $null -or -not $script:ws.Connected) { return }
+        $json = $Obj | ConvertTo-Json -Compress -Depth 12
+        Ws-Send-Text $script:ws $json
+    } catch {
+        Write-Host ("send error: " + $_.Exception.Message) -ForegroundColor Yellow
+        Write-Audit "send error: $($_.Exception.Message)"
+    } finally {
+        $script:sendLock.ReleaseMutex()
+    }
+}
+
+function Receive-Text {
+    return Ws-Receive-Text $script:ws
+}
+
+# ---- machine identity ----
+function Get-LocalIP {
+    try {
+        $ips = [System.Net.Dns]::GetHostAddresses($env:COMPUTERNAME) |
+            Where-Object { $_.AddressFamily -eq 'InterNetwork' } |
+            ForEach-Object { $_.IPAddressToString }
+        if ($ips) { return ($ips | Select-Object -First 1) }
+    } catch {}
+    return ""
+}
+
+function Get-IsAdmin {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $pr = New-Object Security.Principal.WindowsPrincipal($id)
+        return $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }
+}
+
+function Send-Identify {
+    $info = [ordered]@{
+        hostname = $env:COMPUTERNAME
+        os       = "windows"
+        platform = "windows"
+        arch     = $env:PROCESSOR_ARCHITECTURE
+        local_ip = (Get-LocalIP)
+        username = $env:USERNAME
+        version  = $Version
+        bridge   = "ps-pipe"
+        is_admin = (Get-IsAdmin)
+    }
+    Send-Json @{ type = "identify"; info = $info }
+    Write-Audit "identify sent (host=$($env:COMPUTERNAME), ip=$(Get-LocalIP), is_admin=$(Get-IsAdmin))"
+}
+
+# ---- command execution ----
+function Execute-CommandSpec {
+    param($Spec)
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $timeoutSec = if ($Spec.timeout -and $Spec.timeout -gt 0) { [int]$Spec.timeout } else { 60 }
+    $timeoutMs  = $timeoutSec * 1000
+    $cmdStr = [string]$Spec.command
+    $shell  = [string]$Spec.shell
+    if (-not $shell) { $shell = "auto" }
+
+    Write-Audit "cmd [$shell] timeout=${timeoutSec}s: $($cmdStr.Substring(0, [Math]::Min(160, $cmdStr.Length)))"
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow  = -not [bool]$Spec.console
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $psi.StandardErrorEncoding  = [System.Text.Encoding]::UTF8
+    if ($Spec.cwd -and (Test-Path $Spec.cwd)) { $psi.WorkingDirectory = [string]$Spec.cwd }
+
+    switch ($shell) {
+        "cmd" {
+            $psi.FileName = "cmd.exe"
+            $psi.Arguments = "/c `"$cmdStr`""
+        }
+        "bash" {
+            $psi.FileName = "bash.exe"
+            $psi.Arguments = "-c `"$cmdStr`""
+        }
+        default {
+            # powershell / pwsh / auto - use -EncodedCommand to avoid
+            # quote escaping and encoding traps entirely.
+            $psi.FileName = "powershell.exe"
+            $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmdStr))
+            $psi.Arguments = "-NoProfile -NonInteractive -EncodedCommand $enc"
+        }
+    }
+
+    $output = ""
+    $err    = ""
+    $exitCode = -1
+    try {
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $outTask = $p.StandardOutput.ReadToEndAsync()
+        $errTask = $p.StandardError.ReadToEndAsync()
+        if (-not $p.WaitForExit($timeoutMs)) {
+            try {
+                Start-Process -FilePath "taskkill.exe" -ArgumentList "/F","/T","/PID",$p.Id -NoNewWindow -Wait | Out-Null
+            } catch {}
+            $p.WaitForExit(5000) | Out-Null
+            $err = "command timed out after ${timeoutSec}s"
+        }
+        $output = $outTask.GetAwaiter().GetResult()
+        # 输出过大截断（2026-08-28：修复 WebSocket 1009 断开——命令输出 >16MB 导致 ws 超限）
+        if ($output.Length -gt 8MB) {
+            $truncatedLen = $output.Length
+            $output = $output.Substring(0, 8MB) + "`n...[TRUNCATED: output too large ($truncatedLen chars)]"
+            Write-Audit "output truncated: $truncatedLen -> 8MB (id=$($Spec.id))"
+        }
+        $errText = $errTask.GetAwaiter().GetResult()
+        if ($errText) { $err = ($err + $errText).Trim() }
+        $exitCode = $p.ExitCode
+    } catch {
+        $err = $_.Exception.Message
+    }
+    $sw.Stop()
+
+    Send-Json @{
+        type        = "command_result"
+        id          = [string]$Spec.id
+        output      = $output
+        exit_code   = $exitCode
+        error       = $err
+        duration_ms = $sw.ElapsedMilliseconds
+    }
+    Write-Audit "result id=$($Spec.id) exit=$exitCode duration=$($sw.ElapsedMilliseconds)ms outlen=$($output.Length)"
+}
+
+function Execute-CommandSpecFromJson {
+    param($JsonText)
+    try {
+        $spec = $JsonText | ConvertFrom-Json
+        Execute-CommandSpec $spec
+    } catch {
+        Write-Host ("command task error: " + $_.Exception.Message) -ForegroundColor Yellow
+        Write-Audit ("command task error: " + $_.Exception.ToString())
+    }
+}
+
+# ---- file channel ----
+function Handle-FileDownload {
+    param($Msg)
+    $path = [string]$Msg.path
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($path)
+        $name  = [System.IO.Path]::GetFileName($path)
+        $chunkSize = 262144  # 256KB per chunk (matches Go bridge)
+        $total = [Math]::Max(1, [Math]::Ceiling($bytes.Length / $chunkSize))
+        for ($i = 0; $i -lt $total; $i++) {
+            $offset = $i * $chunkSize
+            $len = [Math]::Min($chunkSize, $bytes.Length - $offset)
+            $chunk = New-Object byte[] $len
+            [Array]::Copy($bytes, $offset, $chunk, 0, $len)
+            Send-Json @{
+                type  = "file_download_result"
+                id    = [string]$Msg.id
+                path  = $path
+                name  = $name
+                data  = [Convert]::ToBase64String($chunk)
+                chunk = $i
+                total = $total
+                size  = $bytes.Length
+            }
+        }
+        Write-Audit "file_download OK $path ($($bytes.Length) bytes, $total chunks)"
+        Write-Host ("file uploaded: $path ($($bytes.Length) bytes)") -ForegroundColor DarkGray
+    } catch {
+        Send-Json @{ type = "file_download_error"; id = [string]$Msg.id; error = $_.Exception.Message }
+        Write-Audit "file_download ERROR $path : $($_.Exception.Message)"
+    }
+}
+
+function Handle-FileUpload {
+    param($Msg)
+    $dir = Join-Path $env:TEMP "clouddiag"
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $name = [System.IO.Path]::GetFileName([string]$Msg.name)
+    if (-not $name) { $name = [System.IO.Path]::GetFileName([string]$Msg.path) }
+    $target = Join-Path $dir $name
+    try {
+        $data = [Convert]::FromBase64String([string]$Msg.data)
+        $mode = if ($Msg.chunk -eq 0) { [System.IO.FileMode]::Create } else { [System.IO.FileMode]::Append }
+        $fs = New-Object System.IO.FileStream($target, $mode, [System.IO.FileAccess]::Write)
+        try { $fs.Write($data, 0, $data.Length) } finally { $fs.Close() }
+        if (($Msg.chunk + 1) -ge $Msg.total) {
+            Send-Json @{ type = "file_upload_result"; id = [string]$Msg.id; path = $target }
+            Write-Audit "file_upload OK $target"
+            Write-Host ("file received: $target") -ForegroundColor DarkGray
+        }
+    } catch {
+        Send-Json @{ type = "file_upload_result"; id = [string]$Msg.id; path = "" }
+        Write-Audit "file_upload ERROR $target : $($_.Exception.Message)"
+    }
+}
+
+# ---- main connection loop (one connect + read loop) ----
+# v2 fix: everything runs on the main thread (no background tasks).
+# Why: PowerShell Task.Run/StartNew scriptblocks have no script scope chain,
+# accessing $script: vars silently fails -> heartbeat/command results never sent
+# (KJTFF8HA/A7P7J38W reproduced). Sync mode is safe: ClientWebSocket has no
+# read deadline (server never kicks us for a heartbeat gap); messages queue
+# in the TCP buffer while a command runs and are processed afterwards.
+#
+# Keepalive design (v1.0.2): NEVER cancel ReceiveAsync to send heartbeats -
+# cancelling kills the connection (reproduced: disconnect code=1005 exactly
+# 25s after connect, every cycle). Instead:
+#   - ClientWebSocketOptions.KeepAliveInterval sends protocol-level WebSocket
+#     ping frames internally (.NET handles them, no app code, no main thread)
+#   - a JSON heartbeat is piggy-backed whenever a message arrives and 25s
+#     have passed, so the server's heartbeat_age stays fresh during diagnosis
+function Run-Bridge {
+    param($Uri)
+    $script:ws = Ws-Connect $Uri
+    Write-Host "Connected. Waiting for server..." -ForegroundColor Green
+    Write-Audit "connected to $Uri"
+    Send-Identify
+
+    $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
+    $lastHb = Get-Date
+
+    while (-not $script:exiting -and $script:ws.Connected) {
+        $text = Receive-Text
+        if ($null -eq $text) { break }
+        if (-not $text) { continue }
+
+        # opportunistic heartbeat: piggy-back on any server message
+        if (([DateTime]::UtcNow - $lastHb.ToUniversalTime()).TotalSeconds -ge 25) {
+            $ts = [int64]([DateTime]::UtcNow - $epoch).TotalSeconds
+            Send-Json @{ type = "heartbeat"; ts = $ts }
+            $lastHb = Get-Date
+        }
+
+        $msg = $null
+        try { $msg = $text | ConvertFrom-Json } catch { continue }
+
+        switch ($msg.type) {
+            "identify_request" { Send-Identify }
+            "ping"             { Send-Json @{ type = "pong" } }
+            "pong"             { }  # server's reply to heartbeat, ignore
+            "status"           { Write-Host ("[server] " + $msg.content) -ForegroundColor DarkCyan }
+            "command"          { Execute-CommandSpecFromJson $text }  # synchronous (agent sends one at a time)
+            "file_download"    { Handle-FileDownload $msg }
+            "file_upload"      { Handle-FileUpload $msg }
+            "file_upload_request" { Handle-UploadFileRequest $msg }
+            "close" {
+                Write-Host ("closed by server: " + $msg.reason) -ForegroundColor Yellow
+                $script:exiting = $true
+                break
+            }
+            default            { Write-Host ("unknown msg type: " + $msg.type) -ForegroundColor DarkGray }
+        }
+    }
+
+    try {
+        if ($script:ws.Connected) {
+            try { Ws-Send-Frame $script:ws (New-Object byte[] 0) 0x8 $true } catch {}
+            $script:ws.Stream.Close()
+        }
+    } catch {}
+    try { $script:ws.Tcp.Close() } catch {}
+    $script:ws = $null
+    Write-Audit "disconnected"
+}
+
+# ---- auto-reconnect loop (3s -> 30s backoff) ----
+$attempt = 0
+$delay = 3
+while (-not $script:exiting) {
+    $attempt++
+    try {
+        Run-Bridge ([Uri]$wsUri)
+        Write-Host "Connection closed." -ForegroundColor DarkGray
+    } catch {
+        Write-Host ("Connection error: " + $_.Exception.Message) -ForegroundColor Yellow
+        Write-Audit "connection error: $($_.Exception.Message)"
+    }
+    if ($script:exiting) { break }
+    Write-Host ("Reconnecting in ${delay}s (attempt $attempt)...") -ForegroundColor DarkGray
+    Start-Sleep -Seconds $delay
+    if ($delay -lt 30) { $delay = $delay * 2 }
+}
+Write-Host "Bridge exited."

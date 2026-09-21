@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 — 云端 AI 远程运维助手</title>
+<style>
+  :root { --bg: #0d1117; --surface: #161b22; --text: #e6edf3; --text2: #8b949e; --info: #58a6ff; --border: #30363d; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#0b1a2e; color:#fff; min-height:100vh; display:flex; }
+  /* ===== 左侧宣传区（自动轮播）===== */
+  .left { flex:1.2; background:linear-gradient(160deg,#0b1a2e 0%,#10233d 45%,#0e3a5f 100%); display:flex; flex-direction:column; padding:48px 56px; position:relative; overflow:hidden; }
+  .left::before { content:""; position:absolute; width:500px; height:500px; border-radius:50%; background:radial-gradient(circle,rgba(56,189,248,.15),transparent 60%); top:-120px; right:-120px; }
+  .left::after { content:""; position:absolute; width:350px; height:350px; border-radius:50%; background:radial-gradient(circle,rgba(96,165,250,.12),transparent 60%); bottom:-80px; left:-80px; }
+  .brand { display:flex; align-items:center; gap:12px; font-size:20px; font-weight:700; margin-bottom:80px; position:relative; z-index:1; }
+  .brand .logo { width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,#38bdf8,#2563eb); display:flex; align-items:center; justify-content:center; font-size:18px; }
+  .hero { position:relative; z-index:1; min-height:170px; }
+  .slide { position:absolute; top:0; left:0; opacity:0; transform:translateY(12px); transition:opacity .6s ease, transform .6s ease; pointer-events:none; }
+  .slide.active { opacity:1; transform:translateY(0); }
+  .slide h2 { font-size:30px; font-weight:600; margin-bottom:12px; line-height:1.4; }
+  .slide p { font-size:16px; color:#93a9c7; line-height:1.8; max-width:430px; }
+  .slide-dots { display:flex; gap:8px; margin-top:150px; position:relative; z-index:1; }
+  .dot { width:28px; height:4px; border-radius:2px; background:rgba(255,255,255,.2); cursor:pointer; transition:background .3s; }
+  .dot.active { background:#38bdf8; }
+  .left footer { margin-top:auto; position:relative; z-index:1; font-size:12px; color:#5b7292; }
+  /* ===== 右侧登录区 ===== */
+  .right { width:440px; min-width:440px; background:#0e1c30; display:flex; flex-direction:column; padding:32px 40px; position:relative; }
+  .login-box { margin:auto 0; }
+  .login-title { display:flex; align-items:center; gap:12px; margin-bottom:4px; }
+  .login-title .logo { width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,#38bdf8,#2563eb); display:flex; align-items:center; justify-content:center; font-size:22px; }
+  .login-title .name { font-size:20px; font-weight:700; }
+  .login-sub { font-size:13px; color:#7d94b3; margin:4px 0 28px 56px; }
+  .field { margin-bottom:18px; }
+  .field label { display:block; font-size:13px; color:#93a9c7; margin-bottom:6px; }
+  .field input { width:100%; padding:12px 14px; background:#0b1a2e; border:1px solid #243b57; border-radius:8px; color:#fff; font-size:14px; outline:none; }
+  .field input:focus { border-color:#38bdf8; }
+  .btn-login { width:100%; padding:13px; background:linear-gradient(135deg,#38bdf8,#2563eb); border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; }
+  .btn-login:hover { opacity:.9; }
+  .btn-login:disabled { opacity:.5; cursor:not-allowed; }
+  .btn-guest { width:100%; padding:11px; margin-top:8px; background:transparent; border:1px solid #243b57; border-radius:8px; color:#93a9c7; font-size:13px; cursor:pointer; }
+  .btn-guest:hover { border-color:#38bdf8; color:#38bdf8; }
+  .links { display:flex; justify-content:space-between; margin-top:16px; font-size:13px; }
+  .links a { color:#7d94b3; text-decoration:none; cursor:pointer; }
+  .links a:hover { color:#38bdf8; }
+  .error { display:none; background:rgba(248,81,73,.12); border:1px solid rgba(248,81,73,.4); color:#f87171; font-size:13px; padding:8px 10px; border-radius:6px; margin-bottom:14px; }
+  .foot { margin-top:18px; font-size:12px; color:#5b7292; text-align:center; line-height:1.8; }
+  .hotline { margin-top:auto; font-size:12px; color:#5b7292; text-align:center; padding-top:24px; }
+</style>
+</head>
+<body>
+
+<!-- 左侧宣传区（自动轮播）-->
+<div class="left">
+  <div class="brand"><div class="logo">🤖</div>云端 AI 远程运维助手</div>
+  <div class="hero">
+    <div class="slide active">
+      <h2>智能服务升级<br>赋能远程诊断</h2>
+      <p>云端 AI 诊断 Windows / Linux 电脑问题，远程接入客户机，硬件工具全覆盖。</p>
+    </div>
+    <div class="slide">
+      <h2>一键连接<br>跨网络直达</h2>
+      <p>443 与 8443 双通道自动降级，公司网络/防火墙拦截也能稳定连接客户机。</p>
+    </div>
+    <div class="slide">
+      <h2>专业工具矩阵<br>标准化诊断</h2>
+      <p>SIO / SMART / RAID / 蓝屏分析 / 系统日志——标准化工具链执行，诊断结论基于官方知识库与实测数据，报告严谨可追溯。</p>
+    </div>
+  </div>
+  <div class="slide-dots">
+    <div class="dot active" onclick="goSlide(0)"></div>
+    <div class="dot" onclick="goSlide(1)"></div>
+    <div class="dot" onclick="goSlide(2)"></div>
+  </div>
+  <footer>© 2026 CloudDiag · 售后内部系统</footer>
+</div>
+
+<!-- 右侧登录区 -->
+<div class="right">
+  <div class="login-box">
+    <div class="login-title"><div class="logo">🤖</div><div class="name">云端 AI 远程运维助手</div></div>
+    <div class="login-sub">Cloud AI Remote Diagnostics</div>
+
+    <div class="error" id="error-box"></div>
+
+    <div class="field"><label>账号</label>
+      <input id="username" type="text" placeholder="请输入工号" autocomplete="username" autofocus>
+    </div>
+    <div class="field"><label>密码</label>
+      <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password">
+    </div>
+    <button class="btn-login" id="login-btn" onclick="doLogin()">Login</button>
+    <button class="btn-guest" onclick="guestLogin()" title="免密进入——仅可使用 IDG 日志分析（1 小时会话）">👤 游客进入</button>
+    <div class="links"><a onclick="alert('请联系管理员重置密码')">Forgot password</a><a onclick="alert('请联系管理员开通账号')">Activate account</a></div>
+
+    <div class="foot">如需账号，请联系管理员开通</div>
+  </div>
+  <div class="hotline">内部 IT 支持</div>
+</div>
+
+<script>
+let slideIdx = 0;
+let slideTimer = null;
+
+// ===== 左侧轮播（自动 4s 切换 + 圆点点击）=====
+function goSlide(i) {
+  slideIdx = i;
+  const slides = document.querySelectorAll('.slide');
+  const dots = document.querySelectorAll('.dot');
+  slides.forEach((s, k) => s.classList.toggle('active', k === i));
+  dots.forEach((d, k) => d.classList.toggle('active', k === i));
+}
+function nextSlide() {
+  const total = document.querySelectorAll('.slide').length;
+  goSlide((slideIdx + 1) % total);
+}
+slideTimer = setInterval(nextSlide, 4000);
+
+function showError(msg) {
+  const eb = document.getElementById('error-box');
+  eb.textContent = msg;
+  eb.style.display = 'block';
+}
+function hideError() { document.getElementById('error-box').style.display = 'none'; }
+
+async function doLogin() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  if (!username || !password) { showError('请输入工号和密码'); return; }
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true; btn.textContent = '登录中...';
+  hideError();
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showError(data.error || '登录失败');
+      btn.disabled = false; btn.textContent = 'Login';
+      return;
+    }
+    localStorage.setItem('cab_role', data.role || '');
+    location.href = '/dashboard?role=' + (data.role || '');
+  } catch (e) {
+    showError('网络错误: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Login';
+  }
+}
+
+async function guestLogin() {
+  try {
+    const resp = await fetch('/api/auth/guest', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) { showError(data.error || '游客入口暂不可用'); return; }
+    localStorage.setItem('cab_role', 'guest');
+    location.href = '/dashboard?role=guest';
+  } catch (e) { showError('网络错误: ' + e.message); }
+}
+
+document.getElementById('username').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('password').focus(); });
+document.getElementById('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+// 已登录直接进工作台
+fetch('/api/auth/me').then(r => r.json()).then(d => {
+  if (!d.error) {
+    localStorage.setItem('cab_role', d.role || '');
+    location.href = '/dashboard?role=' + (d.role || '');
+  }
+}).catch(() => {});
+</script>
+</body>
+</html>

@@ -1,0 +1,3445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作台 — 云端 AI 远程运维助手</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --border: #30363d; --text: #e6edf3; --text2: #9da7b3;
+    --info: #58a6ff; --success: #3fb950; --warn: #d29922; --error: #f85149;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); height: 100vh; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+  }
+  .app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ===== 顶部 ===== */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .header .brand { display: flex; align-items: center; gap: 10px; }
+  .header .logo {
+    width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--info), #7c4dff);
+    display: flex; align-items: center; justify-content: center; font-size: 15px; color: #fff; font-weight: 700;
+  }
+  .header .title { font-size: 16px; font-weight: 600; }
+  .header .sub { font-size: 11px; color: var(--text2); }
+  .header .user-box { display: flex; align-items: center; gap: 10px; }
+  .user-tag {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    padding: 5px 14px; font-size: 13px; display: flex; align-items: center; gap: 6px;
+  }
+  .user-tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .btn-sm {
+    padding: 5px 12px; font-size: 12px; background: var(--surface2); color: var(--text2);
+    border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  }
+  .btn-sm:hover { color: var(--text); border-color: var(--text2); }
+
+  /* ===== 主体：侧边栏 + 内容 ===== */
+  .main { display: flex; flex: 1; min-height: 0; }
+  .sidebar {
+    width: 200px; flex-shrink: 0; background: var(--surface);
+    border-right: 1px solid var(--border); padding: 14px 10px;
+    display: flex; flex-direction: column;
+    position: relative; transition: margin-left .2s ease;
+  }
+  /* 侧边栏导航滚动（2026-08-30——选项多/窗口小时可下拉——footer 固定底部） */
+  #sidebar-nav { flex: 1; overflow-y: auto; min-height: 0; margin: 6px -6px 6px 0; padding-right: 6px; }
+  .sidebar-footer { flex-shrink: 0; }
+  #sidebar-nav::-webkit-scrollbar { width: 4px; }
+  #sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  #sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+  .sidebar.collapsed { width: 56px; min-width: 56px; }
+  .sidebar.collapsed .nav-item { justify-content: center; padding: 11px 0; }
+  .sidebar.collapsed .nav-item span { display: none; }
+  .sidebar.collapsed .sidebar-footer { display: none; }
+  .sidebar-toggle {
+    position: absolute; top: 12px; right: -14px; width: 14px; height: 40px;
+    background: var(--border); color: var(--info); border-radius: 0 6px 6px 0; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 9px; z-index: 20;
+  }
+  /* 游客模式首帧置灰（无闪烁）：非 IDG 导航全部禁用 */
+  html.guest-mode .nav-item:not(#nav-idg) { opacity: .4; cursor: not-allowed; pointer-events: none; }
+  /* 游客模式:非 IDG 页面内容全部隐藏(首页/工单/工具等一概不显示) */
+  html.guest-mode .page:not(#page-idg) { display: none !important; }
+  /* 游客模式:导航高亮首帧同步——首页不高亮、IDG 高亮(避免 DOMContentLoaded 后高亮跳动) */
+  html.guest-mode #nav-home { background: transparent; color: var(--text2); border-left-color: transparent; font-weight: normal; }
+  html.guest-mode #nav-idg { background: var(--surface2); color: var(--info); border-left-color: var(--info); font-weight: 600; }
+  /* 游客模式:「连接客户机」field 专属,首帧即隐藏(否则 body 顶部 script 拿不到 DOM,选项闪现后消失) */
+  html.guest-mode #nav-field-guide { display: none !important; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 11px 12px; margin-bottom: 4px;
+    font-size: 14px; color: var(--text2); border-radius: 8px; cursor: pointer; user-select: none;
+    border-left: 3px solid transparent;
+  }
+  .nav-item.guest-disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: var(--surface2); color: var(--info); border-left-color: var(--info); font-weight: 600; }
+  .nav-divider { height: 1px; background: var(--border); margin: 10px 8px; }
+  .sidebar-footer { padding: 8px 12px; font-size: 11px; color: var(--text2); }
+  .admin-only { display: none !important; }
+  .admin-only.show { display: flex !important; }
+
+  .content {
+    flex: 1; min-height: 0; padding: 24px 28px; overflow-y: auto;
+    display: flex; flex-direction: column;
+    min-width: 0; overflow-x: auto;
+  }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-title { font-size: 17px; font-weight: 600; margin-bottom: 4px; display: none !important; }
+  .page-desc { font-size: 12px; color: var(--text2); margin-bottom: 20px; display: none !important; }
+
+  /* ===== 卡片/表单 ===== */
+  .panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 22px; max-width: 640px;
+  }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 5px; }
+  .field input, .field select {
+    width: 100%; padding: 9px 11px; background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; font-size: 14px; outline: none;
+  }
+  .field input:focus, .field select:focus { border-color: var(--info); }
+  .btn-main {
+    padding: 10px 22px; background: var(--info); color: #fff; border: none;
+    border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .btn-main:hover { filter: brightness(1.1); }
+  .btn-main:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-green { background: var(--success); }
+  .btn-amber { background: var(--warn); }
+  .btn-ghost {
+    padding: 8px 16px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; cursor: pointer;
+  }
+  .btn-ghost:hover { color: var(--text); }
+
+
+  .dl-row { display: flex; flex-direction: column; gap: 9px; }
+  .dl-btn {
+    display: block; text-align: center; padding: 10px; font-size: 14px; text-decoration: none;
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .dl-btn:hover { border-color: var(--info); color: var(--info); }
+  .dl-cmd {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 9px 11px; font-size: 12px; color: var(--info); word-break: break-all;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .dl-copy { color: var(--text2); cursor: pointer; flex-shrink: 0; font-size: 12px; }
+  .dl-copy:hover { color: var(--text); }
+  .dl-note { font-size: 11px; color: var(--text2); line-height: 1.8; margin-top: 6px; }
+
+  /* PowerShell 命令版步骤卡片（下载卡片内竖排单列，宽面板才用两列） */
+  .dl-guide { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 10px; }
+  .dl-guide-head { font-size: 13px; font-weight: 700; color: var(--info); margin-bottom: 2px; grid-column: 1 / -1; }
+  .dl-step {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.7;
+  }
+  .dl-step.wide { grid-column: 1 / -1; }
+  .dl-step-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .dl-step-title .num {
+    display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
+    text-align: center; background: var(--accent); color: #fff;
+    border-radius: 50%; font-size: 11px; font-weight: 700; margin-right: 6px;
+  }
+  .dl-cmd-block {
+    display: block; background: rgba(0,0,0,0.45); color: var(--info);
+    padding: 8px 10px; border-radius: 6px; font-family: monospace;
+    font-size: 11px; white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+    margin: 4px 0;
+  }
+  .dl-step-note { font-size: 11px; color: var(--text2); margin-top: 6px; }
+  .dl-guide-foot { font-size: 11px; color: var(--text2); border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 2px; line-height: 1.7; }
+
+  /* ===== 下载桥接器卡片墙 ===== */
+  .dl-steps { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 16px; font-size: 12px; color: var(--text2); }
+  .dl-steps .s { display: inline-flex; align-items: center; gap: 6px; }
+  .dl-steps .s .num { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; background: var(--info); color: #fff; border-radius: 50%; font-size: 11px; font-weight: 700; }
+  .dl-steps .arrow { color: var(--border); }
+  .dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: stretch; }
+  .dl-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; display: flex; flex-direction: column;
+    transition: box-shadow .15s ease, border-color .15s ease;
+  }
+  .dl-card:hover { border-color: var(--info); box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  .dl-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .dl-card-icon { font-size: 22px; }
+  .dl-card-title { font-size: 15px; font-weight: 600; flex: 1; }
+  .dl-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; line-height: 1.6; }
+  .dl-card-actions { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+  .dl-card-note { font-size: 11px; color: var(--text2); line-height: 1.6; }
+  .badge-rec { background: rgba(34,197,94,.12); color: var(--success); border: 1px solid rgba(34,197,94,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .dl-more summary { cursor: pointer; font-size: 12px; color: var(--info); user-select: none; }
+  .dl-more[open] summary { margin-bottom: 8px; }
+  .dl-facts { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text2); line-height: 1.7; }
+  .dl-cmd-text { word-break: break-all; }
+
+  /* ===== 响应式：窗口缩放适配（桌面范围，不做手机平板专用） ===== */
+  @media (max-width: 1100px) {
+    .content { padding: 18px 20px; }
+  }
+  @media (max-width: 900px) {
+    .sidebar { width: 150px; }
+    .nav-item { font-size: 12px; padding: 7px 8px; }
+  }
+  @media (max-width: 700px) {
+    .header { padding: 10px 14px; }
+    .brand .sub { display: none; }
+    .dl-steps { gap: 6px; font-size: 11px; }
+  }
+
+  /* ===== 表格 ===== */
+  .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
+  .toolbar input {
+    padding: 8px 12px; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; outline: none; width: 280px;
+  }
+  .toolbar input:focus { border-color: var(--info); }
+  .count { font-size: 12px; color: var(--text2); align-self: center; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 10px; overflow: hidden; }
+  th, td { padding: 11px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { background: var(--surface2); color: var(--text2); font-weight: 500; font-size: 12px; white-space: nowrap; }
+  tr:hover td { background: rgba(88,166,255,.04); }
+  .mono { font-family: "Consolas", monospace; letter-spacing: 1px; }
+  .status { padding: 3px 10px; border-radius: 12px; font-size: 11px; white-space: nowrap; }
+  .status.on { background: rgba(63,185,80,.15); color: var(--success); }
+  .status.off { background: rgba(157,167,179,.12); color: var(--text2); }
+  .status.disabled { background: rgba(248,81,73,.12); color: var(--error); }
+  .empty { text-align: center; color: var(--text2); padding: 36px 0; font-size: 13px; }
+  .row-actions { display: flex; gap: 6px; }
+  .row-actions .btn-sm { padding: 3px 9px; font-size: 11px; }
+
+  /* ===== 对话（iframe 嵌入） ===== */
+  /* 与 IDG 一致:负 margin 抵消 content padding,iframe 撑满内容区(消除"嵌入感/没撑满") */
+  #page-chat.active { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: -24px -28px; }
+  /* IDG 日志分析：与对话页一致的 flex 自适应布局，容器高度跟随内容区，避免滚动条/边框不齐 */
+  #page-idg.active { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: -24px -28px; }
+  #page-admin.active { display: flex; flex-direction: column; height: 100%; min-height: 0; margin: -24px -28px; }
+  /* 房间标签已按用户要求取消(不显示"房间: xxx") */
+  .chat-head { display: none !important; }
+  .chat-head.hidden { display: none; }
+  .chat-head .page-title { margin-bottom: 0; display: none !important; }
+  .chat-head .room-tag {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    padding: 4px 14px; font-size: 12px; color: var(--text2);
+  }
+  /* 对话 iframe 容器:无边框无圆角(与 IDG 一致,消除边框"嵌入感") */
+  .chat-frame-wrap { flex: 1; min-height: 0; overflow: hidden; }
+  #chat-frame { width: 100%; height: 100%; border: 0; background: var(--surface); display: block; }
+  .chat-empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--text2); font-size: 14px; gap: 8px;
+    border: 1px dashed var(--border); border-radius: 10px;
+  }
+  .chat-empty .big { font-size: 40px; }
+
+  /* ===== 历史记录模态框 ===== */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-lg {
+    width: min(760px, 92vw); height: min(82vh, 700px); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-lg-wide { width: min(880px, 94vw); }
+  .modal-close {
+    background: none; border: none; color: var(--text2); font-size: 18px; cursor: pointer; padding: 2px 8px; border-radius: 6px;
+  }
+  .modal-close:hover { background: var(--surface2); color: var(--text); }
+  .modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
+  }
+  .modal-head h3 { font-size: 15px; }
+  .history-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+  .history-body .empty { padding: 40px 0; }
+  .h-msg { margin-bottom: 12px; max-width: 88%; }
+  .h-msg .h-body { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.7; }
+  .h-msg .h-time { font-size: 11px; color: var(--text2); margin-top: 3px; }
+  .h-user { margin-left: auto; }
+  .h-user .h-body { background: rgba(88,166,255,.15); border: 1px solid rgba(88,166,255,.3); padding: 9px 12px; border-radius: 10px; }
+  .h-user .h-time { text-align: right; }
+  .h-ai .h-body { background: var(--surface2); border: 1px solid var(--border); padding: 9px 12px; border-radius: 10px; }
+  .h-system { margin: 8px auto; text-align: center; font-size: 12px; color: var(--text2); }
+  .h-error { margin: 8px auto; text-align: center; font-size: 12px; color: var(--error); }
+  .h-tool { margin: 8px 0 8px auto; max-width: 95%; background: rgba(210,153,34,.06); border: 1px dashed rgba(210,153,34,.35); border-radius: 8px; padding: 8px 10px; }
+  .h-tool-name { font-size: 11px; color: var(--warn); font-family: "Consolas", monospace; }
+  .h-tool pre { margin-top: 6px; font-size: 11px; color: var(--text2); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow-y: auto; }
+
+  /* ===== 提示 ===== */
+  .msg-box { display: none; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+  .msg-box.err { display: block; background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.35); color: var(--error); }
+  .msg-box.ok { display: block; background: rgba(63,185,80,.1); border: 1px solid rgba(63,185,80,.35); color: var(--success); }
+  .msg-box.info { display: block; background: rgba(52,120,246,.1); border: 1px solid rgba(52,120,246,.35); color: var(--info); }
+  .msg-box.warn { display: block; background: rgba(255,165,0,.1); border: 1px solid rgba(255,165,0,.4); color: var(--warn); }
+
+  /* ===== 工具模式 ===== */
+  .tool-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .tool-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; display: flex; flex-direction: column;
+    transition: box-shadow .15s ease, border-color .15s ease;
+  }
+  .tool-card:hover { border-color: var(--info); box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  .tool-card.open { border-color: var(--info); }
+  .tool-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .tool-card-title { font-size: 15px; font-weight: 600; flex: 1; }
+  .tool-card-icon { font-size: 20px; }
+  .tool-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; line-height: 1.6; }
+  .tool-card-open { align-self: flex-start; }
+  .tool-card-body {
+    display: none; border-top: 1px dashed var(--border); margin-top: 14px; padding-top: 14px;
+  }
+  .tool-card.open .tool-card-body { display: block; }
+  .tool-card-actions { margin: 12px 0; }
+  .tool-card .msg-box { margin-bottom: 12px; }
+  .badge-write { background: rgba(248,81,73,.12); color: var(--error); border: 1px solid rgba(248,81,73,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .badge-read { background: rgba(52,120,246,.12); color: var(--info); border: 1px solid rgba(52,120,246,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .badge { padding: 2px 10px; border-radius: 10px; font-size: 11px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+  .badge-ok { background: rgba(34,197,94,.12); color: var(--success); border-color: rgba(34,197,94,.35); }
+  .badge-warn { background: rgba(255,165,0,.12); color: var(--warn); border-color: rgba(255,165,0,.4); }
+  .oa3-result { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; background: var(--surface); }
+  .oa3-key-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .oa3-label { font-size: 13px; color: var(--text2); }
+  .oa3-key { font-size: 15px; font-weight: 600; letter-spacing: 1px; color: var(--success); word-break: break-all; }
+  .oa3-meta { font-size: 12px; color: var(--text2); margin: 8px 0; }
+  .bios-info { font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-family: "Consolas", monospace; word-break: break-all; }
+  .tool-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
+  .field-hint { font-size: 11px; color: var(--text2); margin-top: 4px; }
+  .tool-warn { font-size: 12px; color: var(--warn); border: 1px solid rgba(255,165,0,.4); background: rgba(255,165,0,.08); padding: 8px 10px; border-radius: 6px; margin: 12px 0; }
+  .tool-actions { margin: 12px 0; }
+  .btn-danger { background: var(--error); color: #fff; }
+  .btn-danger:hover { filter: brightness(1.1); }
+  .tool-steps { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface); margin-top: 12px; max-height: 320px; overflow-y: auto; }
+  .tool-step { font-size: 12px; color: var(--text2); font-family: "Consolas", monospace; padding: 3px 0; border-bottom: 1px dashed var(--border); white-space: pre-wrap; word-break: break-all; }
+  .tool-step-verify { color: var(--success); }
+  .tool-hint { font-size: 12px; color: var(--warn); margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255,165,0,.4); background: rgba(255,165,0,.08); border-radius: 6px; }
+
+  /* ===== 首页 ===== */
+  .home-hero { padding: 28px 24px; border-radius: 12px; background: linear-gradient(135deg, rgba(52,120,246,.15), rgba(52,120,246,.04)); border: 1px solid rgba(52,120,246,.25); margin-bottom: 20px; }
+  .home-title { font-size: 22px; font-weight: 700; }
+  .home-sub { font-size: 13px; color: var(--text2); margin-top: 6px; }
+  .home-section { margin-bottom: 20px; }
+  .home-section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .home-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .home-step { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  .step-num { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; background: var(--info); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .home-step b { font-size: 13px; }
+  .step-desc { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5; }
+  .toast {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 200;
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    padding: 10px 20px; border-radius: 8px; font-size: 13px; display: none; box-shadow: 0 6px 20px rgba(0,0,0,.4);
+  }
+  .toast.show { display: block; }
+</style>
+<!-- 角色首帧样式注入点（field 极简界面：登录后第一帧即正确，无普通界面闪现） -->
+<style id="role-css"></style>
+</head>
+<body>
+<script>
+  // 首帧同步：游客模式置灰（防闪烁——仅 URL 明确 ?role=guest 时置灰；localStorage 残留交给 loadMe 校准，避免工程师误置灰）
+  (function () {
+    var u = new URLSearchParams(location.search).get('role');
+    if (u === 'guest') document.documentElement.classList.add('guest-mode');
+  })();
+</script>
+<script>
+// 角色首帧处理：同步读取（URL 参数优先，localStorage 兜底）——在首帧渲染前注入 CSS
+(function () {
+  var r = new URLSearchParams(location.search).get('role');
+  if (!r) r = localStorage.getItem('cab_role');
+  if (!r) return;
+  localStorage.setItem('cab_role', r);
+  if (r !== 'field') {
+    // 非上门工程师：隐藏「连接客户机」导航（field 专属）
+    var ng = document.getElementById('nav-field-guide');
+    if (ng) ng.style.display = 'none';
+    return;
+  }
+  // 注入首帧规则：隐藏首页/对话/工单/密码/反馈导航 + 默认显示创建页
+  var target = 'create';
+  document.getElementById('role-css').textContent =
+    '.page-home{display:none!important}'
+    + '#nav-home,#nav-chat,#nav-workorders,#nav-password,#nav-feedback{display:none!important}'
+    + '.page-' + target + '{display:block!important}';
+  // DOM ready 后移除注入规则（交给正常 switchTab 逻辑，避免后续冲突）
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('role-css').textContent = '';
+    // 同步切默认页（field 首帧正确）：默认创建房间
+    var target = 'create';
+    document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
+    var pg = document.getElementById('page-' + target);
+    if (pg) pg.classList.add('active');
+    var nav = document.querySelector('.nav-item[onclick="switchTab(\'' + target + '\')"]');
+    if (nav) nav.classList.add('active');
+  });
+})();
+</script>
+<div class="app">
+
+  <div class="header">
+    <div class="brand">
+      <div class="logo">AI</div>
+      <div>
+        <div class="title">云端 AI 远程运维助手</div>
+        <div class="sub">电脑问题远程诊断</div>
+      </div>
+    </div>
+    <div class="user-box">
+      <span class="user-tag"><span class="dot"></span><span id="user-name">未登录</span></span>
+      <button class="btn-sm" data-i18n="logout" onclick="doLogout()">退出登录</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="折叠/展开侧边栏">◀</div>
+      <nav id="sidebar-nav">
+        <!-- FIELD_HIDE_START --><div class="nav-item active" id="nav-home" onclick="switchTab('home')"><span data-i18n="nav_home">🏠 首页</span></div><!-- FIELD_HIDE_END -->
+        <div class="nav-item" id="nav-create" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
+        <div class="nav-item" id="nav-join" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
+        <div class="nav-item" id="nav-field-guide" onclick="openFieldGuideFromNav()"><span>📶 连接客户机</span></div>
+        <!-- FIELD_HIDE_START --><div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div><!-- FIELD_HIDE_END -->
+        <div class="nav-item admin-only" id="nav-download" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
+        <div class="nav-divider"></div>
+        <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('workorders')" id="nav-workorders"><span data-i18n="nav_workorders">📋 诊断记录</span></div><!-- FIELD_HIDE_END -->
+        <div class="nav-item" onclick="switchTab('tools-win')" id="nav-tools-win"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
+        <div class="nav-item" onclick="switchTab('idg')" id="nav-idg"><span>📊 IDG 日志分析</span></div>
+        <div class="nav-item" onclick="switchTab('tools-linux')" id="nav-tools-linux"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
+        <div class="nav-divider"></div>
+        <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('password')" id="nav-password"><span data-i18n="nav_password">🔒 修改密码</span></div>
+        <div class="nav-item" onclick="switchTab('feedback')" id="nav-feedback"><span data-i18n="nav_feedback">📝 反馈</span></div><!-- FIELD_HIDE_END -->
+        <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
+        <div class="nav-item admin-only" id="nav-ai" onclick="switchTab('ai')"><span>🤖 AI 模型配置</span></div>
+        <div class="nav-item admin-only" id="nav-admin" onclick="switchTab('admin')"><span data-i18n="nav_admin">🛠 管理后台</span></div>
+      </nav>
+      <script>
+      // 侧边栏折叠（记忆状态——2026-08-28）
+      function toggleSidebar() {
+        var sb = document.getElementById('sidebar');
+        var collapsed = sb.classList.toggle('collapsed');
+        localStorage.setItem('cab_sidebar', collapsed ? '1' : '0');
+        document.getElementById('sidebar-toggle').textContent = collapsed ? '▶' : '◀';
+      }
+      (function () {
+        if (localStorage.getItem('cab_sidebar') === '1') {
+          document.getElementById('sidebar').classList.add('collapsed');
+          document.getElementById('sidebar-toggle').textContent = '▶';
+        }
+      })();
+      // 页面描述默认隐藏（宁简勿繁——hover 显示）
+      document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.page-desc').forEach(function (el) {
+          el.title = el.textContent;   // 悬停可看
+          el.style.display = 'none';
+        });
+      });
+      // 角色同步裁剪（防"普通界面闪现"）：登录跳转带 ?role=，同步立即应用
+      (function () {
+        var urlRole = new URLSearchParams(location.search).get('role');
+        var r = urlRole;
+        if (!r) r = localStorage.getItem('cab_role');
+        if (!r) return;
+        localStorage.setItem('cab_role', r);
+        // 游客（guest）：仅 URL 明确 ?role=guest 时首帧置灰；localStorage 残留交给 loadMe 校准（防工程师误置灰）
+        if (r === 'guest') {
+          if (urlRole === 'guest') document.documentElement.classList.add('guest-mode');
+          // 游客自动进入 IDG 日志分析（默认页是首页，但 guest-mode 下被隐藏 → 空白）
+          document.addEventListener('DOMContentLoaded', function () {
+            switchTab('idg');
+          });
+          return;
+        }
+        if (r !== 'field') return;
+        ['nav-home', 'nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback', 'nav-idg'].forEach(function (id) {
+          var el = document.getElementById(id); if (el) el.style.display = 'none';
+        });
+        // 同步默认页（避免首页闪现）：DOM ready 后切——有记住的房间→连接引导，否则创建房间
+        document.addEventListener('DOMContentLoaded', function () {
+          // 强制清空创建表单（防浏览器 autofill 误填）
+          ['f-sn', 'f-ticket', 'f-model', 'f-join'].forEach(function (id) {
+            var el = document.getElementById(id); if (el) el.value = '';
+          });
+          // Chrome autofill 常在 load 后才填充——延迟再清一次（只清空，不干扰用户输入后的值）
+          window.addEventListener('load', function () {
+            setTimeout(function () {
+              ['f-sn', 'f-ticket', 'f-model', 'f-join'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el && el.value && el.getAttribute('data-user-typed') !== '1') el.value = '';
+              });
+            }, 400);
+          });
+          var target = 'create';
+          document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
+          document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.remove('active'); });
+          var pg = document.getElementById('page-' + target); if (pg) pg.classList.add('active');
+        });
+      })();
+      </script>
+      <div class="sidebar-footer" id="ver-display">v0.13.7</div>
+    </aside>
+
+    <main class="content">
+
+      <!-- 首页（默认页） -->
+      <!-- FIELD_HIDE_START --><section class="page active" id="page-home">
+        <div class="home-hero">
+          <div class="home-title">🤖 云端 AI 远程运维助手</div>
+          <div class="home-sub" data-i18n="home_sub">云端 AI 诊断 Windows / Linux 电脑问题 · 硬件工具全覆盖</div>
+        </div>
+
+        <div class="home-section">
+          <div class="home-section-title" data-i18n="home_howto">快速上手</div>
+          <div class="home-steps">
+            <div class="home-step"><span class="step-num">1</span><div><b data-i18n="home_step1_t">创建房间</b><div class="step-desc" data-i18n="home_step1_d">填写电脑 SN 与报修工单号，生成房间码</div></div></div>
+            <div class="home-step"><span class="step-num">2</span><div><b>获取连接</b><div class="step-desc">进入对话页点「📶 连接你的电脑」，复制一键命令或下载连接包（已预填房间码）</div></div></div>
+            <div class="home-step"><span class="step-num">3</span><div><b>客户机连接</b><div class="step-desc">客户机粘贴命令运行 / 双击连接包——自动完成连接，无需输入房间码</div></div></div>
+            <div class="home-step"><span class="step-num">4</span><div><b data-i18n="home_step4_t">诊断与处理</b><div class="step-desc">对话式 AI 诊断，或「Windows / Linux 工具」执行硬件诊断、日志收集、刷写激活</div></div></div>
+          </div>
+        </div>
+      </section><!-- FIELD_HIDE_END -->
+
+      <!-- 诊断记录 -->
+      <!-- FIELD_HIDE_START --><section class="page" id="page-workorders">
+        <div class="page-title"><span data-i18n="nav_workorders">诊断记录</span></div>
+        <div class="page-desc" data-i18n="wo_desc">当前账号处理过的诊断房间</div>
+        <div class="toolbar">
+          <input id="search-input" data-i18n-placeholder="search_ph" placeholder="按 SN / 工单号 / 型号 / 房间码搜索" oninput="renderRooms()">
+          <span class="count" id="room-count"></span>
+        </div>
+        <table>
+          <thead><tr>
+            <th data-i18n="th_room">房间码</th><th>SN</th><th data-i18n="th_model">型号</th><th data-i18n="th_ticket">工单号</th><th data-i18n="th_created">创建时间</th><th data-i18n="th_last">最后活动</th><th data-i18n="th_status">状态</th><th>有效期</th><th data-i18n="th_action">操作</th>
+          </tr></thead>
+          <tbody id="room-tbody"><tr><td colspan="9" class="empty" data-i18n="loading">加载中...</td></tr></tbody>
+        </table>
+      </section><!-- FIELD_HIDE_END -->
+
+      <!-- 对话（iframe 嵌入聊天页） -->
+      <section class="page" id="page-chat">
+        <div class="chat-head hidden" id="chat-head">
+          <span class="room-tag" id="chat-room-tag"></span>
+        </div>
+        <div class="chat-frame-wrap" id="chat-frame-wrap" style="display:none;">
+          <iframe id="chat-frame" src="" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals allow-top-navigation"></iframe>
+        </div>
+        <div class="chat-empty" id="chat-empty">
+          <div class="big">💬</div>
+          <div data-i18n="chat_empty1">尚未选择房间</div>
+          <div style="font-size:12px;" data-i18n="chat_empty2">在「诊断记录」里点「进入对话」，或创建/加入房间后自动打开</div>
+        </div>
+      </section>
+
+      <!-- 创建房间 -->
+      <section class="page" id="page-create">
+        <div class="page-title"><span data-i18n="nav_create">创建房间</span></div>
+        <div class="page-desc" data-i18n="create_desc">需绑定电脑 SN 与报修工单号，生成 8 位房间码用于桥接器配对</div>
+        <div class="panel">
+          <div class="msg-box" id="create-msg"></div>
+          <div class="field"><label data-i18n="lbl_sn">SN 序列号</label><input id="f-sn" autocomplete="off" name="no-autofill" readonly onfocus="this.removeAttribute('readonly')" data-i18n-placeholder="ph_sn" placeholder="如 PC204XF3"></div>
+          <div class="field"><label data-i18n="lbl_ticket">报修工单号</label><input id="f-ticket" autocomplete="off" name="no-autofill" readonly onfocus="this.removeAttribute('readonly')" data-i18n-placeholder="ph_ticket" placeholder="如 202608063200477002"></div>
+          <div class="field"><label data-i18n="lbl_model">机器型号（选填）</label><input id="f-model" autocomplete="off" name="no-autofill" readonly onfocus="this.removeAttribute('readonly')" data-i18n-placeholder="ph_model" placeholder="如 ThinkPad X1 Carbon"></div>
+          <div class="field"><label>客户机系统</label>
+            <select id="f-os">
+              <option value="windows">Windows</option>
+              <option value="linux">Linux</option>
+            </select>
+          </div>
+          <div class="field"><label>有效期</label><select id="f-validity" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;"><option value="30" selected>30 天</option><option value="15">15 天</option><option value="7">7 天</option><option value="0">永久</option></select><div style="font-size:12px;color:var(--text2);margin-top:4px;">过期后房间只读（历史保留），管理员可见全部记录</div></div>
+          <button class="btn-main" id="create-btn" data-i18n="btn_create" onclick="createRoom()">创建房间</button>
+        </div>
+      </section>
+
+      <!-- 加入房间 -->
+      <section class="page" id="page-join">
+        <div class="page-title"><span data-i18n="nav_join">加入房间</span></div>
+        <div class="page-desc" data-i18n="join_desc">输入 8 位房间码，进入已有诊断会话</div>
+        <div class="panel">
+          <div class="field"><label data-i18n="lbl_room_code">房间码</label><input id="f-join" autocomplete="off" name="no-autofill" readonly onfocus="this.removeAttribute('readonly')" maxlength="8" data-i18n-placeholder="ph_room_code" placeholder="如 AB12CDEF" style="text-transform:uppercase;letter-spacing:3px;font-size:18px;"></div>
+          <button class="btn-main btn-green" data-i18n="btn_join" onclick="joinRoom()">进入对话</button>
+        </div>
+      </section>
+
+      <section class="page" id="page-download">
+        <div class="page-title"><span data-i18n="nav_download">下载桥接器</span></div>
+        <div class="page-desc" data-i18n="dl_desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
+        <div style="margin:8px 0 14px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--info);border-radius:6px;font-size:13px;color:var(--info);">💡 创建房间后可在「诊断记录 → 📶 连接」或对话页获取<b>房间专属一键连接</b>（预填房间码，无需再输入）</div>
+        <div class="dl-steps">
+          <span class="s"><span class="num">1</span><span data-i18n="dl_step1">安装桥接器</span></span>
+          <span class="arrow">→</span>
+          <span class="s"><span class="num">2</span><span data-i18n="dl_step2">输入房间码</span></span>
+          <span class="arrow">→</span>
+          <span class="s"><span class="num">3</span><span data-i18n="dl_step3">对话诊断</span></span>
+        </div>
+        <div class="dl-grid">
+          <div class="dl-card">
+            <div class="dl-card-head">
+              <div class="dl-card-icon">🪟</div>
+              <div class="dl-card-title" data-i18n="dl_card_win_t">Windows 客户端 (.exe)</div>
+              <span class="badge badge-rec" data-i18n="dl_recommend">推荐</span>
+            </div>
+            <div class="dl-card-desc" data-i18n="dl_card_win_desc">下载后双击运行，输入 8 位房间码即连接。主力方案，最省心。</div>
+            <div class="dl-card-actions">
+              <a class="dl-btn" href="/static/clouddiag-bridge-win64.exe" download data-i18n="dl_card_win_btn">⬇ 下载 clouddiag-bridge-win64.exe (4.8MB)</a>
+              <div class="dl-card-note" data-i18n="dl_card_win_note">双击自动请求管理员权限（UAC 弹窗点「是」即可）</div>
+            </div>
+          </div>
+          <div class="dl-card">
+            <div class="dl-card-head">
+              <div class="dl-card-icon">⚡</div>
+              <div class="dl-card-title" data-i18n="dl_card_ps_t">Windows 命令版（免安装）</div>
+            </div>
+            <div class="dl-card-desc" data-i18n="dl_card_ps_desc">管理员 PowerShell 粘贴一行命令即连接。不下载文件、不落盘，杀毒软件友好。</div>
+            <div class="dl-card-actions">
+              <div class="dl-cmd-block"><span class="dl-cmd-text">iex (New-Object Net.WebClient).DownloadString("{{PUBLIC_URL}}/static/bridge.ps1")</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+              <details class="dl-more">
+                <summary data-i18n="dl_more_steps">查看详细步骤</summary>
+                <div class="dl-guide">
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">1</span><span data-i18n="dl_ps_step1_t">打开管理员 PowerShell</span></div>
+                    <div data-i18n="dl_ps_step1_d">在客户机上右键「开始」菜单 → 选择「Windows PowerShell (管理员)」</div>
+                  </div>
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">2</span><span data-i18n="dl_ps_step2_t">粘贴命令</span></div>
+                    <div data-i18n="dl_ps_step2_d">回车后按提示输入 8 位房间码</div>
+                    <div class="dl-step-note" data-i18n="dl_ps_step2_note">免交互（把 ABC12345 换成你的房间码）：<span class="dl-cmd-text">$env:BRIDGE_ROOM = "ABC12345"; iex (New-Object Net.WebClient).DownloadString("{{PUBLIC_URL}}/static/bridge.ps1")</span></div>
+                  </div>
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">3</span><span data-i18n="dl_ps_step3_t">完成配对</span></div>
+                    <div data-i18n="dl_ps_step3_d">看到绿色 Connected 即连接成功，保持窗口开启即可远程诊断</div>
+                  </div>
+                </div>
+                <div class="dl-step-note" data-i18n="dl_ps_foot2">如提示脚本被系统拦截，可改为下载后运行：<span class="dl-cmd-text">powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345</span></div>
+              </details>
+            </div>
+          </div>
+          <div class="dl-card">
+            <div class="dl-card-head">
+              <div class="dl-card-icon">🐧</div>
+              <div class="dl-card-title" data-i18n="dl_card_linux_t">Linux 客户端</div>
+            </div>
+            <div class="dl-card-desc" data-i18n="dl_card_linux_desc">Ubuntu / UOS / KOS / 麒麟 / 龙芯等发行版通用，一条命令安装。</div>
+            <div class="dl-card-actions">
+              <a class="dl-btn" href="/static/clouddiag-bridge-linux-amd64" download data-i18n="dl_card_linux_btn">⬇ 下载 x86_64 桥接器</a>
+              <div class="dl-cmd-block"><span class="dl-cmd-text">curl -sL {{PUBLIC_URL}}/static/install-linux.sh | bash</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+              <div class="dl-card-note" data-i18n="dl_card_linux_note">仅支持 x86_64 架构；ARM64 / 龙芯版本制作中</div>
+              <details class="dl-more">
+                <summary data-i18n="dl_linux_more">查看安装说明</summary>
+                <div class="dl-guide">
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">1</span><span data-i18n="dl_linux_way1_t">方式一：一键安装（推荐）</span></div>
+                    <div data-i18n="dl_linux_way1_d">在客户机终端粘贴上面命令回车——自动检测架构、下载对应版本、安装到 /usr/local/bin/bridge，然后按提示输入 8 位房间码启动。需要 root 权限（自动用 sudo）。</div>
+                  </div>
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">2</span><span data-i18n="dl_linux_way2_t">方式二：手动安装（已下载二进制）</span></div>
+                    <div data-i18n="dl_linux_way2_d">① 给执行权限：</div>
+                    <div class="dl-cmd-block"><span class="dl-cmd-text">chmod +x clouddiag-bridge-linux-amd64</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+                    <div data-i18n="dl_linux_way2_d2">② 放入系统目录（任意目录也可，这里以 /usr/local/bin 为例）：</div>
+                    <div class="dl-cmd-block"><span class="dl-cmd-text">sudo mv clouddiag-bridge-linux-amd64 /usr/local/bin/bridge</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+                    <div data-i18n="dl_linux_way2_d3">③ 启动（把 ABC12345 换成你的房间码）：</div>
+                    <div class="dl-cmd-block"><span class="dl-cmd-text">bridge -server {{WS_URL}} -room ABC12345</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+                  </div>
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">3</span><span data-i18n="dl_linux_way3_t">完成配对</span></div>
+                    <div data-i18n="dl_linux_way3_d">看到 Connected 即连接成功，保持终端开启即可远程诊断。重启电脑后需重新启动桥接器（一次性使用，不驻留后台）。</div>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+        <div class="panel dl-facts">
+          <div data-i18n="dl_facts_cap">🔧 桥接器能力：AI 远程诊断（系统信息 / 事件日志 / 驱动 / BIOS）· 远程命令 · 文件传输 · 断线自动重连</div>
+          <div data-i18n="dl_facts_sec">🛡 安全机制：只读诊断自动执行；修改 / 危险操作需在对话页人工审批</div>
+        </div>
+      </section>
+
+      <!-- 下载桥接器 -->
+
+      <!-- 上门工程师连接引导（field 专属） -->
+      <section class="page" id="page-field-guide">
+        <div class="page-title">📶 连接客户机</div>
+        <div class="page-desc">创建或加入房间后，在此引导客户机连接服务器；客户机上线后按系统平台使用对应工具</div>
+        <div class="field-card" style="margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;">
+          <div class="field" style="margin-bottom:10px;">
+            <label>当前房间</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="field-guide-room" value="" readonly style="flex:1;font-weight:600;font-size:16px;">
+              <button class="btn-ghost" onclick="openFieldGuide(document.getElementById('field-guide-room').value)">刷新</button>
+            </div>
+          </div>
+          <div id="field-guide-info" class="tip" style="margin:6px 0 12px;"></div>
+          <div class="field" style="margin-bottom:10px;">
+            <label>客户机系统（已连接自动识别，可手动切换）</label>
+            <select id="field-guide-os" onchange="fieldGuideOsChange()">
+              <option value="windows">Windows</option>
+              <option value="linux">Linux</option>
+            </select>
+          </div>
+          <div id="field-guide-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn-main" id="field-guide-copy" onclick="fieldGuideCopy()">📋 复制一键命令</button>
+            <button class="btn-main" id="field-guide-bat" onclick="fieldGuideBat()">⬇ 下载连接包</button>
+          </div>
+          <div id="field-guide-os-tip" style="margin-top:8px;font-size:12px;color:var(--text2);">复制的是 <b id="field-guide-os-label">Windows PowerShell</b> 命令——粘贴到客户机终端运行即可连接</div>
+          <div id="field-guide-status" style="margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(0,0,0,0.15);font-size:13px;line-height:1.8;">
+            客户机状态: <b id="field-guide-bridge">--</b>
+          </div>
+          <div id="field-guide-tools" style="margin-top:10px;display:none;padding-top:10px;border-top:1px solid var(--border);">
+            <div style="font-size:13px;margin-bottom:8px;">客户机已上线——使用工具：</div>
+            <button class="btn-main" id="field-guide-tool-btn" onclick="">🛠 打开工具</button>
+          </div>
+        </div>
+        <div class="tip" style="margin-top:10px;">💡 提示：连接引导会记住当前房间，刷新页面自动恢复；连接包含 443→8443 自动降级，网络被拦截也能连。</div>
+      </section>
+
+      <!-- Windows 工具（非 AI 工具集合） -->
+      <section class="page" id="page-idg">
+        <div style="flex:1;min-height:0;overflow:hidden;">
+          <iframe id="idg-frame" src="/log-analyzer/" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"></iframe>
+        </div>
+      </section>
+
+      <!-- 管理后台：内嵌 iframe（2026-08-30——不再跳转新页面——与整体协调） -->
+      <section class="page" id="page-admin" style="margin:-24px -28px;padding:0;">
+        <div style="flex:1;min-height:0;overflow:hidden;">
+          <iframe src="/admin" style="width:100%;height:100%;border:none;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
+        </div>
+      </section>
+
+      <section class="page" id="page-tools-win">
+        <div class="page-title"><span data-i18n="nav_tools_win">Windows 工具</span></div>
+        <div class="page-desc" data-i18n="tools_win_desc">Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行</div>
+
+        <div class="tool-grid">
+
+          <div class="tool-card" id="card-winlogs">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">📋</div>
+              <div class="tool-card-title">Windows 系统日志</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">导出系统/应用程序/安全事件日志（.evtx）到客户机本地 C:\DiagLogs\日期\logs\——数据不经过云端，只显示清单</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-winlogs')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="winlogs-msg"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="winlogs-room" onchange="winlogsClear()"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="winlogs-btn" onclick="winlogsFetch()">📋 收集系统日志（.evtx）</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-dump">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">💥</div>
+              <div class="tool-card-title">Dump / Minidump 收集</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">收集蓝屏转储文件（Minidump + MEMORY.DMP）到客户机本地 C:\DiagLogs\日期\dump\——数据不经过云端，只显示清单</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-dump')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="dump-msg"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="dump-room" onchange="dumpClear()"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="dump-btn" onclick="dumpFetch()">💥 收集蓝屏 Dump</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-dumpanalyze">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">💥</div>
+              <div class="tool-card-title">蓝屏 / Dump 分析</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">分析蓝屏崩溃：事件日志信号 + dump 解析（停止码/参数）+ WinDbg 深度定位——支持<b>指定路径</b>分析拷来的 dump 并关联对应时间的 Windows 事件日志</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-dumpanalyze')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="dumpanalyze-msg"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="dumpanalyze-room" onchange="dumpAnalyzeClear()"></select>
+              </div>
+              <div class="field">
+                <label>指定路径（可选——分析指定位置的 dump 文件（目录或 .dmp）并关联对应时间的 Windows 事件日志；留空=分析本机默认 Minidump + MEMORY.DMP）</label>
+                <input id="dumpanalyze-path" placeholder="如 D:\dumps 或 D:\dumps\xxx.dmp；留空使用本机默认路径">
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="dumpanalyze-btn" onclick="dumpAnalyzeFetch()">💥 分析蓝屏 / Dump</button>
+              </div>
+              <div id="dumpanalyze-result" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('dumpanalyze-win', document.getElementById('dumpanalyze-room').value)">📄 查看分析报告</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-raid">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🛡</div>
+              <div class="tool-card-title">RAID 信息（VROC / RSTe / Broadcom）</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">抓取 RAID 控制器信息（Intel VROC / Intel RSTe / Broadcom-LSI 三件套）——自动分发工具到客户机执行</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-raid')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="raid-msg"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="raid-room" onchange="raidClear()"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="raid-btn" onclick="raidFetch()">🛡 抓取 RAID 信息</button>
+              </div>
+              <div id="raid-result" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('raid-win', document.getElementById('raid-room').value)">📄 查看 RAID 信息</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-smart-win">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">💽</div>
+              <div class="tool-card-title">硬盘健康检测（SMART）</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">读取硬盘 SMART 健康数据（温度/重映射坏道/通电时长/SSD 磨损）——自动分发 smartctl 工具到客户机执行</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-smart-win')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="smart-msg-win"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="smart-room-win" onchange="smartClear('win')"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="smart-btn-win" onclick="smartFetch('win')">🔍 检测硬盘健康</button>
+              </div>
+              <div id="smart-result-win" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('smart-win', document.getElementById('smart-room-win').value)">📄 查看 SMART 信息</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-sio-win">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🔧</div>
+              <div class="tool-card-title">SIO Log 硬件诊断日志</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">抓取 SIO EEPROM 硬件事件日志（温度/电压/异常记录，共 124 条）——自动下载 HWDiag 工具到客户机并执行，日志可查看/下载</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-sio-win')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="sio-msg-win"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="sio-room-win" onchange="sioClear('win')"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="sio-btn-win" onclick="sioFetch('win')">🔍 抓取 SIO Log</button>
+              </div>
+              <div id="sio-result-win" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('sio-win', document.getElementById('sio-room-win').value)">📄 查看 SIO Log</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-tslog">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">📦</div>
+              <div class="tool-card-title">ThinkStation 日志采集</div>
+              <span class="badge badge-read">采集 · 数据留本地</span>
+            </div>
+            <div class="tool-card-desc">一键采集 ThinkStation 全套日志（软件/BIOS/systeminfo/系统日志/dump/进程/硬件/RAID/SMART/显卡/DirectX 共 20+ 项）——7z 打包到客户机本地，服务器只返回包路径与大小（数据不上云）</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-tslog')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="tslog-msg"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="tslog-room" onchange="tslogClear()"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="tslog-btn" onclick="tslogFetch(false)">📦 打包到本地</button>
+                <button class="btn-main btn-green" id="tslog-upload-btn" onclick="tslogFetch(true)">📤 打包并上传到 IDG</button>
+              </div>
+              <div id="tslog-result" style="display:none;"></div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-sntm">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">💾</div>
+              <div class="tool-card-title">SN/MTM 刷写</div>
+              <span class="badge badge-write" data-i18n="tools_write">写入类 · 需审批</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="snmtm_desc">ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-sntm')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="sntm-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room">目标房间（需桥接器在线）</label>
+                <select id="sntm-room" onchange="sntmRefreshRoom()"></select>
+              </div>
+              <div class="field">
+                <label data-i18n="lbl_tool_model">机型型号</label>
+                <select id="sntm-model"></select>
+                <div class="field-hint" id="sntm-route-hint"></div>
+              </div>
+              <div class="field"><label data-i18n="lbl_tool_sn">序列号 SN</label><input id="sntm-sn" maxlength="32" data-i18n-placeholder="ph_tool_sn" placeholder="如 PC22XGDR"></div>
+              <div class="field"><label data-i18n="lbl_tool_mtm">机型型号 MTM</label><input id="sntm-mtm" maxlength="32" data-i18n-placeholder="ph_tool_mtm" placeholder="如 30E1S5NV00"></div>
+              <div class="tool-warn" data-i18n="snmtm_warn">⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写</div>
+              <div class="tool-card-actions">
+                <button class="btn-main btn-danger" id="sntm-btn" data-i18n="btn_snmtm_flash" onclick="snmtmFlash()">✍️ 刷写 SN/MTM</button>
+              </div>
+              <div class="tool-steps" id="sntm-steps" style="display:none;"></div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-oa3">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🔑</div>
+              <div class="tool-card-title">OA3 密钥读取 / 激活</div>
+              <span class="badge badge-read" data-i18n="tools_read">只读 + 写入</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="oa3_desc">读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-oa3')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="oa3-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room2">目标房间（需桥接器在线）</label>
+                <select id="oa3-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="oa3-read-btn" data-i18n="btn_oa3_read" onclick="oa3Read()">🔍 读取 OA3 密钥</button>
+              </div>
+              <div class="oa3-result" id="oa3-result" style="display:none;">
+                <div class="oa3-key-row">
+                  <span class="oa3-label" data-i18n="oa3_key">主板 OA3 密钥:</span>
+                  <span class="oa3-key mono" id="oa3-key"></span>
+                  <button class="btn-sm" data-i18n="copy" onclick="copyOa3Key()">复制</button>
+                </div>
+                <div class="oa3-meta" id="oa3-meta"></div>
+                <div class="tool-warn" data-i18n="oa3_activate_warn">⚠ 激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配</div>
+                <div class="tool-card-actions">
+                  <button class="btn-main btn-danger" id="oa3-act-btn" data-i18n="btn_oa3_activate" onclick="oa3Activate()">⚡ 导入密钥并激活系统</button>
+                </div>
+              </div>
+              <div class="tool-steps" id="oa3-steps" style="display:none;"></div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-bios">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🖥</div>
+              <div class="tool-card-title">BIOS 信息读取</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="bios_desc">通过联想 WMI 接口（Lenovo_BiosSetting）读取当前机器 BIOS 全量配置——不重启、不改设置，纯采集</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-bios')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="bios-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room3">目标房间（需桥接器在线）</label>
+                <select id="bios-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="bios-btn" data-i18n="btn_bios_read" onclick="biosRead()">🖥 读取 BIOS 配置</button>
+              </div>
+              <div id="bios-result" style="display:none;">
+                <div class="bios-info" id="bios-info"></div>
+                <div class="tool-card-actions">
+                  <button class="btn-main" id="bios-view-btn" onclick="openBiosModal()">📄 <span data-i18n="bios_view_all">查看全部设置</span> (<span id="bios-count2">0</span>)</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-sleep">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">😴</div>
+              <div class="tool-card-title">睡眠报告</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="sleep_desc">用 powercfg /sleepstudy 生成最近 28 天的睡眠质量报告（HTML）——排查睡眠唤醒异常、耗电、休眠失败等问题</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-sleep')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="sleep-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room4">目标房间（需桥接器在线）</label>
+                <select id="sleep-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="sleep-btn" data-i18n="btn_sleep_run" onclick="sleepStudyRun()">😴 生成睡眠报告（28天）</button>
+              </div>
+              <div id="sleep-result" style="display:none;">
+                <div class="tool-warn" data-i18n="sleep_admin_hint">🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）</div>
+                <div class="tool-card-actions">
+                  <a class="btn-main" id="sleep-dl" href="#" download data-i18n="sleep_download">📥 下载睡眠报告 (.html)</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-energy">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">⚡</div>
+              <div class="tool-card-title">能源效率报告</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="energy_desc">用 powercfg /energy 采集 60 秒生成系统能源效率与电源设置诊断报告（HTML）——发现潜在的耗电问题</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-energy')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="energy-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room5">目标房间（需桥接器在线）</label>
+                <select id="energy-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="energy-btn" data-i18n="btn_energy_run" onclick="energyRun()">⚡ 生成能源报告（60秒）</button>
+              </div>
+              <div id="energy-result" style="display:none;">
+                <div class="tool-warn" data-i18n="energy_admin_hint">🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）</div>
+                <div class="tool-card-actions">
+                  <a class="btn-main" id="energy-dl" href="#" download data-i18n="energy_download">📥 下载能源报告 (.html)</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-drivers">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🖱</div>
+              <div class="tool-card-title">驱动版本信息</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="drivers_desc">读取系统已安装驱动的 DeviceName / Manufacturer / DriverVersion——核对驱动版本、排查驱动过期或不匹配</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-drivers')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="drivers-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room6">目标房间（需桥接器在线）</label>
+                <select id="drivers-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="drivers-btn" data-i18n="btn_drivers_list" onclick="driversList()">🖱 读取驱动版本</button>
+              </div>
+              <div id="drivers-result" style="display:none;">
+                <div class="bios-info" id="drivers-summary"></div>
+                <div class="tool-card-actions">
+                  <button class="btn-main" id="drivers-view-btn" onclick="openDriversModal()">📄 <span data-i18n="drivers_view_all">查看全部驱动</span> (<span id="drivers-count2">0</span>)</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Linux 工具 -->
+      <section class="page" id="page-tools-linux">
+        <div class="page-title"><span data-i18n="nav_tools_linux">Linux 工具</span></div>
+        <div class="page-desc" data-i18n="tools_linux_desc">Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行</div>
+
+        <div class="tool-grid">
+
+          <div class="tool-card" id="card-smart-linux">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">💽</div>
+              <div class="tool-card-title">硬盘健康检测（SMART）</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">读取硬盘 SMART 健康数据（温度/重映射坏道/通电时长/SSD 磨损）——自动安装 smartmontools 后执行</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-smart-linux')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="smart-msg-linux"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线）</label>
+                <select id="smart-room-linux" onchange="smartClear('linux')"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="smart-btn-linux" onclick="smartFetch('linux')">🔍 检测硬盘健康</button>
+              </div>
+              <div id="smart-result-linux" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('smart-linux', document.getElementById('smart-room-linux').value)">📄 查看 SMART 信息</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-sio-linux">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">🔧</div>
+              <div class="tool-card-title">SIO Log 硬件诊断日志</div>
+              <span class="badge badge-read">只读</span>
+            </div>
+            <div class="tool-card-desc">抓取 SIO EEPROM 硬件事件日志（温度/电压/异常记录，共 124 条）——自动下载 HWDiag Linux 版到客户机（root 执行），日志可查看/下载</div>
+            <button class="btn-sm tool-card-open" onclick="toggleTool('card-sio-linux')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="sio-msg-linux"></div>
+              <div class="field">
+                <label>目标房间（需桥接器在线，Linux 平台）</label>
+                <select id="sio-room-linux" onchange="sioClear('linux')"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="sio-btn-linux" onclick="sioFetch('linux')">🔍 抓取 SIO Log</button>
+              </div>
+              <div id="sio-result-linux" style="display:none;">
+                <div class="tool-card-actions">
+                  <button class="btn-main" onclick="openLogModal('sio-linux', document.getElementById('sio-room-linux').value)">📄 查看 SIO Log</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tool-card" id="card-linux-logpack">
+            <div class="tool-card-head">
+              <div class="tool-card-icon">📦</div>
+              <div class="tool-card-title">打包系统日志</div>
+              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+            </div>
+            <div class="tool-card-desc" data-i18n="linux_logpack_desc">将 /var/log 日志打包为 tar.gz 保存到客户机桌面，文件名以机器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查时快速收集日志</div>
+            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-linux-logpack')">▶ 打开工具</button>
+            <div class="tool-card-body">
+              <div class="msg-box" id="linux-logpack-msg"></div>
+              <div class="field">
+                <label data-i18n="lbl_tool_room_linux">目标房间（需 Linux 桥接器在线）</label>
+                <select id="linux-logpack-room"></select>
+              </div>
+              <div class="tool-card-actions">
+                <button class="btn-main" id="linux-logpack-btn" data-i18n="btn_linux_logpack" onclick="linuxLogPack(false)">📦 打包到本地</button>
+                <button class="btn-main btn-green" id="linux-logpack-upload-btn" onclick="linuxLogPack(true)">📤 打包并上传到 IDG</button>
+              </div>
+              <div id="linux-logpack-result" style="display:none;">
+                <div class="bios-info" id="linux-logpack-info"></div>
+                <div class="tool-warn" data-i18n="linux_logpack_tip">💡 压缩包已保存到客户机桌面，可直接拷贝/发送；如需服务器下载请告知</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 修改密码 -->
+      <!-- FIELD_HIDE_START --><section class="page" id="page-password">
+        <div class="page-title"><span data-i18n="nav_password">修改密码</span></div>
+        <div class="page-desc" data-i18n="pwd_desc">定期修改密码保护账号安全</div>
+        <div class="panel">
+          <div class="msg-box" id="pwd-msg"></div>
+          <div class="field"><label data-i18n="lbl_old">旧密码</label><input id="p-old" type="password"></div>
+          <div class="field"><label data-i18n="lbl_new">新密码（至少 4 位）</label><input id="p-new" type="password"></div>
+          <div class="field"><label data-i18n="lbl_confirm">确认新密码</label><input id="p-new2" type="password"></div>
+          <button class="btn-main" data-i18n="btn_change" onclick="changePwd()">确认修改</button>
+        </div>
+      </section><!-- FIELD_HIDE_END -->
+
+      <!-- 账号管理（仅管理员） -->
+      <section class="page" id="page-users">
+        <div class="page-title"><span data-i18n="nav_users">账号管理</span></div>
+        <div class="page-desc" data-i18n="users_desc">创建工程师账号、停用/启用、重置密码</div>
+        <div class="toolbar">
+          <button class="btn-main" data-i18n="btn_new_user" onclick="showCreateUser()">+ 新建账号</button>
+          <span class="count" id="user-count"></span>
+        </div>
+        <div class="panel" id="create-user-panel" style="display:none;margin-bottom:16px;">
+          <div class="msg-box" id="user-msg"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;">
+            <div class="field"><label data-i18n="lbl_username">工号</label><input id="u-username" data-i18n-placeholder="ph_username" placeholder="如 E10086"></div>
+            <div class="field"><label data-i18n="lbl_name">姓名</label><input id="u-name" data-i18n-placeholder="ph_name" placeholder="如 张三"></div>
+            <div class="field"><label data-i18n="lbl_role">角色</label>
+              <select id="u-role"><option value="engineer" data-i18n="role_engineer">工程师</option><option value="admin" data-i18n="role_admin">管理员</option></select>
+            </div>
+            <div class="field"><label data-i18n="lbl_init_pwd">初始密码</label><input id="u-password" data-i18n-placeholder="ph_init_pwd" placeholder="至少 4 位"></div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn-main" data-i18n="btn_create_user" onclick="createUser()">创建账号</button>
+            <button class="btn-ghost" data-i18n="btn_cancel" onclick="document.getElementById('create-user-panel').style.display='none'">取消</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th data-i18n="th_id">ID</th><th data-i18n="th_username">工号</th><th data-i18n="lbl_name">姓名</th><th data-i18n="lbl_role">角色</th><th data-i18n="th_status">状态</th><th data-i18n="th_created">创建时间</th><th data-i18n="th_action">操作</th></tr></thead>
+          <tbody id="user-tbody"><tr><td colspan="7" class="empty" data-i18n="loading">加载中...</td></tr></tbody>
+        </table>
+      </section>
+
+      <!-- 反馈 -->
+      <!-- FIELD_HIDE_START --><section class="page" id="page-feedback">
+        <div class="page-title"><span data-i18n="nav_feedback">反馈</span></div>
+        <div class="page-desc" data-i18n="fb_desc">把测试中发现的问题或建议告诉我们</div>
+        <div class="panel">
+          <div class="msg-box" id="fb-msg"></div>
+          <textarea id="fb-content" rows="5" data-i18n-placeholder="fb_placeholder" placeholder="请描述您遇到的问题或建议…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:12px;"></textarea>
+          <button class="btn-main" data-i18n="fb_submit" onclick="submitFeedback()">提交反馈</button>
+        </div>
+        <div class="panel">
+          <div style="font-weight:600;margin-bottom:10px;" data-i18n="fb_history">我的反馈记录</div>
+          <div id="fb-history" style="font-size:13px;color:var(--text2);"></div>
+        </div>
+      </section><!-- FIELD_HIDE_END -->
+
+      <!-- 🤖 AI 模型配置(admin) -->
+      <section class="page" id="page-ai">
+        <div class="page-title">🤖 AI 模型配置</div>
+        <div class="page-desc">管理 IDG AI 分析/深度分析的模型 API——多套配置可保存、测试、一键切换生效</div>
+        <div class="toolbar">
+          <button class="btn-main" onclick="aiOpenForm()">➕ 新增配置</button>
+          <span class="count" id="ai-count"></span>
+        </div>
+        <div class="panel" id="ai-form-panel" style="display:none;margin-bottom:16px;">
+          <div style="font-weight:600;margin-bottom:14px;" id="ai-form-title">新增模型配置</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="field"><label>模型提供者(名称)*</label><input id="ai-name" placeholder="如:New-API 中转站 / 商汤 SenseNova"></div>
+            <div class="field"><label>模型调用链接(Base URL)*</label><input id="ai-base-url" placeholder="https://xxx/v1"></div>
+            <div class="field"><label>模型 API Key*</label><input id="ai-key" type="password" placeholder="sk-..."></div>
+            <div class="field"><label>模型识别名(Model)*</label><input id="ai-model" placeholder="deepseek-v4-flash"></div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn-main" onclick="aiSave()">保存</button>
+            <button class="btn-ghost" onclick="aiCancelForm()">取消</button>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>提供者</th><th>调用链接</th><th>模型</th><th>API Key</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="ai-tbody"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody>
+        </table>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- 历史记录模态框 -->
+<div class="modal-overlay" id="history-modal">
+  <div class="modal-lg">
+    <div class="modal-head">
+      <h3 id="history-title">历史对话记录</h3>
+      <button class="btn-sm" onclick="closeHistory()" data-i18n="close">关闭</button>
+    </div>
+    <div class="history-body" id="history-body"><div class="empty">加载中...</div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- BIOS 设置弹窗：查看全部设置项 + 搜索 + 复制 + 下载 -->
+<div class="modal-overlay" id="bios-modal">
+  <div class="modal-lg modal-lg-wide">
+    <div class="modal-head">
+      <div class="modal-title">🖥 <span data-i18n="bios_modal_title">BIOS 设置项（全量）</span></div>
+      <button class="modal-close" onclick="closeBiosModal()">✕</button>
+    </div>
+    <div class="history-body" style="display:flex; flex-direction:column;">
+      <div class="toolbar" style="margin-bottom:10px; flex-shrink:0;">
+        <input id="bios-search" data-i18n-placeholder="bios_search_ph" placeholder="搜索设置项（如 WakeOnLAN）" oninput="renderBiosItems()">
+        <span class="count" id="bios-count"></span>
+        <button class="btn-sm" onclick="copyBiosItems()" data-i18n="copy">复制全部</button>
+        <button class="btn-sm" onclick="downloadBiosTxt()" data-i18n="bios_download">下载 .txt</button>
+      </div>
+      <div style="flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px;">
+        <table style="margin:0;">
+          <thead><tr><th data-i18n="bios_th_item">设置项</th><th data-i18n="bios_th_value">当前值</th></tr></thead>
+          <tbody id="bios-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 通用日志查看弹窗（SIO Log / SMART 等纯文本结果） -->
+<div class="modal-overlay" id="log-modal">
+  <div class="modal-lg modal-lg-wide">
+    <div class="modal-head">
+      <div class="modal-title" id="log-modal-title">📄 查看日志</div>
+      <button class="modal-close" onclick="closeLogModal()">✕</button>
+    </div>
+    <div class="history-body" style="display:flex; flex-direction:column;">
+      <div class="toolbar" style="margin-bottom:10px; flex-shrink:0;">
+        <button class="btn-sm" onclick="copyLogText()">📋 复制全部</button>
+        <button class="btn-sm" onclick="downloadLogTxt()">💾 下载 .txt</button>
+      </div>
+      <div style="flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--bg);">
+        <pre id="log-modal-content" style="margin:0; padding:12px; font-size:12px; white-space:pre-wrap; word-break:break-all;"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 驱动版本弹窗：查看全部驱动 + 搜索 + 复制 + 下载 -->
+<div class="modal-overlay" id="drivers-modal">
+  <div class="modal-lg modal-lg-wide">
+    <div class="modal-head">
+      <div class="modal-title">🖱 <span data-i18n="drivers_modal_title">驱动版本信息（全量）</span></div>
+      <button class="modal-close" onclick="closeDriversModal()">✕</button>
+    </div>
+    <div class="history-body" style="display:flex; flex-direction:column;">
+      <div class="toolbar" style="margin-bottom:10px; flex-shrink:0;">
+        <input id="drivers-search" data-i18n-placeholder="drivers_search_ph" placeholder="搜索驱动（如 GPU / 网卡）" oninput="renderDriversItems()">
+        <span class="count" id="drivers-count"></span>
+        <button class="btn-sm" onclick="copyDriversText()" data-i18n="copy">复制全部</button>
+        <button class="btn-sm" onclick="downloadDriversTxt()" data-i18n="bios_download">下载 .txt</button>
+      </div>
+      <div style="flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px;">
+        <table style="margin:0;">
+          <thead><tr><th data-i18n="drivers_th_name">设备名</th><th data-i18n="drivers_th_manu">厂商</th><th data-i18n="drivers_th_ver">驱动版本</th></tr></thead>
+          <tbody id="drivers-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const I18N = {
+  'zh-CN': {
+    nav_workorders: '📋 诊断记录', nav_chat: '💬 对话', nav_create: '➕ 创建房间', nav_join: '⇄ 加入房间',
+    nav_download: '📦 下载桥接器', nav_password: '🔒 修改密码', nav_users: '👥 账号管理', nav_admin: '🛠 管理后台', nav_feedback: '📝 反馈',
+    fb_desc: '把测试中发现的问题或建议告诉我们', fb_placeholder: '请描述您遇到的问题或建议（如：诊断结果不准确、页面报错、希望增加的功能…）', fb_submit: '提交反馈', fb_success: '反馈已提交，感谢您的建议！', fb_need: '请填写反馈内容', fb_empty: '暂无反馈记录', fb_history: '我的反馈记录',
+    nav_home: '🏠 首页',
+    home_sub: '云端 AI 诊断 Windows / Linux 电脑问题 · 硬件工具全覆盖',
+    home_howto: '快速上手',
+    home_step1_t: '创建房间', home_step1_d: '填写电脑 SN 与报修工单号，生成 8 位房间码',
+    home_step2_t: '获取连接', home_step2_d: '进入对话页点「📶 连接你的电脑」，复制一键命令或下载连接包',
+    home_step3_t: '客户机连接', home_step3_d: '粘贴命令运行 / 双击连接包，自动连接当前房间',
+    home_step4_t: '诊断与处理', home_step4_d: '对话式 AI 诊断，或工具页执行硬件诊断、日志收集、刷写激活',
+    tools_desc: '无需 AI 对话的本地工具集合，通过桥接器远程推送到客户机执行',
+    btn_open_tool: '打开工具', btn_close_tool: '收起',
+    nav_tools_win: '🪟 Windows 工具', nav_tools_linux: '🐧 Linux 工具',
+    tools_win_desc: 'Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行',
+    tools_linux_desc: 'Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行',
+    lbl_tool_room_linux: '目标房间（需 Linux 桥接器在线）',
+    btn_linux_logpack: '📦 打包日志到桌面',
+    linux_logpack_desc: '将 /var/log 日志打包为 tar.gz 保存到客户机桌面，文件名以机器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查时快速收集日志',
+    linux_logpack_running: '正在打包 /var/log 日志（视日志大小可能需要 1-3 分钟）...',
+    linux_logpack_done: '日志打包完成',
+    linux_logpack_file: '压缩包路径: ',
+    linux_logpack_empty: '未获取到打包结果',
+    linux_logpack_tip: '💡 压缩包已保存到客户机桌面，可直接拷贝/发送；如需服务器下载请告知',
+    tools_write: '写入类 · 需审批',
+    snmtm_desc: 'ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区',
+    lbl_tool_room: '目标房间（需桥接器在线）', lbl_tool_model: '机型型号',
+    lbl_tool_sn: '序列号 SN', lbl_tool_mtm: '机型型号 MTM',
+    ph_tool_sn: '如 PC22XGDR', ph_tool_mtm: '如 30E1S5NV00',
+    snmtm_warn: '⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写',
+    btn_snmtm_flash: '✍️ 刷写 SN/MTM',
+    sntm_no_room: '暂无可用的在线房间。请先在「诊断记录」/「创建房间」让客户机桥接器上线',
+    need_model: '请选择机型型号',
+    snmtm_running: '刷写执行中，请稍候（推送工具 → 写入 SN/MTM → 回读校验）...',
+    snmtm_verify_label: '回读校验:',
+    snmtm_ok: '刷写成功，WMI 回读一致。建议重启后进入 BIOS 二次确认',
+    snmtm_warn_verify: '写入命令已执行，但回读校验未完全匹配',
+    tools_read: '只读 + 写入',
+    oa3_desc: '读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用',
+    lbl_tool_room2: '目标房间（需桥接器在线）',
+    btn_oa3_read: '🔍 读取 OA3 密钥',
+    oa3_key: '主板 OA3 密钥:',
+    oa3_marker: 'OA2 主板标记',
+    oa3_lic: '激活状态',
+    oa3_marker_yes: '是', oa3_marker_no: '否',
+    oa3_lic_activated: '已激活(永久)', oa3_lic_oob: 'OOB 宽限期', oa3_lic_oot: 'OOT 宽限期', oa3_lic_none: '未激活',
+    oa3_reading: '读取中...', oa3_read_ok: 'OA3 密钥读取成功', oa3_read_empty: '未读取到 OA3 密钥（该主板可能无 OA3 标记）',
+    oa3_no_key: '暂无密钥', oa3_confirm: '确认导入以下密钥并激活系统？',
+    oa3_activate_warn: '⚠ 激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配',
+    btn_oa3_activate: '⚡ 导入密钥并激活系统',
+    oa3_activating: '激活中（导入密钥 → 在线激活 → 状态验证）...',
+    oa3_act_ok: '激活完成，系统处于已激活/宽限期状态',
+    oa3_act_warn: '激活命令已执行，但系统状态未确认',
+    tools_readonly: '只读',
+    bios_desc: '通过联想 WMI 接口（Lenovo_BiosSetting）读取当前机器 BIOS 全量配置——不重启、不改设置，纯采集',
+    lbl_tool_room3: '目标房间（需桥接器在线）',
+    btn_bios_read: '🖥 读取 BIOS 配置',
+    bios_reading: '读取中（采集 BIOS 全量设置项）...',
+    bios_read_ok: 'BIOS 配置读取成功',
+    bios_empty: '未读取到 BIOS 设置项（该机型可能不支持 Lenovo WMI 接口）',
+    bios_search_ph: '搜索设置项（如 WakeOnLAN）',
+    bios_th_item: '设置项', bios_th_value: '当前值',
+    bios_no_match: '无匹配的设置项',
+    bios_elevate_title: '🔒 需管理员权限：bridge 当前为普通权限运行，无法读取完整 BIOS 设置',
+    bios_elevate_hint: '请在客户机上重启 bridge（双击会自动请求管理员权限，UAC 弹窗点"是"即可）',
+    bios_view_all: '查看全部设置',
+    bios_modal_title: 'BIOS 设置项（全量）',
+    bios_download: '下载 .txt',
+    bios_downloaded: 'BIOS 配置已下载',
+    sleep_desc: '用 powercfg /sleepstudy 生成最近 28 天的睡眠质量报告（HTML）——排查睡眠唤醒异常、耗电、休眠失败等问题',
+    lbl_tool_room4: '目标房间（需桥接器在线）',
+    btn_sleep_run: '😴 生成睡眠报告（28天）',
+    sleep_admin_hint: '🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）',
+    sleep_download: '📥 下载睡眠报告 (.html)',
+    sleep_running: '正在生成睡眠报告（读取最近 28 天睡眠历史）...',
+    sleep_done: '睡眠报告已生成',
+    sleep_empty: '未生成报告（系统可能无睡眠历史或组件缺失）',
+    energy_desc: '用 powercfg /energy 采集 60 秒生成系统能源效率与电源设置诊断报告（HTML）——发现潜在的耗电问题',
+    lbl_tool_room5: '目标房间（需桥接器在线）',
+    btn_energy_run: '⚡ 生成能源报告（60秒）',
+    energy_admin_hint: '🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）',
+    energy_download: '📥 下载能源报告 (.html)',
+    energy_running: '正在采集 60 秒能耗数据并生成报告（约需 1-2 分钟）...',
+    energy_done: '能源报告已生成',
+    energy_empty: '未生成报告（采样失败或系统组件缺失）',
+    drivers_desc: '读取系统已安装驱动的 DeviceName / Manufacturer / DriverVersion——核对驱动版本、排查驱动过期或不匹配',
+    lbl_tool_room6: '目标房间（需桥接器在线）',
+    btn_drivers_list: '🖱 读取驱动版本',
+    drivers_reading: '正在读取驱动版本信息...',
+    drivers_done: '驱动版本读取成功',
+    drivers_empty: '未读取到驱动信息',
+    drivers_view_all: '查看全部驱动',
+    drivers_modal_title: '驱动版本信息（全量）',
+    drivers_search_ph: '搜索驱动（如 GPU / 网卡）',
+    drivers_th_name: '设备名', drivers_th_manu: '厂商', drivers_th_ver: '驱动版本',
+    drivers_summary: '共 ', drivers_summary_suffix: ' 个驱动，点击下方按钮查看全部',
+    logout: '退出登录',
+    wo_desc: '当前账号处理过的诊断房间',
+    search_ph: '按 SN / 工单号 / 型号 / 房间码搜索',
+    th_room: '房间码', th_model: '型号', th_ticket: '工单号', th_created: '创建时间', th_last: '最后活动', th_status: '状态', th_action: '操作',
+    status_on: '连接中', status_off: '已断开',
+    enter_chat: '进入对话',
+    view_history: '查看记录', export_record: '导出',
+    history_title: '历史对话记录', empty_history: '暂无对话记录',
+    close: '关闭',
+    export_title: '诊断对话记录', export_time: '导出时间', export_ok: '已导出',
+    msg_user: '用户', msg_ai: 'AI', msg_system: '系统', msg_error: '错误', msg_tool: '工具',
+    loading: '加载中...',
+    count_prefix: '共 ', count_suffix: ' 条',
+    empty_rooms: '暂无工单记录，左侧点「创建房间」开始',
+    load_fail: '加载失败',
+    create_desc: '需绑定电脑 SN 与报修工单号，生成 8 位房间码用于桥接器配对',
+    lbl_sn: 'SN 序列号', lbl_ticket: '报修工单号', lbl_model: '机器型号（选填）',
+    ph_sn: '如 PC204XF3', ph_ticket: '如 202608063200477002', ph_model: '如 ThinkPad X1 Carbon',
+    btn_create: '创建房间', creating: '创建中...',
+    need_sn: '请填写 SN 序列号', need_ticket: '请填写报修工单号',
+    room_ok_tip: '房间创建成功，请让客户电脑运行一键命令或连接包（进入对话页获取）',
+    copy_room: '复制房间码', copied_room: '房间码已复制',
+    join_desc: '输入 8 位房间码，进入已有诊断会话',
+    lbl_room_code: '房间码', ph_room_code: '如 AB12CDEF',
+    btn_join: '进入对话',
+    need_code: '请输入 8 位房间码',
+    room_not_found: '房间不存在，请确认房间码或先创建房间',
+    check_fail: '校验失败',
+    dl_desc: '在需要诊断的电脑上运行桥接器，输入房间码完成配对',
+    dl_win: '⬇ Windows 桥接器 (clouddiag-bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 桥接器',
+    copy: '复制', copied_cmd: '命令已复制',
+    dl_note: 'Linux 其他架构（ARM64 / 龙芯）请从管理后台获取。<br>运行后按提示输入服务器地址与 8 位房间码即可连接。',
+    dl_ps_title: '⚡ 命令版（免安装 · Windows PowerShell）',
+    dl_ps_desc: '不想下载 .exe？在客户机的「管理员 PowerShell」窗口粘贴一行命令即可连接——不下载文件、不落盘，适合 .exe 被杀毒软件拦截的场景。',
+    dl_ps_step1_t: '打开管理员 PowerShell',
+    dl_ps_step1_d: '在客户机上右键「开始」菜单 → 选择「Windows PowerShell (管理员)」',
+    dl_ps_step2_t: '粘贴一行命令',
+    dl_ps_step2_d: '回车后按提示输入 8 位房间码：',
+    dl_ps_step2_note: '也可以提前写入房间码，免交互直接连（把 ABC12345 换成你的房间码）：',
+    dl_ps_step3_t: '完成配对',
+    dl_ps_step3_d: '看到绿色 Connected 即连接成功，保持窗口开启，回到本工作台进入对话即可远程诊断',
+    dl_ps_foot: '命令版与 .exe 版完全兼容（连接 / 远程命令 / 文件传输）。如提示脚本被系统拦截，可改为下载后运行：powershell -ExecutionPolicy Bypass -File bridge.ps1 -Room ABC12345',
+    dl_ps_foot2: '如提示脚本被系统拦截，可改为下载后运行：',
+    dl_linux_more: '查看安装说明',
+    dl_linux_way1_t: '方式一：一键安装（推荐）', dl_linux_way1_d: '在客户机终端粘贴上面命令回车——自动检测架构、下载对应版本、安装到 /usr/local/bin/bridge，然后按提示输入 8 位房间码启动。需要 root 权限（自动用 sudo）。',
+    dl_linux_way2_t: '方式二：手动安装（已下载二进制）', dl_linux_way2_d: '① 给执行权限：', dl_linux_way2_d2: '② 放入系统目录（任意目录也可，这里以 /usr/local/bin 为例）：', dl_linux_way2_d3: '③ 启动（把 ABC12345 换成你的房间码）：',
+    dl_linux_way3_t: '完成配对', dl_linux_way3_d: '看到 Connected 即连接成功，保持终端开启即可远程诊断。重启电脑后需重新启动桥接器（一次性使用，不驻留后台）。',
+    dl_step1: '安装桥接器', dl_step2: '输入房间码', dl_step3: '对话诊断',
+    dl_recommend: '推荐',
+    dl_card_win_t: 'Windows 客户端 (.exe)', dl_card_win_desc: '下载后双击运行，输入 8 位房间码即连接。主力方案，最省心。', dl_card_win_btn: '⬇ 下载 clouddiag-bridge-win64.exe (4.8MB)', dl_card_win_note: '双击自动请求管理员权限（UAC 弹窗点「是」即可）',
+    dl_card_ps_t: 'Windows 命令版（免安装）', dl_card_ps_desc: '管理员 PowerShell 粘贴一行命令即连接。不下载文件、不落盘，杀毒软件友好。', dl_more_steps: '查看详细步骤',
+    dl_card_linux_t: 'Linux 客户端', dl_card_linux_desc: 'Ubuntu / UOS / KOS / 麒麟 / 龙芯等发行版通用，一条命令安装。', dl_card_linux_btn: '⬇ 下载 x86_64 桥接器', dl_card_linux_note: '仅支持 x86_64 架构；ARM64 / 龙芯版本制作中',
+    dl_facts_cap: '🔧 桥接器能力：AI 远程诊断（系统信息 / 事件日志 / 驱动 / BIOS）· 远程命令 · 文件传输 · 断线自动重连',
+    dl_facts_sec: '🛡 安全机制：只读诊断自动执行；修改 / 危险操作需在对话页人工审批',
+    pwd_desc: '定期修改密码保护账号安全',
+    lbl_old: '旧密码', lbl_new: '新密码（至少 4 位）', lbl_confirm: '确认新密码',
+    btn_change: '确认修改',
+    pwd_mismatch: '两次输入的新密码不一致', pwd_short: '新密码至少 4 位', pwd_ok: '密码修改成功', pwd_fail: '修改失败',
+    users_desc: '创建工程师账号、停用/启用、重置密码',
+    btn_new_user: '+ 新建账号',
+    lbl_username: '工号', lbl_name: '姓名', lbl_role: '角色', lbl_init_pwd: '初始密码',
+    ph_username: '如 E10086', ph_name: '如 张三', ph_init_pwd: '至少 4 位',
+    role_engineer: '工程师', role_admin: '管理员',
+    btn_create_user: '创建账号', btn_cancel: '取消',
+    th_id: 'ID', th_username: '工号',
+    need_username: '工号必填', user_created: '创建成功', no_perm: '无权限',
+    empty_users: '暂无账号',
+    status_enabled: '启用', status_disabled: '停用',
+    btn_disable: '停用', btn_enable: '启用', btn_reset: '重置密码',
+    reset_ok: '密码已重置', op_fail: '操作失败',
+    chat_empty1: '尚未选择房间', chat_empty2: '在「诊断记录」里点「进入对话」，或创建/加入房间后自动打开',
+    room_prefix: '房间: ',
+    net_err: '网络错误',
+    user_guest: '未登录', user_admin: ' (管理员)', user_prefix: '工号: ',
+  },
+};
+
+
+let currentLang = 'zh-CN';
+function t(key) { return (I18N[currentLang] || {})[key] || I18N['zh-CN'][key] || key; }
+
+function applyLang(lang) {
+  currentLang = lang;
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+  // 动态内容重渲染
+  renderRooms();
+  if (currentRole === 'admin') loadUsers();
+  // 同步对话页 iframe（同源可直接调用其 applyLang）
+  const frame = document.getElementById('chat-frame');
+  if (frame && frame.contentWindow && typeof frame.contentWindow.applyLang === 'function') {
+    try { frame.contentWindow.applyLang(lang); } catch (e) { /* ignore */ }
+  }
+}
+
+
+let allRooms = [];
+let currentRole = 'engineer';
+
+// ===== Tab 切换 =====
+let currentChatRoom = null;
+
+function switchTab(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const page = document.getElementById('page-' + name);
+  if (page) page.classList.add('active');
+  const nav = document.querySelector('.nav-item[onclick="switchTab(\'' + name + '\')"]');
+  if (nav) nav.classList.add('active');
+  if (name === 'workorders') loadRooms();
+  if (name === 'users') loadUsers();
+  if (name === 'feedback') loadMyFeedbacks();
+  // 工具模式依赖桥接器在线状态：每次进入都重新拉取房间列表，避免用页面加载时的旧快照
+  if (name === 'tools-win') loadRooms(true, true).then(() => { initTools(); preselectChatRoom(); });
+  if (name === 'tools-linux') loadRooms(true, true).then(() => { initLinuxTools(); preselectChatRoom(); });
+  // 连接引导页：切回时刷新状态（field 用——防止切走再回来后状态过期）
+  if (name === 'field-guide' && currentRole === 'field') {
+    const room = document.getElementById('field-guide-room').value;
+    if (room) loadFieldGuide();
+  }
+}
+
+// 方案 A：工具上传 IDG 后——dashboard 内嵌打开分析页（不跳独立页——2026-09-08 主人要求）
+function openIdgJob(jobId) {
+  switchTab('idg');
+  const f = document.getElementById('idg-frame');
+  if (f) f.src = '/log-analyzer/analyze/' + jobId + '?v=' + Date.now();
+}
+
+// 打开对话（iframe 加载 /chat?room=XXX，不跳页）
+// ── 界面分流弹窗（2026-09-16）：创建/加入房间后选择进入哪个界面 ──
+function chooseInterface(room, sn, ticket, title) {
+  const old = document.getElementById('iface-modal');
+  if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'iface-modal';
+  box.style.cssText = 'position:fixed;inset:0;background:rgba(1,4,9,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  box.innerHTML =
+    '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:520px;width:100%;padding:26px 28px;">'
+    + '<div style="font-size:17px;font-weight:650;color:#e6edf3;margin-bottom:6px;">' + (title || '选择进入方式') + '</div>'
+    + '<div style="font-size:12.5px;color:#8b949e;margin-bottom:18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+    + '房间 <b style="color:#e6edf3;font-family:Consolas,monospace;letter-spacing:1px;font-size:14px;">' + room + '</b>'
+    + '<button onclick="copyRoomCodeNew(\'' + room + '\')" id="iface-copy-btn" '
+    + 'style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">📋 复制房间码</button>'
+    + (sn ? '<span>· SN ' + sn + '</span>' : '') + (ticket ? '<span>· 工单 ' + ticket + '</span>' : '') + '</div>'
+
+    + '<div onclick="ifaceGo(\'/diag?room=' + room + (sn ? '&sn=' + encodeURIComponent(sn) : '') + (ticket ? '&ticket=' + encodeURIComponent(ticket) : '') + '\')" '
+    + 'style="cursor:pointer;border:1.5px solid #58a6ff;background:rgba(56,139,253,.08);border-radius:10px;padding:15px 18px;margin-bottom:12px;">'
+    + '<div style="font-size:14.5px;font-weight:650;color:#e6edf3;margin-bottom:4px;">🔍 诊断台（推荐）</div>'
+    + '<div style="font-size:12.5px;color:#8b949e;line-height:1.55;">左侧 26 项诊断工具 → 右侧结构化结果（采集项清单 / 观察 / 依据 / 缺失）<br>点击工具自动执行标准化诊断，结果可追溯</div>'
+    + '</div>'
+
+    + '<div onclick="ifaceGo(\'/chat?room=' + room + '\')" '
+    + 'style="cursor:pointer;border:1px solid #30363d;background:#1c2128;border-radius:10px;padding:15px 18px;margin-bottom:18px;">'
+    + '<div style="font-size:14.5px;font-weight:650;color:#e6edf3;margin-bottom:4px;">💬 AI 对话界面</div>'
+    + '<div style="font-size:12.5px;color:#8b949e;line-height:1.55;">与 AI 自由对话，适合复杂问题排查与追问<br>保留原有全部能力（工具矩阵 / 一键连接 / 导出）</div>'
+    + '</div>'
+
+    + '<div style="text-align:right;"><button onclick="document.getElementById(\'iface-modal\').remove()" '
+    + 'style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:7px;padding:7px 16px;font-size:13px;cursor:pointer;">稍后再说</button></div>'
+    + '</div>';
+  document.body.appendChild(box);
+}
+// 复制房间码（分流弹窗内）
+function copyRoomCodeNew(code) {
+  navigator.clipboard.writeText(code).then(function () {
+    const b = document.getElementById('iface-copy-btn');
+    if (b) { const old = b.textContent; b.textContent = '✅ 已复制'; setTimeout(function () { b.textContent = old; }, 1800); }
+  }).catch(function () {
+    // 降级：选中弹窗里的房间码文本
+    const sel = window.getSelection(); const r = document.createRange();
+    const b = document.getElementById('iface-copy-btn');
+    if (b && b.previousElementSibling) { r.selectNodeContents(b.previousElementSibling); sel.removeAllRanges(); sel.addRange(r); }
+  });
+}
+
+function ifaceGo(url) {
+  const m = document.getElementById('iface-modal');
+  if (m) m.remove();
+  location.href = url;
+}
+
+function openChat(room) {
+  currentChatRoom = room;
+  // 记录加入（账号隔离）
+  fetch('/api/rooms/join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ room_code: room }),
+  }).catch(() => {});
+  document.getElementById('chat-frame-wrap').style.display = 'block';
+  document.getElementById('chat-empty').style.display = 'none';
+  document.getElementById('chat-room-tag').textContent = t('room_prefix') + room;
+  document.getElementById('chat-head').classList.remove('hidden');
+  document.getElementById('chat-frame').src = '/chat?room=' + room + '&connect=1&v=' + Date.now();
+  switchTab('chat');
+}
+
+// 一键连接：打开对话页并自动展开连接面板（openChat 已带 connect=1）
+function connectRoom(room) {
+  openChat(room);
+}
+
+// 供对话页 iframe 内「← 工作台」按钮调用（同源父窗口访问）
+function switchToWorkorders() {
+  switchTab('workorders');
+}
+
+// ===== 上门工程师连接引导（field 专属）=====
+let fieldGuideConn = null;
+let fieldGuideOs = 'windows';  // 客户机系统选择（自动识别 + 手动兜底）
+let currentUsername = '';      // 当前登录账号（localStorage 房间按账号隔离）
+
+function fieldRoomKey() { return 'field_room_' + (currentUsername || ''); }
+
+function fieldGuideOsChange() {
+  fieldGuideOs = document.getElementById('field-guide-os').value;
+  const isWin = fieldGuideOs === 'windows';
+  const lbl = document.getElementById('field-guide-os-label');
+  if (lbl) lbl.textContent = isWin ? 'Windows PowerShell' : 'Linux bash';
+  const batBtn = document.getElementById('field-guide-bat');
+  batBtn.textContent = isWin ? '⬇ 下载连接包' : '⬇ 下载连接包（仅 Windows）';
+  batBtn.disabled = !isWin;
+}
+
+function openFieldGuide(room) {
+  room = (room || '').toUpperCase();
+  if (!room) return;
+  try { localStorage.setItem(fieldRoomKey(), room); } catch (e) {}
+  document.getElementById('field-guide-room').value = room;
+  document.getElementById('field-guide-bridge').textContent = '--';
+  document.getElementById('field-guide-tools').style.display = 'none';
+  switchTab('field-guide');
+  loadFieldGuide();
+  startFieldGuidePolling();
+}
+
+// 连接状态自动刷新：引导页可见时每 5 秒轮询（客户机连上后无需手动切回）
+let fieldGuideTimer = null;
+function startFieldGuidePolling() {
+  if (fieldGuideTimer) clearInterval(fieldGuideTimer);
+  fieldGuideTimer = setInterval(() => {
+    const active = document.querySelector('.page.active');
+    if (active && active.id === 'page-field-guide') {
+      refreshFieldStatus();
+    }
+  }, 5000);
+}
+
+// 左侧「📶 连接客户机」导航：记住的房间直接回引导页，没有则提示先创建/加入
+function openFieldGuideFromNav() {
+  const lastRoom = localStorage.getItem(fieldRoomKey());
+  if (lastRoom) {
+    openFieldGuide(lastRoom);
+  } else {
+    switchTab('field-guide');
+    document.getElementById('field-guide-room').value = '';
+    document.getElementById('field-guide-info').textContent = '还没有连接中的房间——请先「➕ 创建房间」或「⇄ 加入房间」';
+    document.getElementById('field-guide-bridge').textContent = '--';
+  }
+}
+
+async function loadFieldGuide() {
+  const room = document.getElementById('field-guide-room').value;
+  if (!room) return;
+  try {
+    const resp = await fetch('/api/room_connect/' + room);
+    const data = await resp.json();
+    if (!resp.ok) { document.getElementById('field-guide-info').textContent = data.error || '无法获取连接信息'; return; }
+    fieldGuideConn = data;
+    document.getElementById('field-guide-info').textContent = 'SN: ' + (data.sn || '-') + ' ｜ 工单: ' + (data.ticket_no || '-') + ' ｜ 有效期: 剩 ' + (data.days_left != null ? data.days_left : '-') + ' 天';
+    // 创建时已选客户机系统（os 记录）→ 直接应用（连接后 identify 会再纠正）
+    if (data.os === 'linux') {
+      document.getElementById('field-guide-os').value = 'linux';
+      fieldGuideOsChange();
+    } else if (data.os === 'windows') {
+      document.getElementById('field-guide-os').value = 'windows';
+      fieldGuideOsChange();
+    }
+  } catch (e) {}
+  await refreshFieldStatus();
+}
+
+// 刷新客户机连接状态（轮询用——只拉状态，不重新拉命令）
+async function refreshFieldStatus() {
+  const room = document.getElementById('field-guide-room').value;
+  if (!room) return;
+  try {
+    const r2 = await fetch('/api/my_rooms');
+    const rd = await r2.json();
+    const roomInfo = (rd.rooms || []).find(r => r.room_code === room);
+    if (roomInfo) {
+      const on = roomInfo.bridge_online;
+      const plat = (roomInfo.platform || '').toLowerCase();
+      document.getElementById('field-guide-bridge').textContent = on ? ('已连接 (' + (plat === 'linux' ? 'Linux' : 'Windows') + ')') : '未连接';
+      // 自动识别客户机系统（连接后）——可手动切换兜底
+      if (plat === 'linux') {
+        document.getElementById('field-guide-os').value = 'linux';
+        fieldGuideOsChange();
+      } else if (plat === 'windows') {
+        document.getElementById('field-guide-os').value = 'windows';
+        fieldGuideOsChange();
+      }
+      // 工具导航按平台动态显示：os 已记录（连接过）→ 只留对应平台工具；os 未知 → 两个都显示
+      const winNav = document.getElementById('nav-tools-win');
+      const linuxNav = document.getElementById('nav-tools-linux');
+      if (plat) {
+        if (winNav) winNav.style.display = plat === 'linux' ? 'none' : '';
+        if (linuxNav) linuxNav.style.display = plat === 'linux' ? '' : 'none';
+      } else {
+        if (winNav) winNav.style.display = '';
+        if (linuxNav) linuxNav.style.display = '';
+      }
+      const toolsDiv = document.getElementById('field-guide-tools');
+      if (on) {
+        toolsDiv.style.display = 'block';
+        const btn = document.getElementById('field-guide-tool-btn');
+        btn.textContent = plat === 'linux' ? '🐧 打开 Linux 工具' : '🪟 打开 Windows 工具';
+        btn.onclick = function () { switchTab(plat === 'linux' ? 'tools-linux' : 'tools-win'); };
+      } else {
+        toolsDiv.style.display = 'none';
+      }
+    }
+  } catch (e) {}
+}
+
+function fieldGuideCopy() {
+  if (!fieldGuideConn || !fieldGuideConn.connect) { loadFieldGuide(); setTimeout(fieldGuideCopy, 800); return; }
+  fieldGuideOs = document.getElementById('field-guide-os').value;
+  const cmd = fieldGuideOs === 'linux' ? fieldGuideConn.connect.linux : fieldGuideConn.connect.powershell;
+  const hint = fieldGuideOs === 'linux'
+    ? 'Linux 命令已复制——粘贴到客户机终端（bash）运行即可连接'
+    : '一键命令已复制——粘贴到客户机 PowerShell 运行即可连接';
+  navigator.clipboard.writeText(cmd).then(() => alert(hint))
+    .catch(() => { prompt(hint + '：', cmd); });
+}
+
+function fieldGuideBat() {
+  const room = document.getElementById('field-guide-room').value;
+  if (!room) return;
+  fieldGuideOs = document.getElementById('field-guide-os').value;
+  if (fieldGuideOs !== 'windows') { alert('Linux 客户机使用复制命令方式连接（无需下载包）'); return; }
+  window.open('/api/room_bat/' + room, '_blank');
+}
+
+// ===== 用户信息 =====
+
+// 左下角版本号动态获取（2026-08-30——替换同步时硬编码 v0.13.7 遗留，改动态免每次打版手改）
+(function () {
+  fetch('/api/health', { headers: { 'Accept': 'application/json' } })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('ver-display');
+      if (el && d.version) el.textContent = 'v' + d.version;
+    })
+    .catch(function () {});
+})();
+
+// 主题切换（2026-08-30——全局：GitHub 暗黑 / 天蓝浅色——localStorage 记忆）
+async function loadMe() {
+  try {
+    const resp = await fetch('/api/auth/me');
+    const data = await resp.json();
+    if (data.error) { location.href = '/login'; return; }
+    currentRole = data.role;
+    const roleTag = data.role === 'admin' ? t('user_admin') : (data.role === 'field' ? '（上门工程师）' : '');
+    document.getElementById('user-name').textContent = t('user_prefix') + data.username + roleTag;
+    if (data.role === 'admin') {
+      document.querySelectorAll('.admin-only').forEach(el => el.classList.add('show'));
+      aiLoad();
+    } else if (data.role === 'field') {
+      // 上门工程师极简界面：只保留 创建/加入 + 工具（隐藏对话/工单/密码/反馈/首页）
+      ['nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback', 'nav-home'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      currentUsername = data.username || '';
+      // 默认进入创建房间（不自动分配/恢复房间——创建或加入后才进引导页）
+      switchTab('create');
+    } else {
+      // 普通工程师：隐藏「连接客户机」导航（field 专属）
+      const ng = document.getElementById('nav-field-guide');
+      if (ng) ng.style.display = 'none';
+    }
+  } catch (e) { location.href = '/login'; }
+}
+
+function doLogout() {
+  localStorage.removeItem('cab_role');   // 清除角色标记,防止游客残留误置灰
+  fetch('/api/auth/logout', { method: 'POST' }).finally(() => { location.href = '/login'; });
+}
+
+// ===== AI 模型配置(admin) =====
+let aiEditingId = null;
+function aiLoad() {
+  fetch('/api/admin/ai/providers').then(r => r.json()).then(d => {
+    const tbody = document.getElementById('ai-tbody');
+    document.getElementById('ai-count').textContent = '共 ' + (d.providers ? d.providers.length : 0) + ' 套';
+    if (!d.providers || d.providers.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无配置,点击「➕ 新增配置」添加</td></tr>';
+      return;
+    }
+    let html = '';
+    d.providers.forEach(p => {
+      const isActive = p.id === d.active;
+      const isBackup = !isActive && d.providers.length > 1;
+      const badge = isActive ? '<span class="badge badge-ok">● 生效中</span>'
+        : (isBackup ? '<span class="badge badge-warn">◐ 备用</span>' : '<span class="badge">○ 未启用</span>');
+      html += `<tr>
+        <td style="font-weight:600;">${p.name || p.id}</td>
+        <td style="color:var(--text2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.base_url}">${p.base_url}</td>
+        <td style="color:var(--info);">${p.model}</td>
+        <td style="color:var(--text2);font-family:monospace;font-size:12px;">${p.api_key_masked || '-'}</td>
+        <td>${badge}</td>
+        <td style="white-space:nowrap;">
+          ${isActive ? '' : `<button class="btn-main" onclick="aiActivate('${p.id}','${p.name || ''}')" style="padding:4px 12px;font-size:12px;margin-right:6px;">切换生效</button>`}
+          <button class="btn-ghost" onclick="aiTest('${p.id}')" style="padding:4px 10px;font-size:12px;margin-right:4px;">测试</button>
+          <button class="btn-ghost" onclick="aiEdit('${p.id}')" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑</button>
+          <button class="btn-ghost" onclick="aiDelete('${p.id}','${p.name || ''}')" style="padding:4px 10px;font-size:12px;color:var(--error);border-color:var(--error);">删除</button>
+        </td></tr>`;
+    });
+    tbody.innerHTML = html;
+  }).catch(e => { document.getElementById('ai-tbody').innerHTML = '<tr><td colspan="6" class="empty">加载失败:' + e + '</td></tr>'; });
+}
+function aiOpenForm() {
+  aiEditingId = null;
+  document.getElementById('ai-form-title').textContent = '新增模型配置';
+  ['ai-name', 'ai-base-url', 'ai-key', 'ai-model'].forEach(i => document.getElementById(i).value = '');
+  document.getElementById('ai-form-panel').style.display = 'block';
+}
+function aiEdit(id) {
+  fetch('/api/admin/ai/providers').then(r => r.json()).then(d => {
+    const p = d.providers.find(x => x.id === id);
+    if (!p) return;
+    aiEditingId = id;
+    document.getElementById('ai-form-title').textContent = '编辑配置:' + (p.name || id);
+    document.getElementById('ai-name').value = p.name || '';
+    document.getElementById('ai-base-url').value = p.base_url || '';
+    document.getElementById('ai-key').value = '';
+    document.getElementById('ai-key').placeholder = '留空保持不变(当前:' + (p.api_key_masked || '') + ')';
+    document.getElementById('ai-model').value = p.model || '';
+    document.getElementById('ai-form-panel').style.display = 'block';
+  });
+}
+function aiCancelForm() { document.getElementById('ai-form-panel').style.display = 'none'; }
+function aiSave() {
+  const name = document.getElementById('ai-name').value.trim();
+  const base_url = document.getElementById('ai-base-url').value.trim();
+  const api_key = document.getElementById('ai-key').value.trim();
+  const model = document.getElementById('ai-model').value.trim();
+  if (!name || !base_url || !api_key || !model) { alert('模型提供者/调用链接/API/模型名 均必填'); return; }
+  const body = { name, base_url, api_key, model };
+  const url = aiEditingId ? '/api/admin/ai/providers/' + aiEditingId : '/api/admin/ai/providers';
+  const method = aiEditingId ? 'PUT' : 'POST';
+  fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json()).then(d => {
+      if (d.ok) { aiCancelForm(); aiLoad(); alert('保存成功'); }
+      else alert(d.error || '保存失败');
+    }).catch(e => alert('保存失败:' + e));
+}
+function aiDelete(id, name) {
+  if (!confirm('确定删除配置「' + name + '」?')) return;
+  fetch('/api/admin/ai/providers/' + id, { method: 'DELETE' }).then(r => r.json()).then(d => {
+    if (d.ok) { aiLoad(); alert('已删除'); }
+    else alert(d.error || '删除失败');
+  });
+}
+function aiTest(id) {
+  fetch('/api/admin/ai/providers/' + id + '/test', { method: 'POST' }).then(r => r.json()).then(d => {
+    alert((d.ok ? '✅ ' : '❌ ') + (d.detail || ''));
+  }).catch(e => alert('测试请求失败:' + e));
+}
+function aiActivate(id, name) {
+  if (!confirm('确认切换到配置「' + name + '」?\n切换将写入 .env 并重启 IDG 分析服务(约 3 秒),期间 IDG 短暂不可用。')) return;
+  fetch('/api/admin/ai/providers/' + id + '/activate', { method: 'POST' }).then(r => r.json()).then(d => {
+    if (d.ok) { aiLoad(); alert('已切换生效:' + name + '\nAI 分析将使用新配置'); }
+    else alert(d.error || '切换失败');
+  }).catch(e => alert('切换失败:' + e));
+}
+
+// ===== 创建房间 =====
+async function createRoom() {
+  const sn = document.getElementById('f-sn').value.trim();
+  const ticket = document.getElementById('f-ticket').value.trim();
+  const model = document.getElementById('f-model').value.trim();
+  const validity = parseInt(document.getElementById('f-validity').value || '30', 10);
+  const osChoice = document.getElementById('f-os').value;
+  const msg = document.getElementById('create-msg');
+  msg.className = 'msg-box';
+  if (!sn) { msg.textContent = t('need_sn'); msg.className = 'msg-box err'; return; }
+  if (!ticket) { msg.textContent = t('need_ticket'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('create-btn');
+  btn.disabled = true; btn.textContent = t('creating');
+  try {
+    const resp = await fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sn, ticket_no: ticket, machine_model: model, validity_days: validity, os: osChoice }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; btn.disabled = false; btn.textContent = t('btn_create'); return; }
+    if (currentRole === 'field') {
+      // 上门工程师：创建成功直接进连接引导
+      openFieldGuide(data.room_code);
+      msg.className = 'msg-box';
+      btn.disabled = false; btn.textContent = t('btn_create');
+      return;
+    }
+    // 创建成功 → 直接弹分流选择（房间码/SN/工单都在弹窗内显示——2026-09-16）
+    chooseInterface(data.room_code, sn, ticket, '房间创建成功 · 选择进入方式');
+    document.getElementById('f-sn').value = '';
+    document.getElementById('f-ticket').value = '';
+    document.getElementById('f-model').value = '';
+    loadRooms();
+  } catch (e) { msg.textContent = t('net_err') + ': ' + e.message; msg.className = 'msg-box err'; }
+  btn.disabled = false; btn.textContent = t('btn_create');
+}
+
+
+
+// ===== 加入房间 =====
+async function joinRoom() {
+  const code = document.getElementById('f-join').value.trim().toUpperCase();
+  if (code.length !== 8) { showToast(t('need_code')); return; }
+  try {
+    const resp = await fetch('/api/rooms/check/' + code);
+    const data = await resp.json();
+    if (!resp.ok) { showToast(data.error || t('check_fail')); return; }
+    if (!data.exists) { showToast(t('room_not_found')); return; }
+    // 记录加入（账号隔离：工具/工单只显示"我创建 + 我加入"的房间）
+    fetch('/api/rooms/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: code }),
+    }).catch(() => {});
+    if (currentRole === 'field') {
+      // 上门工程师：加入房间 → 连接引导
+      openFieldGuide(code);
+      return;
+    }
+    chooseInterface(code, '', '', '已加入房间 · 选择进入方式');
+  } catch (e) { showToast(t('net_err') + ': ' + e.message); }
+}
+
+// ===== 工单列表 =====
+async function loadRooms(all, skipRender) {
+  try {
+    const resp = await fetch('/api/my_rooms' + (all ? '?all=1' : ''));
+    const data = await resp.json();
+    allRooms = data.rooms || [];
+    if (!skipRender) renderRooms();
+  } catch (e) {
+    if (!skipRender) {
+      document.getElementById('room-tbody').innerHTML = '<tr><td colspan="9" class="empty">' + t('load_fail') + ': ' + e.message + '</td></tr>';
+    }
+  }
+}
+
+// 工具页：把正在对话的房间自动选中（工具下拉可见 + 预选）
+function preselectChatRoom() {
+  if (!currentChatRoom) return;
+  document.querySelectorAll('.page-tools select[id$="-room"], .page-tools select[class*="room"]').forEach(sel => {
+    const opts = Array.from(sel.options || []);
+    if (opts.some(o => o.value === currentChatRoom)) {
+      sel.value = currentChatRoom;
+      sel.dispatchEvent(new Event('change'));
+    }
+  });
+}
+
+function renderRooms() {
+  // 工单页被服务端裁剪（field 角色）时元素不存在——跳过渲染
+  if (!document.getElementById('room-tbody')) return;
+  const si = document.getElementById('search-input');
+  const kw = si ? si.value.trim().toLowerCase() : '';
+  const list = allRooms.filter(r => !kw
+    || r.sn.toLowerCase().includes(kw)
+    || r.ticket_no.toLowerCase().includes(kw)
+    || (r.machine_model || '').toLowerCase().includes(kw)
+    || r.room_code.toLowerCase().includes(kw));
+  document.getElementById('room-count').textContent = t('count_prefix') + list.length + t('count_suffix');
+  if (!list.length) {
+    document.getElementById('room-tbody').innerHTML = '<tr><td colspan="9" class="empty">' + t('empty_rooms') + '</td></tr>';
+    return;
+  }
+  document.getElementById('room-tbody').innerHTML = list.map(r => {
+    // 状态：房间状态优先（归档/闲置），否则连接状态
+    let stHtml;
+    if (r.status === 'archived') stHtml = '<span class="status off">已归档</span>';
+    else if (r.status === 'idle') stHtml = '<span class="status off" style="color:#888;">已闲置</span>';
+    else if (r.bridge_online) stHtml = '<span class="status on">连接中</span>';
+    else stHtml = '<span class="status off">已断开</span>';
+    return '<tr>'
+      + '<td class="mono">' + r.room_code + '</td>'
+      + '<td>' + r.sn + '</td>'
+      + '<td>' + (r.machine_model || '-') + '</td>'
+      + '<td>' + r.ticket_no + '</td>'
+      + '<td>' + (r.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
+      + '<td>' + (r.last_seen || '').replace('T', ' ').slice(0, 16) + '</td>'
+      + '<td>' + stHtml + '</td>'
+      + '<td>' + validityBadge(r.days_left) + '</td>'
+      + '<td><div class="row-actions">'
+      + '<button class="btn-sm" onclick="chooseInterface(\'' + r.room_code + '\', \'' + (r.sn||'') + '\', \'' + (r.ticket_no||'') + '\', \'选择进入方式\')">' + t('enter_chat') + '</button>'
+      + '<button class="btn-sm" onclick="connectRoom(\'' + r.room_code + '\')" title="一键连接">📶 连接</button>'
+      + '<button class="btn-sm" onclick="viewHistory(\'' + r.room_code + '\')">' + t('view_history') + '</button>'
+      + '<button class="btn-sm" onclick="exportRoom(\'' + r.room_code + '\')">' + t('export_record') + '</button>'
+      + '</div></td>'
+      + '</tr>';
+  }).join('');
+}
+
+// 有效期显示：剩余天数（黄=快过期，红=已过期，灰=永久）
+function validityBadge(daysLeft) {
+  if (daysLeft === null || daysLeft === undefined) return '<span style="color:var(--text2);">永久</span>';
+  if (daysLeft < 0) return '<span style="color:#e74c3c;font-weight:600;">已过期</span>';
+  if (daysLeft <= 3) return '<span style="color:#e0a800;font-weight:600;">剩 ' + daysLeft + ' 天</span>';
+  return '<span style="color:var(--text2);">剩 ' + daysLeft + ' 天</span>';
+}
+
+// ===== 修改密码 =====
+async function changePwd() {
+  const oldPw = document.getElementById('p-old').value;
+  const newPw = document.getElementById('p-new').value;
+  const newPw2 = document.getElementById('p-new2').value;
+  const msg = document.getElementById('pwd-msg');
+  msg.className = 'msg-box';
+  if (newPw !== newPw2) { msg.textContent = t('pwd_mismatch'); msg.className = 'msg-box err'; return; }
+  if (newPw.length < 4) { msg.textContent = t('pwd_short'); msg.className = 'msg-box err'; return; }
+  try {
+    const resp = await fetch('/api/auth/change_password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('pwd_fail'); msg.className = 'msg-box err'; return; }
+    msg.textContent = '✅ ' + t('pwd_ok');
+    msg.className = 'msg-box ok';
+    document.getElementById('p-old').value = '';
+    document.getElementById('p-new').value = '';
+    document.getElementById('p-new2').value = '';
+  } catch (e) { msg.textContent = t('net_err') + ': ' + e.message; msg.className = 'msg-box err'; }
+}
+
+// ===== 账号管理（管理员） =====
+function showCreateUser() {
+  const panel = document.getElementById('create-user-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  const msg = document.getElementById('user-msg');
+  msg.className = 'msg-box';
+}
+
+async function createUser() {
+  const username = document.getElementById('u-username').value.trim();
+  const name = document.getElementById('u-name').value.trim();
+  const role = document.getElementById('u-role').value;
+  const password = document.getElementById('u-password').value;
+  const msg = document.getElementById('user-msg');
+  msg.className = 'msg-box';
+  if (!username) { msg.textContent = t('need_username'); msg.className = 'msg-box err'; return; }
+  if (password.length < 4) { msg.textContent = t('pwd_short'); msg.className = 'msg-box err'; return; }
+  try {
+    const resp = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, name, role, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    msg.textContent = '✅ ' + username + ' ' + t('user_created');
+    msg.className = 'msg-box ok';
+    document.getElementById('u-username').value = '';
+    document.getElementById('u-name').value = '';
+    document.getElementById('u-password').value = '';
+    loadUsers();
+  } catch (e) { msg.textContent = t('net_err') + ': ' + e.message; msg.className = 'msg-box err'; }
+}
+
+async function loadUsers() {
+  try {
+    const resp = await fetch('/api/admin/users');
+    if (resp.status === 401) { showToast(t('no_perm')); return; }
+    const data = await resp.json();
+    renderUsers(data.users || []);
+  } catch (e) {
+    document.getElementById('user-tbody').innerHTML = '<tr><td colspan="7" class="empty">' + t('load_fail') + ': ' + e.message + '</td></tr>';
+  }
+}
+
+function renderUsers(users) {
+  document.getElementById('user-count').textContent = t('count_prefix') + users.length + t('count_suffix');
+  if (!users.length) {
+    document.getElementById('user-tbody').innerHTML = '<tr><td colspan="7" class="empty">' + t('empty_users') + '</td></tr>';
+    return;
+  }
+  document.getElementById('user-tbody').innerHTML = users.map(u => {
+    const st = u.enabled ? '<span class="status on">' + t('status_enabled') + '</span>' : '<span class="status disabled">' + t('status_disabled') + '</span>';
+    const roleTxt = u.role === 'admin' ? t('role_admin') : t('role_engineer');
+    return '<tr>'
+      + '<td>' + u.id + '</td>'
+      + '<td class="mono">' + u.username + '</td>'
+      + '<td>' + u.name + '</td>'
+      + '<td>' + roleTxt + '</td>'
+      + '<td>' + st + '</td>'
+      + '<td>' + (u.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
+      + '<td><div class="row-actions">'
+      + '<button class="btn-sm" onclick="toggleUser(\'' + u.username + '\')">' + (u.enabled ? t('btn_disable') : t('btn_enable')) + '</button>'
+      + '<button class="btn-sm" onclick="resetPwd(\'' + u.username + '\')">' + t('btn_reset') + '</button>'
+      + '</div></td>'
+      + '</tr>';
+  }).join('');
+}
+
+async function toggleUser(username) {
+  const btn = document.activeElement;
+  const action = btn && btn.textContent ? btn.textContent.trim() : t('btn_disable');
+  if (!confirm(action + ' ' + username + ' ?')) return;
+  try {
+    const resp = await fetch('/api/admin/users/' + username + '/toggle', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) { showToast(data.error || t('op_fail')); return; }
+    showToast((data.enabled ? t('status_enabled') : t('status_disabled')) + ' ' + username);
+    loadUsers();
+  } catch (e) { showToast(t('net_err') + ': ' + e.message); }
+}
+
+async function resetPwd(username) {
+  const newPw = prompt(t('btn_reset') + ' ' + username + ':');
+  if (!newPw) return;
+  if (newPw.length < 4) { showToast(t('pwd_short')); return; }
+  try {
+    const resp = await fetch('/api/admin/users/' + username + '/reset_password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: newPw }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showToast(data.error || t('op_fail')); return; }
+    showToast('✅ ' + username + ' ' + t('reset_ok'));
+  } catch (e) { showToast(t('net_err') + ': ' + e.message); }
+}
+
+// ===== 历史记录（只读查看 + 导出） =====
+function escapeHtml(str) {  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ===== 反馈 =====
+async function submitFeedback() {
+  const msg = document.getElementById('fb-msg');
+  const content = document.getElementById('fb-content').value.trim();
+  if (!content) { msg.textContent = t('fb_need'); msg.className = 'msg-box err'; return; }
+  try {
+    const resp = await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+    const d = await resp.json();
+    if (d.ok) {
+      msg.textContent = t('fb_success'); msg.className = 'msg-box ok';
+      document.getElementById('fb-content').value = '';
+      loadMyFeedbacks();
+      setTimeout(() => { msg.className = 'msg-box'; }, 4000);
+    } else {
+      msg.textContent = d.error || t('op_fail'); msg.className = 'msg-box err';
+    }
+  } catch (e) { msg.textContent = t('net_err') + ': ' + e.message; msg.className = 'msg-box err'; }
+}
+async function loadMyFeedbacks() {
+  const box = document.getElementById('fb-history');
+  if (!box) return;
+  box.innerHTML = '<span class="empty" data-i18n="loading">加载中...</span>';
+  try {
+    const resp = await fetch('/api/feedback/my');
+    const d = await resp.json();
+    const list = d.feedbacks || [];
+    if (!list.length) { box.innerHTML = '<div data-i18n="fb_empty">暂无反馈记录</div>'; return; }
+    box.innerHTML = list.map(f =>
+      '<div style="padding:10px 0;border-bottom:1px solid var(--border);">'
+      + '<div style="color:var(--text2);font-size:12px;">' + escapeHtml(f.created_at) + '</div>'
+      + '<div style="margin-top:4px;white-space:pre-wrap;color:var(--text);">' + escapeHtml(f.content) + '</div>'
+      + '</div>').join('');
+  } catch (e) { box.innerHTML = t('net_err'); }
+}
+
+async function viewHistory(room) {
+  const modal = document.getElementById('history-modal');
+  document.getElementById('history-title').textContent = t('history_title') + ' — ' + t('room_prefix') + room;
+  document.getElementById('history-body').innerHTML = '<div class="empty">' + t('loading') + '</div>';
+  modal.classList.add('show');
+  try {
+    const resp = await fetch('/api/history/' + room);
+    const data = await resp.json();
+    if (!resp.ok) { document.getElementById('history-body').innerHTML = '<div class="empty">' + t('load_fail') + '</div>'; return; }
+    renderHistoryMessages(data.messages || []);
+  } catch (e) {
+    document.getElementById('history-body').innerHTML = '<div class="empty">' + t('net_err') + '</div>';
+  }
+}
+
+function closeHistory() {
+  document.getElementById('history-modal').classList.remove('show');
+}
+
+function renderHistoryMessages(messages) {
+  const body = document.getElementById('history-body');
+  if (!messages.length) { body.innerHTML = '<div class="empty">' + t('empty_history') + '</div>'; return; }
+  let html = '';
+  for (const m of messages) {
+    const time = (m.created_at || '').replace('T', ' ').slice(5, 16);
+    const content = m.content || '';
+    if (m.role === 'user') {
+      html += '<div class="h-msg h-user"><div class="h-body">' + escapeHtml(content) + '</div><div class="h-time">' + escapeHtml(time) + '</div></div>';
+    } else if (m.role === 'ai') {
+      html += '<div class="h-msg h-ai"><div class="h-body">' + escapeHtml(content) + '</div><div class="h-time">' + escapeHtml(time) + '</div></div>';
+    } else if (m.role === 'system') {
+      html += '<div class="h-msg h-system">' + escapeHtml(content) + '</div>';
+    } else if (m.role === 'error') {
+      html += '<div class="h-msg h-error">' + escapeHtml(content) + '</div>';
+    } else if (m.role === 'tool') {
+      html += '<div class="h-msg h-tool"><span class="h-tool-name">[' + t('msg_tool') + '] ' + escapeHtml(m.tool_name || '') + '</span><pre>' + escapeHtml(content.slice(0, 800)) + '</pre></div>';
+    }
+  }
+  body.innerHTML = html;
+}
+
+async function exportRoom(room) {
+  try {
+    const resp = await fetch('/api/history/' + room);
+    const data = await resp.json();
+    if (!resp.ok) { showToast(t('load_fail')); return; }
+    const lines = [];
+    lines.push('==== ' + t('export_title') + ' ====');
+    lines.push(t('room_prefix') + ' ' + room);
+    lines.push(t('export_time') + ': ' + new Date().toLocaleString());
+    lines.push('='.repeat(50)); lines.push('');
+    for (const m of data.messages) {
+      const content = (m.content || '').replace(/\r\n/g, '\n');
+      if (m.role === 'user') { lines.push('[' + t('msg_user') + '] ' + content); lines.push(''); }
+      else if (m.role === 'ai') { lines.push('[' + t('msg_ai') + ']'); lines.push(content); lines.push(''); }
+      else if (m.role === 'system') { lines.push('[' + t('msg_system') + '] ' + content); }
+      else if (m.role === 'error') { lines.push('[' + t('msg_error') + '] ' + content); }
+      else if (m.role === 'tool') {
+        lines.push('--- [' + t('msg_tool') + '] ' + (m.tool_name || '') + ' ---');
+        lines.push(content.slice(0, 2000)); lines.push('---'); lines.push('');
+      }
+    }
+    const text = lines.join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'diagnostic_record_' + room + '_' + new Date().toISOString().slice(0, 10) + '.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(t('export_ok'));
+  } catch (e) { showToast(t('net_err') + ': ' + e.message); }
+}
+
+// ===== 工具模式（SN/MTM 刷写） =====
+let snmtmModels = [];
+let snmtmLoading = false;
+
+async function initTools() {
+  const msg = document.getElementById('sntm-msg');
+  msg.className = 'msg-box';
+  // 房间下拉（取在线房间）
+  fillSntmRoom();
+  // 机型下拉
+  try {
+    const resp = await fetch('/api/tools/snmtm/models');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || t('load_fail'));
+    snmtmModels = data.models || [];
+    document.getElementById('sntm-model').innerHTML = snmtmModels.map(m =>
+      '<option value="' + m.name + '">' + m.name + '</option>'
+    ).join('');
+    sntmRefreshRoom();
+    sntmRouteHint();
+  } catch (e) {
+    msg.textContent = t('load_fail') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  fillOa3Room();
+  fillBiosRoom();
+  fillSleepRoom();
+  fillEnergyRoom();
+  fillDriversRoom();
+  fillSioRoom('win');
+  fillSmartRoom('win');
+  fillWinlogsRoom();
+  fillDumpRoom();
+  fillRaidRoom();
+  fillDumpAnalyzeRoom();
+  fillTslogRoom();
+  ensureRoomPlaceholders();
+}
+
+// 所有工具房间下拉：加"请选择房间"占位并清空默认（不自动选中第一个房间）
+// 只有 preselectChatRoom（用户确实在对话中）才会自动选中对话房间
+function ensureRoomPlaceholders() {
+  document.querySelectorAll('section[id^="page-tools"] select[id$="-room"], section[id^="page-tools"] select[id$="-room-win"], section[id^="page-tools"] select[id$="-room-linux"]').forEach(sel => {
+    if (!Array.from(sel.options).some(o => o.value === '')) {
+      const ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = '-- 请选择房间 --';
+      sel.insertBefore(ph, sel.options[0]);
+    }
+    sel.value = '';
+  });
+}
+
+function fillTslogRoom() {
+  const sel = document.getElementById('tslog-room');
+  const online = toolOnlineRooms('windows');
+  sel.innerHTML = '';
+  if (!online.length) { sel.innerHTML = '<option value="">（无在线 Windows 房间）</option>'; return; }
+  online.forEach(r => {
+    const o = document.createElement('option');
+    o.value = r.room_code;
+    o.textContent = r.room_code + ' (' + (r.platform || '') + ')';
+    sel.appendChild(o);
+  });
+}
+
+function tslogClear() { document.getElementById('tslog-result').style.display = 'none'; }
+
+async function tslogFetch(uploadToIdg) {
+  const room = document.getElementById('tslog-room').value;
+  const msg = document.getElementById('tslog-msg');
+  const btn = uploadToIdg ? document.getElementById('tslog-upload-btn') : document.getElementById('tslog-btn');
+  const btn2 = uploadToIdg ? document.getElementById('tslog-btn') : document.getElementById('tslog-upload-btn');
+  if (!room) { msg.textContent = '请选择在线房间'; msg.className = 'msg-box err'; return; }
+  msg.textContent = uploadToIdg ? '采集打包中（约 3-5 分钟）——完成后自动上传到 IDG 分析...' : '采集进行中（约 3-5 分钟）——请耐心等待，完成后自动显示结果...';
+  msg.className = 'msg-box';
+  const _rbox = document.getElementById('tslog-result');
+  if (_rbox) { _rbox.style.display = 'none'; _rbox.innerHTML = ''; }  // 清旧结果（避免混淆）
+  btn.disabled = true; if (btn2) btn2.disabled = true;
+  // 动态等待反馈（2026-09-09：显示已等待时间——不让用户干等无感知）
+  var _tw0 = Date.now();
+  var _twTimer = setInterval(function () {
+    if (!msg) return;
+    var s = Math.round((Date.now() - _tw0) / 1000);
+    if (s > 0 && s % 15 === 0) msg.textContent = '仍在执行（已等待 ' + Math.floor(s / 60) + ' 分 ' + (s % 60) + ' 秒）——请耐心等待...';
+  }, 15000);
+  function _clearTw() { if (_twTimer) { clearInterval(_twTimer); _twTimer = null; } }
+  try {
+    // 超时保护（2026-09-09：请求挂起会导致按钮永久灰——680s 后报错恢复）
+    const ac = new AbortController();
+    const toTimer = setTimeout(() => ac.abort(), 680000);
+    const resp = await fetch('/api/tools/tslog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+      signal: ac.signal,
+    });
+    clearTimeout(toTimer);
+    const data = await resp.json();
+    if (!resp.ok) { _clearTw(); msg.textContent = data.error || '采集失败'; msg.className = 'msg-box err'; btn.disabled = false; if (btn2) btn2.disabled = false; return; }
+    const box = document.getElementById('tslog-result');
+    box.style.display = 'block';
+    if (!uploadToIdg) {
+      _clearTw();
+      msg.textContent = '✅ 采集完成（已打包到客户机本地）';
+      msg.className = 'msg-box';
+      box.innerHTML = '<pre style="white-space:pre-wrap;background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;color:#cbd5e1;margin-top:10px;">' + (data.output || '').replace(/</g, '&lt;') + '</pre>';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    // 上传模式：包路径（服务器已提取 pkg_path——正则兜底）
+    const out = data.output || '';
+    let pkgPath = data.pkg_path || '';
+    if (!pkgPath) {
+      const m = out.match(/TSLOG_DONE\s+(\S+)/);
+      if (m) pkgPath = m[1];
+    }
+    if (!pkgPath) {
+      _clearTw();
+      msg.textContent = '打包完成但未找到包路径（可能采集异常）——请先点「打包到本地」看输出';
+      msg.className = 'msg-box err';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    _clearTw();
+    msg.textContent = '打包完成——正在上传到 IDG 日志分析（大包可能需要几分钟）...';
+    const ac2 = new AbortController();
+    const to2 = setTimeout(() => ac2.abort(), 620000);
+    const upResp = await fetch('/api/tools/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room, path: pkgPath }),
+      signal: ac2.signal,
+    });
+    clearTimeout(to2);
+    const upData = await upResp.json();
+    if (!upResp.ok) {
+      _clearTw();
+      msg.textContent = '❌ 上传失败: ' + (upData.error || '');
+      msg.className = 'msg-box err';
+    } else {
+      _clearTw();
+      msg.textContent = '✅ 已上传到 IDG 日志分析';
+      msg.className = 'msg-box';
+      box.innerHTML = '<div style="margin-top:10px;padding:12px;background:#0b1220;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '📤 日志包已上传 IDG 并完成分析<br><br>' +
+        '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#58a6ff;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
+    }
+    btn.disabled = false; if (btn2) btn2.disabled = false;
+  } catch (e) {
+    _clearTw();
+    msg.textContent = '网络错误: ' + e.message;
+    msg.className = 'msg-box err';
+    btn.disabled = false; if (btn2) btn2.disabled = false;
+  }
+}
+
+function fillSntmRoom() {
+  const roomSel = document.getElementById('sntm-room');
+  const online = toolOnlineRooms('windows');
+  if (!online.length) {
+    roomSel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    roomSel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+// 根据房间的 machine_model 预选机型
+function sntmRefreshRoom() {
+  const roomCode = document.getElementById('sntm-room').value;
+  const room = allRooms.find(r => r.room_code === roomCode);
+  const model = room && room.machine_model ? room.machine_model.trim() : '';
+  const sel = document.getElementById('sntm-model');
+  if (model) {
+    const found = snmtmModels.find(m => m.name === model);
+    if (found) { sel.value = model; }
+  }
+  sntmRouteHint();
+}
+
+function sntmRouteHint() {
+  const model = document.getElementById('sntm-model').value;
+  const m = snmtmModels.find(x => x.name === model);
+  document.getElementById('sntm-route-hint').textContent = m
+    ? '工具链: AMIDEWIN ' + m.amide.toUpperCase() + ' + 驱动 ' + m.drv.toUpperCase()
+    : '';
+}
+
+async function snmtmFlash() {
+  const msg = document.getElementById('sntm-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('sntm-room').value;
+  const model = document.getElementById('sntm-model').value;
+  const sn = document.getElementById('sntm-sn').value.trim();
+  const mtm = document.getElementById('sntm-mtm').value.trim();
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  if (!model) { msg.textContent = t('need_model'); msg.className = 'msg-box err'; return; }
+  if (!sn) { msg.textContent = t('need_sn'); msg.className = 'msg-box err'; return; }
+  if (!mtm) { msg.textContent = t('need_ticket'); msg.className = 'msg-box err'; return; }
+
+  // 二次确认（防呆）
+  if (!confirm('⚠ 确认写入\n\n机型: ' + model + '\nSN : ' + sn + '\nMTM: ' + mtm + '\n\n写入后无法撤销，确认无误？')) return;
+
+  const btn = document.getElementById('sntm-btn');
+  btn.disabled = true;
+  snmtmLoading = true;
+  msg.textContent = t('snmtm_running');
+  msg.className = 'msg-box info';
+  const stepsBox = document.getElementById('sntm-steps');
+  stepsBox.style.display = 'block';
+  stepsBox.innerHTML = '<div class="empty">' + t('loading') + '</div>';
+  try {
+    const resp = await fetch('/api/tools/snmtm/flash', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room, model, sn, mtm }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; stepsBox.innerHTML = ''; return; }
+    // 渲染步骤日志
+    const steps = data.steps || [];
+    stepsBox.innerHTML = steps.map(s => '<div class="tool-step">' + escapeHtml(s) + '</div>').join('')
+      + '<div class="tool-step tool-step-verify">' + escapeHtml(t('snmtm_verify_label')) + ' ' + escapeHtml(data.verify_output || '') + '</div>';
+    if (data.status === 'ok') {
+      msg.textContent = '✅ ' + t('snmtm_ok');
+      msg.className = 'msg-box ok';
+    } else if (data.status === 'warning') {
+      msg.textContent = '⚠ ' + t('snmtm_warn_verify');
+      msg.className = 'msg-box warn';
+      if (data.hint) { const hint = document.createElement('div'); hint.className = 'tool-hint'; hint.textContent = data.hint; stepsBox.appendChild(hint); }
+    } else {
+      msg.textContent = data.error || t('op_fail');
+      msg.className = 'msg-box err';
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+  snmtmLoading = false;
+}
+
+// ===== OA3 密钥读取 / 激活 =====
+let oa3Key = '';
+
+function fillOa3Room() {
+  const sel = document.getElementById('oa3-room');
+  const online = toolOnlineRooms('windows');
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function oa3Read() {
+  const msg = document.getElementById('oa3-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('oa3-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('oa3-read-btn');
+  btn.disabled = true;
+  msg.textContent = t('oa3_reading');
+  msg.className = 'msg-box info';
+  try {
+    const resp = await fetch('/api/tools/oa3/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    oa3Key = data.key || '';
+    document.getElementById('oa3-key').textContent = oa3Key || t('oa3_no_key');
+    const markerTxt = data.bios_marker === '1' ? t('oa3_marker_yes') : (data.bios_marker === '0' ? t('oa3_marker_no') : (data.bios_marker || '-'));
+    const licTxt = oa3LicText(data.license_status);
+    document.getElementById('oa3-meta').textContent = t('oa3_marker') + ': ' + markerTxt + ' | ' + t('oa3_lic') + ': ' + licTxt;
+    document.getElementById('oa3-result').style.display = 'block';
+    document.getElementById('oa3-act-btn').disabled = !oa3Key;
+    document.getElementById('oa3-steps').style.display = 'none';
+    if (oa3Key) { msg.textContent = '✅ ' + t('oa3_read_ok'); msg.className = 'msg-box ok'; }
+    else { msg.textContent = '⚠ ' + t('oa3_read_empty'); msg.className = 'msg-box warn'; }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+function oa3LicText(status) {
+  if (status === '1') return t('oa3_lic_activated');
+  if (status === '2') return t('oa3_lic_oob');
+  if (status === '3') return t('oa3_lic_oot');
+  if (status === '0') return t('oa3_lic_none');
+  return (status || '-');
+}
+
+function copyOa3Key() {
+  if (!oa3Key) return;
+  copyText(oa3Key).then(() => showToast(t('copied_room')));
+}
+
+async function oa3Activate() {
+  const msg = document.getElementById('oa3-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('oa3-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  if (!oa3Key) { msg.textContent = t('oa3_no_key'); msg.className = 'msg-box err'; return; }
+  if (!confirm('⚠ ' + t('oa3_confirm') + '\n\n' + oa3Key + '\n\n' + t('oa3_activate_warn'))) return;
+  const btn = document.getElementById('oa3-act-btn');
+  btn.disabled = true;
+  msg.textContent = t('oa3_activating');
+  msg.className = 'msg-box info';
+  const stepsBox = document.getElementById('oa3-steps');
+  stepsBox.style.display = 'block';
+  stepsBox.innerHTML = '<div class="empty">' + t('loading') + '</div>';
+  try {
+    const resp = await fetch('/api/tools/oa3/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room, key: oa3Key }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; stepsBox.innerHTML = ''; return; }
+    const steps = data.steps || [];
+    stepsBox.innerHTML = steps.map(s => '<div class="tool-step">' + escapeHtml(s) + '</div>').join('')
+      + '<div class="tool-step tool-step-verify">' + escapeHtml(t('oa3_lic')) + ': ' + escapeHtml(oa3LicText(data.license_status)) + '</div>';
+    if (data.status === 'ok') {
+      msg.textContent = '✅ ' + t('oa3_act_ok');
+      msg.className = 'msg-box ok';
+    } else {
+      msg.textContent = '⚠ ' + t('oa3_act_warn');
+      msg.className = 'msg-box warn';
+      if (data.hint) { const h = document.createElement('div'); h.className = 'tool-hint'; h.textContent = data.hint; stepsBox.appendChild(h); }
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+// ===== BIOS 信息读取 =====
+let biosItems = [];
+let biosRawText = '';
+let biosPwdState = '';
+
+function fillBiosRoom() {
+  const sel = document.getElementById('bios-room');
+  const online = toolOnlineRooms('windows');
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function biosRead() {
+  const msg = document.getElementById('bios-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('bios-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('bios-btn');
+  btn.disabled = true;
+  msg.textContent = t('bios_reading');
+  msg.className = 'msg-box info';
+  try {
+    const resp = await fetch('/api/tools/bios/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    biosItems = data.items || [];
+    biosPwdState = data.password_state || '';
+    const info = data.info || {};
+    document.getElementById('bios-info').textContent =
+      (info.vendor || '-') + ' | ' + (info.version || '-') + (info.serial ? ' | SN: ' + info.serial : '') + (info.date ? ' | ' + info.date : '');
+    if (data.item_error) {
+      msg.textContent = '⚠ ' + data.item_error;
+      msg.className = 'msg-box warn';
+    } else if (data.need_admin) {
+      msg.textContent = '⚠ ' + data.need_admin + ' — ' + t('bios_elevate_hint');
+      msg.className = 'msg-box warn';
+      document.getElementById('bios-info').textContent = t('bios_elevate_title');
+    } else if (!biosItems.length) {
+      msg.textContent = '⚠ ' + t('bios_empty');
+      msg.className = 'msg-box warn';
+    } else {
+      msg.textContent = '✅ ' + t('bios_read_ok') + ' (' + biosItems.length + ')';
+      msg.className = 'msg-box ok';
+    }
+    document.getElementById('bios-result').style.display = 'block';
+    document.getElementById('bios-count2').textContent = biosItems.length;
+    biosRawText = biosItems.map(i => i.name + ',' + i.value).join('\n');
+    renderBiosItems();
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+function openBiosModal() {
+  renderBiosItems();
+  document.getElementById('bios-modal').classList.add('show');
+}
+
+function closeBiosModal() {
+  document.getElementById('bios-modal').classList.remove('show');
+}
+
+function downloadBiosTxt() {
+  if (!biosItems.length) return;
+  const info = (document.getElementById('bios-info').textContent || '').trim();
+  const lines = [];
+  lines.push('=== BIOS 配置快照 ===');
+  lines.push('机器: ' + info);
+  lines.push('时间: ' + new Date().toLocaleString());
+  lines.push('密码状态: ' + (typeof biosPwdState !== 'undefined' ? biosPwdState : ''));
+  lines.push('---------------------');
+  lines.push(biosRawText || '(无设置项)');
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'bios-config-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  showToast(t('bios_downloaded'));
+}
+
+function renderBiosItems() {
+  const kw = (document.getElementById('bios-search').value || '').trim().toLowerCase();
+  const list = biosItems.filter(i => !kw || i.name.toLowerCase().includes(kw) || i.value.toLowerCase().includes(kw));
+  document.getElementById('bios-count').textContent = t('count_prefix') + list.length + t('count_suffix');
+  if (!list.length) {
+    document.getElementById('bios-tbody').innerHTML = '<tr><td colspan="2" class="empty">' + t('bios_no_match') + '</td></tr>';
+    return;
+  }
+  document.getElementById('bios-tbody').innerHTML = list.map(i =>
+    '<tr><td class="mono">' + escapeHtml(i.name) + '</td><td>' + escapeHtml(i.value) + '</td></tr>'
+  ).join('');
+}
+
+function copyBiosItems() {
+  if (!biosItems.length) return;
+  copyText(biosRawText).then(() => showToast(t('copied_cmd')));
+}
+
+// ===== 工具：睡眠报告 =====
+function fillSleepRoom() {
+  const sel = document.getElementById('sleep-room');
+  const online = toolOnlineRooms('windows');
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function sleepStudyRun() {
+  const msg = document.getElementById('sleep-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('sleep-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('sleep-btn');
+  btn.disabled = true;
+  msg.textContent = t('sleep_running');
+  msg.className = 'msg-box info';
+  document.getElementById('sleep-result').style.display = 'none';
+  try {
+    const resp = await fetch('/api/tools/sleepstudy/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    if (data.need_admin) {
+      msg.textContent = '⚠ ' + t('sleep_admin_hint');
+      msg.className = 'msg-box warn';
+    } else if (data.report_error) {
+      msg.textContent = '⚠ ' + data.report_error;
+      msg.className = 'msg-box warn';
+    } else if (data.file_url) {
+      msg.textContent = '✅ ' + t('sleep_done') + ' (' + (data.size || 0) + ' bytes)';
+      msg.className = 'msg-box ok';
+      const dl = document.getElementById('sleep-dl');
+      dl.href = data.file_url;
+      dl.setAttribute('download', data.file_name || 'sleepstudy_report.html');
+      document.getElementById('sleep-result').style.display = 'block';
+    } else {
+      msg.textContent = '⚠ ' + t('sleep_empty');
+      msg.className = 'msg-box warn';
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+// ===== 工具：能源效率报告 =====
+function fillEnergyRoom() {
+  const sel = document.getElementById('energy-room');
+  const online = toolOnlineRooms('windows');
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function energyRun() {
+  const msg = document.getElementById('energy-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('energy-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('energy-btn');
+  btn.disabled = true;
+  msg.textContent = t('energy_running');
+  msg.className = 'msg-box info';
+  document.getElementById('energy-result').style.display = 'none';
+  try {
+    const resp = await fetch('/api/tools/energy/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    if (data.need_admin) {
+      msg.textContent = '⚠ ' + t('energy_admin_hint');
+      msg.className = 'msg-box warn';
+    } else if (data.report_error) {
+      msg.textContent = '⚠ ' + data.report_error;
+      msg.className = 'msg-box warn';
+    } else if (data.file_url) {
+      msg.textContent = '✅ ' + t('energy_done') + ' (' + (data.size || 0) + ' bytes)';
+      msg.className = 'msg-box ok';
+      const dl = document.getElementById('energy-dl');
+      dl.href = data.file_url;
+      dl.setAttribute('download', data.file_name || 'energy_report.html');
+      document.getElementById('energy-result').style.display = 'block';
+    } else {
+      msg.textContent = '⚠ ' + t('energy_empty');
+      msg.className = 'msg-box warn';
+    }
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+// ===== 工具：驱动版本信息 =====
+function fillDriversRoom() {
+  const sel = document.getElementById('drivers-room');
+  const online = toolOnlineRooms('windows');
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+let driversItems = [];
+let driversRawText = '';
+
+async function driversList() {
+  const msg = document.getElementById('drivers-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('drivers-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = document.getElementById('drivers-btn');
+  btn.disabled = true;
+  msg.textContent = t('drivers_reading');
+  msg.className = 'msg-box info';
+  document.getElementById('drivers-result').style.display = 'none';
+  try {
+    const resp = await fetch('/api/tools/drivers/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; return; }
+    driversItems = data.drivers || [];
+    driversRawText = data.table || data.raw || '';
+    if (!driversItems.length && !driversRawText) {
+      msg.textContent = '⚠ ' + t('drivers_empty');
+      msg.className = 'msg-box warn';
+      return;
+    }
+    msg.textContent = '✅ ' + t('drivers_done') + ' (' + (data.count || driversItems.length) + ')';
+    msg.className = 'msg-box ok';
+    document.getElementById('drivers-summary').textContent =
+      t('drivers_summary') + (data.count || driversItems.length) + t('drivers_summary_suffix');
+    document.getElementById('drivers-count2').textContent = data.count || driversItems.length;
+    document.getElementById('drivers-result').style.display = 'block';
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+  }
+  btn.disabled = false;
+}
+
+function renderDriversItems() {
+  const kw = (document.getElementById('drivers-search').value || '').trim().toLowerCase();
+  let list = driversItems;
+  if (!list.length) {
+    // 后端没解析出结构化数据时，退回文本模式（按行过滤）
+    const lines = (driversRawText || '').split('\n').filter(l => l.trim());
+    document.getElementById('drivers-count').textContent = t('count_prefix') + lines.length + t('count_suffix');
+    const body = document.getElementById('drivers-tbody');
+    if (!lines.length) {
+      body.innerHTML = '<tr><td colspan="3" class="empty">' + t('drivers_empty') + '</td></tr>';
+      return;
+    }
+    body.innerHTML = lines.map(l => {
+      const hit = !kw || l.toLowerCase().includes(kw);
+      return hit ? '<tr><td colspan="3" class="mono">' + escapeHtml(l) + '</td></tr>' : '';
+    }).join('');
+    return;
+  }
+  const filtered = list.filter(d => !kw
+    || (d.name || '').toLowerCase().includes(kw)
+    || (d.manufacturer || '').toLowerCase().includes(kw)
+    || (d.version || '').toLowerCase().includes(kw));
+  document.getElementById('drivers-count').textContent = t('count_prefix') + filtered.length + t('count_suffix');
+  const body = document.getElementById('drivers-tbody');
+  if (!filtered.length) {
+    body.innerHTML = '<tr><td colspan="3" class="empty">' + t('bios_no_match') + '</td></tr>';
+    return;
+  }
+  body.innerHTML = filtered.map(d =>
+    '<tr><td class="mono">' + escapeHtml(d.name || '') + '</td><td>' + escapeHtml(d.manufacturer || '') + '</td><td class="mono">' + escapeHtml(d.version || '') + '</td></tr>'
+  ).join('');
+}
+
+function openDriversModal() {
+  renderDriversItems();
+  document.getElementById('drivers-modal').classList.add('show');
+}
+
+function closeDriversModal() {
+  document.getElementById('drivers-modal').classList.remove('show');
+}
+
+function copyDriversText() {
+  const txt = driversRawText || (driversItems || []).map(d => [d.name, d.manufacturer, d.version].filter(Boolean).join('\t')).join('\n');
+  if (!txt) return;
+  copyText(txt).then(() => showToast(t('copied_cmd')));
+}
+
+function downloadDriversTxt() {
+  const lines = [];
+  lines.push('=== 驱动版本信息 ===');
+  lines.push('时间: ' + new Date().toLocaleString());
+  lines.push('驱动数量: ' + (driversItems.length || '—'));
+  lines.push('---------------------');
+  if (driversItems.length) {
+    lines.push('设备名\t厂商\t驱动版本');
+    driversItems.forEach(d => lines.push([d.name, d.manufacturer, d.version].join('\t')));
+  } else {
+    lines.push(driversRawText || '(无数据)');
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'drivers-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  showToast(t('bios_downloaded'));
+}
+
+// ===== 工具卡片：原位展开/收起 =====
+function toggleTool(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const isOpen = card.classList.contains('open');
+  // 先收起同一页面其他展开的卡片
+  const grid = card.closest('.tool-grid');
+  if (grid) {
+    grid.querySelectorAll('.tool-card.open').forEach(c => {
+      if (c.id !== cardId) {
+        c.classList.remove('open');
+        const btn = c.querySelector('.tool-card-open');
+        if (btn) btn.textContent = '▶ ' + t('btn_open_tool');
+      }
+    });
+  }
+  if (isOpen) {
+    card.classList.remove('open');
+    card.querySelector('.tool-card-open').textContent = '▶ ' + t('btn_open_tool');
+  } else {
+    card.classList.add('open');
+    card.querySelector('.tool-card-open').textContent = '▼ ' + t('btn_close_tool');
+    // 展开后刷新房间下拉（确保刚上线/下线的桥接器状态正确）
+    if (cardId === 'card-sntm') fillSntmRoom();
+    else if (cardId === 'card-oa3') fillOa3Room();
+    else if (cardId === 'card-bios') fillBiosRoom();
+    else if (cardId === 'card-sleep') fillSleepRoom();
+    else if (cardId === 'card-energy') fillEnergyRoom();
+    else if (cardId === 'card-drivers') fillDriversRoom();
+    else if (cardId === 'card-linux-logpack') fillLinuxLogPackRoom();
+  }
+}
+
+// ===== Linux 工具 =====
+function initLinuxTools() {
+  const msg = document.getElementById('linux-logpack-msg');
+  if (msg) msg.className = 'msg-box';
+  fillLinuxLogPackRoom();
+  fillSioRoom('linux');
+  fillSmartRoom('linux');
+  ensureRoomPlaceholders();
+}
+
+// ===== 蓝屏 / Dump 分析 =====
+let dumpAnalyzeReport = '';
+
+
+// 工具页房间过滤：普通工程师=全部在线房间；上门工程师(field)=按平台过滤
+function toolOnlineRooms(platform) {
+  if (currentRole === 'field') {
+    return allRooms.filter(r => r.bridge_online && (r.platform || '').toLowerCase() === platform);
+  }
+  return allRooms.filter(r => r.bridge_online);
+}
+
+function fillDumpAnalyzeRoom() {
+  const sel = document.getElementById('dumpanalyze-room');
+  const online = toolOnlineRooms('windows');
+  sel.innerHTML = online.length
+    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
+    : '<option value="">暂无在线房间</option>';
+}
+
+function dumpAnalyzeClear() {
+  document.getElementById('dumpanalyze-msg').textContent = '';
+  document.getElementById('dumpanalyze-result').style.display = 'none';
+}
+
+async function dumpAnalyzeFetch() {
+  const roomCode = document.getElementById('dumpanalyze-room').value;
+  if (!roomCode) { alert('请选择在线房间'); return; }
+  const path = document.getElementById('dumpanalyze-path').value.trim();
+  const msg = document.getElementById('dumpanalyze-msg');
+  const btn = document.getElementById('dumpanalyze-btn');
+  msg.className = 'msg-box';
+  msg.textContent = path
+    ? '正在分析指定路径的 dump（' + path + '，约 1-2 分钟）...'
+    : '正在分析蓝屏 / Dump（事件日志 + 转储解析，约 1-2 分钟）...';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/dump_analyze', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode, path: path || undefined }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    dumpAnalyzeReport = data.report || '';
+    msg.textContent = '✅ 蓝屏分析完成——点击下方按钮查看报告/下载';
+    msg.className = 'msg-box ok';
+    document.getElementById('dumpanalyze-result').style.display = 'block';
+    msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    msg.className = 'msg-box err';
+    msg.textContent = '分析失败：' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+// ===== RAID 信息抓取（VROC / RSTe / Broadcom）=====
+let raidLogText = '';
+
+function fillRaidRoom() {
+  const sel = document.getElementById('raid-room');
+  const online = toolOnlineRooms('windows');
+  sel.innerHTML = online.length
+    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
+    : '<option value="">暂无在线房间</option>';
+}
+
+function raidClear() {
+  document.getElementById('raid-msg').textContent = '';
+  document.getElementById('raid-result').style.display = 'none';
+}
+
+async function raidFetch() {
+  const roomCode = document.getElementById('raid-room').value;
+  if (!roomCode) { alert('请选择在线房间'); return; }
+  const msg = document.getElementById('raid-msg');
+  const btn = document.getElementById('raid-btn');
+  msg.className = 'msg-box';
+  msg.textContent = '正在抓取 RAID 信息（VROC / RSTe / Broadcom，约 30-60 秒）...';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/raid', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    raidLogText = data.log || '';
+    msg.textContent = '✅ RAID 信息抓取完成（' + raidLogText.split('\n').length + ' 行）——点击下方按钮查看/下载';
+    msg.className = 'msg-box ok';
+    document.getElementById('raid-result').style.display = 'block';
+    msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    msg.className = 'msg-box err';
+    msg.textContent = '抓取失败：' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+// ===== Windows 系统日志收集 =====
+function fillWinlogsRoom() {
+  const sel = document.getElementById('winlogs-room');
+  const online = toolOnlineRooms('windows');
+  sel.innerHTML = online.length
+    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
+    : '<option value="">暂无在线房间</option>';
+}
+
+function winlogsClear() { document.getElementById('winlogs-msg').textContent = ''; }
+
+async function winlogsFetch() {
+  const roomCode = document.getElementById('winlogs-room').value;
+  if (!roomCode) { alert('请选择在线房间'); return; }
+  const msg = document.getElementById('winlogs-msg');
+  const btn = document.getElementById('winlogs-btn');
+  msg.className = 'msg-box';
+  msg.textContent = '正在导出系统日志（约 30-60 秒）...';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/winlogs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    msg.className = 'msg-box ok';
+    msg.innerHTML = '<pre style="margin:0;font-size:12px;white-space:pre-wrap;word-break:break-all;">' + escapeHtml(data.log || '') + '</pre>';
+    msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    msg.className = 'msg-box err';
+    msg.textContent = '收集失败：' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+// ===== Dump / Minidump 收集 =====
+function fillDumpRoom() {
+  const sel = document.getElementById('dump-room');
+  const online = toolOnlineRooms('windows');
+  sel.innerHTML = online.length
+    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
+    : '<option value="">暂无在线房间</option>';
+}
+
+function dumpClear() { document.getElementById('dump-msg').textContent = ''; }
+
+async function dumpFetch() {
+  const roomCode = document.getElementById('dump-room').value;
+  if (!roomCode) { alert('请选择在线房间'); return; }
+  const msg = document.getElementById('dump-msg');
+  const btn = document.getElementById('dump-btn');
+  msg.className = 'msg-box';
+  msg.textContent = '正在收集蓝屏 Dump...';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/dump', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    msg.className = 'msg-box ok';
+    msg.innerHTML = '<pre style="margin:0;font-size:12px;white-space:pre-wrap;word-break:break-all;">' + escapeHtml(data.log || '') + '</pre>';
+    msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    msg.className = 'msg-box err';
+    msg.textContent = '收集失败：' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+// ===== 硬盘健康检测（SMART）=====
+let smartLogText = { win: '', linux: '' };
+
+function fillSmartRoom(platform) {
+  const roomSel = document.getElementById('smart-room-' + platform);
+  const online = toolOnlineRooms(platform === 'win' ? 'windows' : 'linux');
+  if (!online.length) {
+    roomSel.innerHTML = '<option value="">暂无在线房间</option>';
+  } else {
+    roomSel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+function smartClear(platform) {
+  document.getElementById('smart-msg-' + platform).textContent = '';
+  document.getElementById('smart-result-' + platform).style.display = 'none';
+}
+
+async function smartFetch(platform) {
+  const roomCode = document.getElementById('smart-room-' + platform).value;
+  if (!roomCode) { alert('请选择在线房间'); return; }
+  const msg = document.getElementById('smart-msg-' + platform);
+  const btn = document.getElementById('smart-btn-' + platform);
+  msg.className = 'msg-box';
+  msg.textContent = '正在检测硬盘 SMART 健康（Linux 首次可能需安装 smartmontools，请稍候）...';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/smart', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    smartLogText[platform] = data.log || '';
+    msg.textContent = '✅ SMART 检测完成（' + smartLogText[platform].split('\n').length + ' 行）——点击下方按钮查看/下载';
+    msg.className = 'msg-box ok';
+    document.getElementById('smart-result-' + platform).style.display = 'block';
+  } catch (e) {
+    msg.className = 'msg-box err';
+    msg.textContent = '检测失败：' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+// ===== SIO Log 硬件诊断日志 =====
+let sioLogText = { win: '', linux: '' };
+
+function fillSioRoom(platform) {
+  const roomSel = document.getElementById('sio-room-' + platform);
+  const online = toolOnlineRooms(platform === 'win' ? 'windows' : 'linux');
+  if (!online.length) {
+    roomSel.innerHTML = '<option value="">暂无在线房间</option>';
+  } else {
+    roomSel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+function sioClear(platform) {
+  document.getElementById('sio-msg-' + platform).textContent = '';
+  document.getElementById('sio-result-' + platform).style.display = 'none';
+}
+
+async function sioFetch(platform) {
+  const roomCode = document.getElementById('sio-room-' + platform).value;
+  if (!roomCode) { alert('请选择在线房间'); return; }
+  const msg = document.getElementById('sio-msg-' + platform);
+  const btn = document.getElementById('sio-btn-' + platform);
+  msg.className = 'msg-box';
+  msg.textContent = '正在下载工具并抓取 SIO Log（需 30-60 秒，请稍候）...';
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/tools/sio_log', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+    sioLogText[platform] = data.log || '';
+    const toolTag = data.tool === 'alt' ? '（备用工具链路）' : '';
+    msg.textContent = '✅ SIO Log 抓取完成' + toolTag + '（' + sioLogText[platform].split('\n').length + ' 行）——点击下方按钮查看/下载';
+    msg.className = 'msg-box ok';
+    document.getElementById('sio-result-' + platform).style.display = 'block';
+  } catch (e) {
+    msg.className = 'msg-box err';
+    msg.textContent = '抓取失败：' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+// ===== 通用日志查看弹窗（SIO / SMART 共用）=====
+let logModalKind = '';
+let logModalRoom = '';
+
+function getLogState(kind) {
+  const p = kind.split('-')[1] || 'win';
+  if (kind.startsWith('sio')) return { title: '🔧 SIO Log（' + p + '）', text: sioLogText[p] || '' };
+  if (kind.startsWith('raid')) return { title: '🛡 RAID 信息（VROC / RSTe / Broadcom）', text: raidLogText || '' };
+  if (kind.startsWith('dumpanalyze')) return { title: '💥 蓝屏 / Dump 分析报告', text: dumpAnalyzeReport || '' };
+  return { title: '💽 硬盘健康 SMART（' + p + '）', text: smartLogText[p] || '' };
+}
+
+function openLogModal(kind, room) {
+  logModalKind = kind;
+  logModalRoom = room || '';
+  const state = getLogState(kind);
+  document.getElementById('log-modal-title').textContent = state.title;
+  document.getElementById('log-modal-content').textContent = state.text;
+  document.getElementById('log-modal').classList.add('show');
+}
+
+function closeLogModal() {
+  document.getElementById('log-modal').classList.remove('show');
+}
+
+function copyLogText() {
+  const text = document.getElementById('log-modal-content').textContent;
+  navigator.clipboard.writeText(text).then(() => alert('已复制全部内容')).catch(() => alert('复制失败'));
+}
+
+function downloadLogTxt() {
+  const text = document.getElementById('log-modal-content').textContent;
+  if (!text) return;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const prefix = logModalKind.startsWith('sio') ? 'sio_log' : 'smart';
+  a.download = prefix + '_' + (logModalRoom || 'room') + '_' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+function fillLinuxLogPackRoom() {
+  const sel = document.getElementById('linux-logpack-room');
+  const online = allRooms.filter(r => r.bridge_online && r.platform === 'linux');
+  if (!online.length) {
+    sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
+  } else {
+    sel.innerHTML = online.map(r =>
+      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
+    ).join('');
+  }
+}
+
+async function linuxLogPack(uploadToIdg) {
+  const msg = document.getElementById('linux-logpack-msg');
+  msg.className = 'msg-box';
+  const room = document.getElementById('linux-logpack-room').value;
+  if (!room) { msg.textContent = t('sntm_no_room'); msg.className = 'msg-box err'; return; }
+  const btn = uploadToIdg ? document.getElementById('linux-logpack-upload-btn') : document.getElementById('linux-logpack-btn');
+  const btn2 = uploadToIdg ? document.getElementById('linux-logpack-btn') : document.getElementById('linux-logpack-upload-btn');
+  btn.disabled = true; if (btn2) btn2.disabled = true;
+  msg.textContent = uploadToIdg ? '打包中——完成后自动上传到 IDG 分析...' : t('linux_logpack_running');
+  msg.className = 'msg-box info';
+  document.getElementById('linux-logpack-result').style.display = 'none';
+  try {
+    const resp = await fetch('/api/tools/linux/logpack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { msg.textContent = data.error || t('op_fail'); msg.className = 'msg-box err'; btn.disabled = false; if (btn2) btn2.disabled = false; return; }
+    if (data.pack_error) {
+      msg.textContent = '⚠ ' + data.pack_error;
+      msg.className = 'msg-box warn';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    if (!data.pack_path) {
+      msg.textContent = '⚠ ' + t('linux_logpack_empty');
+      msg.className = 'msg-box warn';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    if (!uploadToIdg) {
+      const sizeMB = (data.pack_size / 1024 / 1024).toFixed(2);
+      msg.textContent = '✅ ' + t('linux_logpack_done');
+      msg.className = 'msg-box ok';
+      document.getElementById('linux-logpack-info').textContent =
+        t('linux_logpack_file') + data.pack_path + '  (' + sizeMB + ' MB)';
+      document.getElementById('linux-logpack-result').style.display = 'block';
+      btn.disabled = false; if (btn2) btn2.disabled = false;
+      return;
+    }
+    // 上传模式
+    msg.textContent = '打包完成——正在上传到 IDG 日志分析...';
+    const upResp = await fetch('/api/tools/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: room, path: data.pack_path }),
+    });
+    const upData = await upResp.json();
+    if (!upResp.ok) {
+      _clearTw();
+      msg.textContent = '❌ 上传失败: ' + (upData.error || '');
+      msg.className = 'msg-box err';
+    } else {
+      _clearTw();
+      msg.textContent = '✅ 已上传到 IDG 日志分析';
+      msg.className = 'msg-box ok';
+      document.getElementById('linux-logpack-info').textContent = '';
+      document.getElementById('linux-logpack-result').style.display = 'block';
+      document.getElementById('linux-logpack-result').innerHTML =
+        '<div style="margin-top:10px;padding:12px;background:#0b1220;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '📤 日志包已上传 IDG 并完成分析<br><br>' +
+        '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#58a6ff;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
+    }
+    btn.disabled = false; if (btn2) btn2.disabled = false;
+  } catch (e) {
+    msg.textContent = t('net_err') + ': ' + e.message;
+    msg.className = 'msg-box err';
+    btn.disabled = false; if (btn2) btn2.disabled = false;
+  }
+}
+
+// ===== 工具 =====
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function copyCmd(el) {
+  const cmd = el.parentElement.querySelector('span').textContent;
+  copyText(cmd).then(() => showToast(t('copied_cmd')));
+}
+
+// 通用复制：HTTP 环境下 navigator.clipboard 不可用（非安全上下文），自动降级 execCommand
+function copyText(text) {
+  return new Promise((resolve, reject) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(resolve).catch(() => fallbackCopy(text, resolve));
+    } else {
+      fallbackCopy(text, resolve);
+    }
+  });
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { }
+  document.body.removeChild(ta);
+}
+
+document.getElementById('f-join').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });
+document.getElementById('f-sn').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
+document.getElementById('f-ticket').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRoom(); });
+document.getElementById('history-modal').addEventListener('click', (e) => { if (e.target.id === 'history-modal') closeHistory(); });
+document.getElementById('bios-modal').addEventListener('click', (e) => { if (e.target.id === 'bios-modal') closeBiosModal(); });
+document.getElementById('drivers-modal').addEventListener('click', (e) => { if (e.target.id === 'drivers-modal') closeDriversModal(); });
+
+// ===== Init =====
+applyLang(currentLang);
+loadMe();
+loadRooms();
+</script>
+</body>
+</html>

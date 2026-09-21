@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>诊断台 · 云端 AI 远程运维助手</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d1117; --surface:#161b22; --surface2:#21262d; --border:#30363d;
+    --text:#e6edf3; --text2:#8b949e; --text3:#6e7681;
+    --info:#58a6ff; --success:#3fb950; --warn:#d29922; --error:#f85149; --purple:#bc8cff;
+  }
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+  /* ── 顶栏 ── */
+  header{background:var(--surface);border-bottom:1px solid var(--border);padding:9px 16px;
+    display:flex;align-items:center;gap:14px;row-gap:8px;flex-wrap:wrap;flex:0 0 auto}
+  .status-dot{width:8px;height:8px;border-radius:50%;background:var(--success);
+    box-shadow:0 0 6px var(--success);flex:0 0 auto}
+  .hdr-item{font-size:12.5px;color:var(--text2);display:inline-flex;align-items:center;gap:5px;
+    white-space:nowrap}
+  .hdr-item b{color:var(--text);font-weight:600}
+  .hdr-sep{width:1px;height:13px;background:var(--border);flex:0 0 auto}
+  .hdr-btn{padding:3px 10px;font-size:12px;background:var(--surface2);color:var(--text2);
+    border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto}
+  .hdr-btn:hover{color:var(--text);border-color:var(--text3)}
+  .spacer{flex:1}
+
+  /* ── 主区 ── */
+  .main{flex:1;display:flex;min-height:0}
+
+  /* 左：标签面板 */
+  .tags-panel{flex:0 0 340px;border-right:1px solid var(--border);overflow-y:auto;padding:14px 12px 30px}
+  .panel-title{font-size:12px;color:var(--text3);font-weight:600;letter-spacing:.5px;
+    padding:0 4px 8px;text-transform:uppercase}
+  .group-title{font-size:12px;color:var(--text3);padding:12px 4px 6px;font-weight:600}
+
+  /* 诊断卡片（新版：带说明 + 状态） */
+  .diag-card{display:flex;gap:10px;padding:9px 11px;margin-bottom:6px;background:var(--surface);
+    border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .12s}
+  .diag-card:hover{border-color:var(--info);background:var(--surface2)}
+  .diag-card.running{border-color:var(--warn);background:rgba(210,153,34,.08)}
+  .diag-card.done{border-color:var(--success);background:rgba(63,185,80,.06)}
+  .dc-icon{font-size:17px;flex:0 0 auto;line-height:1.3}
+  .dc-body{flex:1;min-width:0}
+  .dc-title{font-size:13.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px}
+  .dc-desc{font-size:11.5px;color:var(--text2);margin-top:2px;line-height:1.45;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dc-status{font-size:11px;flex:0 0 auto;align-self:center;padding:1px 7px;border-radius:10px;
+    background:var(--surface2);color:var(--text3)}
+  .dc-status.run{background:rgba(210,153,34,.15);color:var(--warn)}
+  .dc-status.ok{background:rgba(63,185,80,.15);color:var(--success)}
+
+  /* 右：结果区 */
+  .result-panel{flex:1;overflow-y:auto;padding:18px 22px 60px;min-width:0}
+  .ticket-bar{background:var(--surface);border:1px solid var(--border);border-radius:9px;
+    padding:11px 15px;margin-bottom:16px;display:flex;gap:22px;flex-wrap:wrap;align-items:center}
+  .tb-item{font-size:12.5px;color:var(--text2)}
+  .tb-item b{color:var(--text)}
+  .machine-bar{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text2);
+    background:var(--surface2);border-radius:7px;padding:7px 12px;margin-bottom:16px}
+  .machine-bar span b{color:var(--text)}
+
+  .result-title{font-size:16px;font-weight:650;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .sec-label{font-size:12.5px;font-weight:600;color:var(--text2);margin:16px 0 7px;display:flex;align-items:center;gap:6px}
+
+  /* 采集项清单 */
+  .manifest{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:12px 15px}
+  .mani-row{display:flex;gap:9px;padding:5px 0;font-size:13px;align-items:flex-start;
+    border-bottom:1px solid rgba(48,54,61,.5)}
+  .mani-row:last-child{border-bottom:none}
+  .mani-icon{flex:0 0 auto;font-size:13px}
+  .mani-text{flex:1;color:var(--text)}
+  .mani-note{color:var(--text2);font-size:12px}
+  .mani-ok .mani-text{color:var(--success)}
+  .mani-ok .mani-note{color:var(--text2)}
+  .mani-fail .mani-text{color:var(--error)}
+  .mani-na .mani-text{color:var(--text3)}
+
+  /* 观察/依据/缺失 */
+  .obs-box{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:12px 15px;
+    font-size:13.5px;line-height:1.75}
+  .obs-box table{width:100%;border-collapse:collapse;margin:6px 0;font-size:12.5px}
+  .obs-box th,.obs-box td{text-align:left;padding:5px 9px;border-bottom:1px solid var(--border)}
+  .obs-box th{color:var(--text2);font-size:11.5px;font-weight:600;background:var(--surface2)}
+  .obs-box code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px;color:#79c0ff}
+  .gap-box{background:rgba(210,153,34,.07);border-left:3px solid var(--warn);border-radius:0 8px 8px 0;
+    padding:11px 15px;font-size:13px;color:#e8c26a}
+  .clue-box{background:rgba(188,140,255,.07);border-left:3px solid var(--purple);border-radius:0 8px 8px 0;
+    padding:10px 14px;font-size:12.5px;color:#d8b9ff;margin-bottom:8px}
+
+  /* 底部输入区 */
+  .input-area{flex:0 0 auto;border-top:1px solid var(--border);background:var(--surface);
+    padding:10px 16px;display:flex;gap:10px;align-items:center}
+  .input-area input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;
+    padding:9px 13px;color:var(--text);font-size:13.5px;outline:none}
+  .input-area input:focus{border-color:var(--info)}
+  .send-btn{background:var(--info);color:#fff;border:none;border-radius:8px;padding:9px 20px;
+    font-size:13.5px;font-weight:600;cursor:pointer}
+
+  /* ── 初步判读框（第五段）── */
+  .read-box{background:rgba(188,140,255,.07);border-left:3px solid var(--purple,#bc8cff);
+    border-radius:0 8px 8px 0;padding:11px 15px;font-size:13.5px;line-height:1.75;color:#d8b9ff}
+  .read-box code{background:rgba(255,255,255,.06);padding:1px 5px;border-radius:3px;font-size:12px;color:#e2ccff}
+  .warn-flag{margin-top:8px;font-size:11.5px;color:#e8c26a;background:rgba(210,153,34,.08);
+    border-left:3px solid var(--warn);border-radius:0 6px 6px 0;padding:7px 11px}
+
+  /* ── 启动项列表（可勾选）── */
+  .st-row{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid rgba(48,54,61,.5);align-items:flex-start}
+  .st-row:last-child{border-bottom:none}
+  .st-dis{opacity:.55}
+
+  /* ── 连接面板 tab ── */
+  .cp-tab{padding:5px 12px;font-size:12px;background:var(--surface2);color:var(--text2);
+    border:1px solid var(--border);border-radius:6px;cursor:pointer}
+  .cp-tab.active{background:rgba(56,139,253,.12);color:var(--info);border-color:var(--info)}
+
+  /* ── 审批弹窗（与对话页同款）── */
+  #approval-overlay{display:none;position:fixed;inset:0;background:rgba(1,4,9,.8);z-index:10000;
+    align-items:center;justify-content:center;padding:20px}
+  #approval-dialog{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+    max-width:520px;width:100%;padding:22px 24px}
+  #approval-dialog h3{font-size:16px;font-weight:650;margin-bottom:8px;color:var(--text)}
+  .human-desc{background:var(--surface2);border-left:3px solid var(--info);border-radius:0 8px 8px 0;
+    padding:11px 14px;font-size:13.5px;color:var(--text);margin:10px 0;line-height:1.65}
+  .detail-toggle{background:none;border:none;color:var(--text2);font-size:12px;cursor:pointer;padding:4px 0}
+  .detail-toggle:hover{color:var(--info)}
+  .tool-info{display:none;background:#010409;border:1px solid var(--border);border-radius:7px;
+    padding:10px 12px;margin:6px 0;font-size:12px}
+  .args-display{white-space:pre-wrap;color:#c9d1d9;font-family:Consolas,Monaco,monospace;font-size:11.5px;
+    max-height:180px;overflow-y:auto}
+  .timer{font-size:12px;color:var(--text3);margin:8px 0}
+  .btn-row{display:flex;gap:10px;margin:12px 0 8px}
+  .btn-approve,.btn-deny{flex:1;padding:9px;border:none;border-radius:8px;font-size:13.5px;
+    font-weight:600;cursor:pointer}
+  .btn-approve{background:var(--success);color:#fff}
+  .btn-deny{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+  .deny-reason{display:none;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:7px;
+    padding:8px 11px;color:var(--text);font-size:12.5px;resize:vertical;min-height:56px}
+
+
+
+  /* ── 右侧页签（B方案 2026-09-16）── */
+  .tabs{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:16px;align-items:center}
+  .tab{padding:7px 15px;font-size:13px;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;
+    display:flex;align-items:center;gap:6px;user-select:none}
+  .tab:hover{color:var(--text)}
+  .tab.active{color:var(--info);border-bottom-color:var(--info);font-weight:600}
+  .tab .badge-mini{background:var(--error);color:#fff;font-size:10px;padding:0 5px;border-radius:9px;line-height:15px}
+  .tab-panel{display:none}
+  .tab-panel.active{display:block}
+
+  /* 对话流 */
+  .chat-flow{max-width:760px}
+  .msg{display:flex;gap:10px;margin-bottom:14px}
+  .msg .avatar{flex:0 0 28px;height:28px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-size:14px;background:var(--surface2)}
+  .msg .bubble{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    padding:10px 14px;font-size:13.5px;line-height:1.72;min-width:0}
+  .msg.user .bubble{background:rgba(56,139,253,.09);border-color:rgba(56,139,253,.35)}
+  .msg .mtime{font-size:11px;color:var(--text3);margin-top:5px}
+  .bubble table{width:100%;border-collapse:collapse;margin:6px 0;font-size:12.5px}
+  .bubble th,.bubble td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)}
+  .bubble th{color:var(--text2);font-size:11.5px;background:var(--surface2)}
+  .bubble code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px;color:#79c0ff}
+</style>
+</head>
+<body>
+
+<!-- 顶栏 -->
+<header>
+  <span class="status-dot"></span>
+  <span class="hdr-item" id="hdr-svc">服务已连接</span>
+  <span class="hdr-sep"></span>
+  <span class="hdr-item" id="hdr-bridge" style="color:#f85149">桥接器未连接</span>
+  <span class="hdr-sep"></span>
+  <span class="hdr-item">📋 房间 <b id="hdr-room">------</b></span>
+  <span class="hdr-item">SN: <b id="hdr-sn">-</b></span>
+  <span class="hdr-item">工单: <b id="hdr-ticket">-</b></span>
+  <span class="hdr-item">剩 <b id="hdr-days">-</b> 天</span>
+  <span class="hdr-item" id="hdr-status" style="color:var(--info)">诊断中</span>
+  <span class="spacer"></span>
+  <button class="hdr-btn" id="btn-connect" onclick="toggleConnectPanel()">📶 连接你的电脑 ▾</button>
+  <button class="hdr-btn" onclick="backToChat()">💬 转对话界面</button>
+  <button class="hdr-btn" onclick="closeRoom()" style="color:#f85149;">⛔ 结束诊断</button>
+  <button class="hdr-btn" id="btn-export" onclick="exportReport()">📄 导出报告</button>
+</header>
+
+<!-- 连接面板（一键连接命令——与对话页一致） -->
+<div id="connect-panel" style="display:none;background:var(--surface);border-bottom:1px solid var(--border);padding:14px 18px;">
+  <div style="font-size:13px;font-weight:650;color:var(--text);margin-bottom:8px;">📶 在客户机上执行以下命令（任选其一）</div>
+  <div style="display:flex;gap:6px;margin-bottom:10px;">
+    <button class="cp-tab active" data-tab="ps" onclick="switchConnectTab('ps')">PowerShell 命令（推荐）</button>
+    <button class="cp-tab" data-tab="exe" onclick="switchConnectTab('exe')">exe 下载</button>
+    <button class="cp-tab" data-tab="linux" onclick="switchConnectTab('linux')">Linux</button>
+  </div>
+  <div id="cp-body" style="font-size:12px;color:var(--text2);">
+    <div id="cp-cmd" style="background:#010409;border:1px solid var(--border);border-radius:7px;padding:11px 13px;
+      font-family:Consolas,Monaco,monospace;font-size:11.5px;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;max-height:190px;overflow:auto;"></div>
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+      <button class="hdr-btn" onclick="copyConnectCmd()">📋 复制命令</button>
+      <span id="cp-hint" style="font-size:11.5px;color:var(--text3);"></span>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <!-- 左侧：诊断标签 -->
+  <div class="tags-panel">
+    <div class="panel-title">⚡ 快捷诊断工具</div>
+
+    <div class="group-title">系统诊断</div>
+
+    <div class="diag-card" data-key="system" onclick="pick(this)">
+      <span class="dc-icon">🖥</span>
+      <div class="dc-body">
+        <div class="dc-title">系统问题</div>
+        <div class="dc-desc">版本/激活 · 事件日志 · TPM · 系统文件 · 更新历史 · 运行库</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="bsod" onclick="pick(this)">
+      <span class="dc-icon">💥</span>
+      <div class="dc-body">
+        <div class="dc-title">蓝屏分析</div>
+        <div class="dc-desc">蓝屏记录 · 停止码 · WHEA · 内存诊断 · TDR</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="reboot" onclick="pick(this)">
+      <span class="dc-icon">🔄</span>
+      <div class="dc-body">
+        <div class="dc-title">意外重启</div>
+        <div class="dc-desc">重启历史 · 41/6008 判定 · 电源 · 温度 · 睡眠唤醒</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="slow" onclick="pick(this)">
+      <span class="dc-icon">🐢</span>
+      <div class="dc-body">
+        <div class="dc-title">性能卡顿</div>
+        <div class="dc-desc">启动项 · 占用 Top · 磁盘空间 · 开机耗时 · 内存诊断</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="thermal" onclick="pick(this)">
+      <span class="dc-icon">🌡</span>
+      <div class="dc-body">
+        <div class="dc-title">温度散热</div>
+        <div class="dc-desc">机型识别 · 温度读数 · 风扇 · 降频记录 · SIO 日志</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="sleep" onclick="pick(this)">
+      <span class="dc-icon">💤</span>
+      <div class="dc-body">
+        <div class="dc-title">睡眠唤醒</div>
+        <div class="dc-desc">睡眠事件 · 异常唤醒源 · sleepstudy · 唤醒定时器</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="appcrash" onclick="pick(this)">
+      <span class="dc-icon">🧩</span>
+      <div class="dc-body">
+        <div class="dc-title">应用崩溃</div>
+        <div class="dc-desc">错误事件 · 崩溃模块 · 运行库 · 崩溃频率</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="security" onclick="pick(this)">
+      <span class="dc-icon">🛡</span>
+      <div class="dc-body">
+        <div class="dc-title">安全威胁</div>
+        <div class="dc-desc">Defender · 可疑自启 · hosts · 浏览器劫持 · 补丁</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="activation" onclick="pick(this)">
+      <span class="dc-icon">🔑</span>
+      <div class="dc-body">
+        <div class="dc-title">系统激活</div>
+        <div class="dc-desc">激活状态 · 许可证类型 · KMS · Office 激活 · 服务状态</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="data" onclick="pick(this)">
+      <span class="dc-icon">📁</span>
+      <div class="dc-body">
+        <div class="dc-title">数据丢失</div>
+        <div class="dc-desc">磁盘空间 · 回收站 · 文件系统 · 卷影副本 · SMART</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+
+    <div class="diag-card" data-key="update" onclick="pick(this)">
+      <span class="dc-icon">📅</span>
+      <div class="dc-body">
+        <div class="dc-title">更新失败</div>
+        <div class="dc-desc">更新历史 · 错误码 · Windows Update 组件 · DISM</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="sfc" onclick="pick(this)">
+      <span class="dc-icon">🧯</span>
+      <div class="dc-body">
+        <div class="dc-title">系统文件修复</div>
+        <div class="dc-desc">sfc 记录 · DISM 状态 · 组件存储健康度</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="adware" onclick="pick(this)">
+      <span class="dc-icon">🕵️</span>
+      <div class="dc-body">
+        <div class="dc-title">弹窗广告</div>
+        <div class="dc-desc">流氓软件 · 计划任务 · 浏览器扩展 · hosts</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="bitlocker" onclick="pick(this)">
+      <span class="dc-icon">🔒</span>
+      <div class="dc-body">
+        <div class="dc-title">BitLocker/TPM</div>
+        <div class="dc-desc">加密状态 · 恢复密钥 · TPM 版本 · 安全启动</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="group-title">硬件诊断</div>
+
+    <div class="diag-card" data-key="disk" onclick="pick(this)">
+      <span class="dc-icon">🔧</span>
+      <div class="dc-body">
+        <div class="dc-title">硬盘健康</div>
+        <div class="dc-desc">SMART 全量 · 坏道 · 文件系统 · 备份还原点</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="raid" onclick="pick(this)">
+      <span class="dc-icon">💾</span>
+      <div class="dc-body">
+        <div class="dc-title">RAID 阵列</div>
+        <div class="dc-desc">阵列状态 · 成员磁盘 · 控制器 · SMART · 重建进度</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="gpuactive" onclick="pick(this)">
+      <span class="dc-icon">🎮</span>
+      <div class="dc-body">
+        <div class="dc-title">独显启用状态</div>
+        <div class="dc-desc">显卡枚举 · 当前驱动显示 · 切换设置 · 是否被禁用</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="battery" onclick="pick(this)">
+      <span class="dc-icon">🔋</span>
+      <div class="dc-body">
+        <div class="dc-title">电池健康</div>
+        <div class="dc-desc">电池报告 · 充电状态 · 电源计划 · 睡眠唤醒</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="display" onclick="pick(this)">
+      <span class="dc-icon">🎨</span>
+      <div class="dc-body">
+        <div class="dc-title">花屏显示</div>
+        <div class="dc-desc">显卡驱动 · 分辨率刷新率 · 外接多屏 · TDR</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="keyboard" onclick="pick(this)">
+      <span class="dc-icon">⌨</span>
+      <div class="dc-body">
+        <div class="dc-title">键盘触控板</div>
+        <div class="dc-desc">设备状态 · 驱动 · 外设干扰 · 输入法冲突</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="group-title">外设网络</div>
+
+    <div class="diag-card" data-key="usb" onclick="pick(this)">
+      <span class="dc-icon">🔌</span>
+      <div class="dc-body">
+        <div class="dc-title">USB 接口</div>
+        <div class="dc-desc">设备枚举 · 驱动供电 · 蓝牙 · 摄像头 · 打印机</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="audio" onclick="pick(this)">
+      <span class="dc-icon">🎵</span>
+      <div class="dc-body">
+        <div class="dc-title">音频设备</div>
+        <div class="dc-desc">音频设备 · 驱动 · 服务 · 麦克风权限</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="network" onclick="pick(this)">
+      <span class="dc-icon">🌐</span>
+      <div class="dc-body">
+        <div class="dc-title">网络诊断</div>
+        <div class="dc-desc">连通性 · DNS · 代理VPN · 共享 · 端口占用</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+
+    <div class="diag-card" data-key="printer" onclick="pick(this)">
+      <span class="dc-icon">🖨</span>
+      <div class="dc-body">
+        <div class="dc-title">打印扫描</div>
+        <div class="dc-desc">Print Spooler · 驱动 · 端口 · 共享权限</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="camera" onclick="pick(this)">
+      <span class="dc-icon">📷</span>
+      <div class="dc-body">
+        <div class="dc-title">摄像头麦克风</div>
+        <div class="dc-desc">隐私权限 · 设备状态 · 浏览器权限 · 占用检查</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="biometric" onclick="pick(this)">
+      <span class="dc-icon">🔐</span>
+      <div class="dc-body">
+        <div class="dc-title">生物识别</div>
+        <div class="dc-desc">指纹 · 人脸识别 · 生物识别服务 · 凭据配置</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="ime" onclick="pick(this)">
+      <span class="dc-icon">⌨</span>
+      <div class="dc-body">
+        <div class="dc-title">输入法/语言</div>
+        <div class="dc-desc">输入法状态 · 语言包 · 快捷键冲突</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="diskspace" onclick="pick(this)">
+      <span class="dc-icon">🧹</span>
+      <div class="dc-body">
+        <div class="dc-title">磁盘空间</div>
+        <div class="dc-desc">各分区占用 · 大文件定位 · 临时文件 · WinSxS</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="group-title">实用工具</div>
+
+    <div class="diag-card" data-key="startup" onclick="pick(this)">
+      <span class="dc-icon">⚙️</span>
+      <div class="dc-body">
+        <div class="dc-title">开机自启动</div>
+        <div class="dc-desc">启动项管理 · 可疑项 · 计划任务</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="driver" onclick="pick(this)">
+      <span class="dc-icon">📥</span>
+      <div class="dc-body">
+        <div class="dc-title">驱动获取</div>
+        <div class="dc-desc">按 SN/机型从官网获取驱动包</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+  </div>
+
+  <!-- 右侧：诊断结果 -->
+  <div class="result-panel">
+    <!-- 页签（B方案） -->
+    <div class="tabs">
+      <div class="tab active" id="tab-diag" onclick="switchTab('diag')">📊 诊断结果</div>
+      <div class="tab" id="tab-chat" onclick="switchTab('chat')">💬 对话<span class="badge-mini" id="chat-badge" style="display:none">!</span></div>
+      <span class="spacer" style="flex:1"></span>
+      <span id="cur-diag-label" style="font-size:11.5px;color:var(--text3);margin-right:6px"></span>
+    </div>
+
+    <!-- 面板1：诊断结果 -->
+    <div class="tab-panel active" id="panel-diag">
+      <div id="result-panel">
+        <div style="padding:30px 0;color:#8b949e;font-size:13.5px;">👈 选择左侧诊断工具开始调查（或已在加载历史记录…）</div>
+      </div>
+    </div>
+
+    <!-- 面板2：对话 -->
+    <div class="tab-panel" id="panel-chat">
+      <div class="chat-flow" id="chat-flow">
+        <div style="padding:26px 0;color:#8b949e;font-size:13.5px;">💬 这里可与 AI 自由对话——诊断结果在「📊 诊断结果」页签</div>
+      </div>
+    </div>
+  </div><!-- /右侧 result-panel -->
+</div><!-- /main -->
+
+<!-- 审批弹窗（与对话页一致的 Tier 2/3 安全边界） -->
+<div id="approval-overlay">
+  <div id="approval-dialog">
+    <h3 id="approval-title">操作确认</h3>
+    <p id="approval-desc" style="font-size:13px;color:var(--text2);">助手想执行以下操作：</p>
+    <p style="font-size:12px;color:var(--success);margin:0 0 6px;">✅ 允许后，本次任务后续操作将不再询问（自动放行）</p>
+    <div class="human-desc" id="approval-human"></div>
+    <button class="detail-toggle" id="approval-toggle-detail" onclick="toggleApprovalDetail()">▸ 查看命令详情</button>
+    <div class="tool-info" id="approval-detail">
+      <strong id="approval-tool" style="color:var(--info);"></strong>
+      <div class="args-display" id="approval-args" style="margin-top:8px;"></div>
+    </div>
+    <p class="timer" id="approval-timer"></p>
+    <div class="btn-row">
+      <button class="btn-deny" onclick="respondApproval(false)">取消</button>
+      <button class="btn-approve" onclick="respondApproval(true)">允许</button>
+    </div>
+    <textarea class="deny-reason" id="deny-reason" placeholder="拒绝理由（可选）"></textarea>
+  </div>
+</div>
+
+<!-- 底部输入 -->
+<div class="input-area">
+  <input id="chat-input" placeholder="输入问题，按 Enter 发送…（也可直接点击左侧诊断工具）" autocomplete="off">
+  <button class="send-btn" id="chat-send">发送</button>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// 诊断台 · 真实数据版（2026-09-16）
+// 房间参数 → WS 连接 → 点标签跑诊断 → 右侧四段式渲染
+// ══════════════════════════════════════════════════════
+const Q = new URLSearchParams(location.search);
+const ROOM = (Q.get('room') || '').toUpperCase();
+
+let ws = null, heartbeatTimer = null, reconnectAttempts = 0;
+let bridgeConnected = false;
+const diagState = {};   // key -> 'idle' | 'running' | 'done'
+
+// ── 诊断 prompt：启动时从 /api/quick_diagnoses 拉取（单一口径）──
+let PROMPTS = {};
+let DIAGS = [];
+async function loadPrompts() {
+  try {
+    const r = await fetch('/api/quick_diagnoses');
+    if (r.ok) {
+      DIAGS = await r.json();
+      DIAGS.forEach(d => { if (d.prompt) PROMPTS[d.key] = d.prompt; });
+    }
+  } catch (e) { /* 失败则用兜底 prompt */ }
+}
+
+// ── 顶栏：从服务器读房间信息 ──
+async function loadRoomInfo() {
+  if (!ROOM) { setNote('缺少房间码参数'); return; }
+  try {
+    const r = await fetch('/api/room_connect/' + encodeURIComponent(ROOM));
+    if (!r.ok) { setNote('房间读取失败（' + r.status + '）'); return; }
+    const d = await r.json();
+    setText('hdr-room', d.room_code || ROOM);
+    setText('hdr-sn', d.sn || '-');
+    setText('hdr-ticket', d.ticket_no || '-');
+    setText('hdr-days', d.days_left != null ? d.days_left : '-');
+    // 工单信息条
+    setText('tb-ticket', d.ticket_no ? ('AI' + (d.created_at || '').slice(2,10).replace(/-/g,'') + '-' + (d.sn||'') + '-01') : '-');
+    setNote('诊断台 · 房间 ' + (d.room_code || ROOM));
+  } catch (e) {
+    setNote('房间读取异常：' + e.message);
+  }
+}
+function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+function setNote(t) { /* 状态提示已并入顶栏「服务已连接」（2026-09-16） */ }
+
+// ── WS 连接 ──
+function connect() {
+  if (!ROOM) { setNote('缺少房间码——请从工作台进入'); return; }
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws/browser/' + ROOM);
+
+  ws.onopen = () => {
+    reconnectAttempts = 0;
+    setConnState(true);
+    ws.send(JSON.stringify({ type: 'auto_approve_toggle', enabled: true }));
+    loadHistory();
+    loadChatHistory();
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) {} }
+    }, 25000);
+  };
+
+  ws.onmessage = (event) => {
+    let msg; try { msg = JSON.parse(event.data); } catch (e) { return; }
+    switch (msg.type) {
+      case 'status':
+        // 服务器通过 status 消息携带 bridge_connected（与对话页一致）
+        if (msg.bridge_connected !== undefined) {
+          bridgeConnected = !!msg.bridge_connected;
+          setBridgeState(bridgeConnected);
+        }
+        if (msg.content && document.getElementById('live-steps')) appendLiveStep('▸', msg.content);
+        break;
+      case 'approval_required':
+        showApprovalDialog(msg);
+        break;
+      case 'tool_start':
+        appendLiveStep('🔧', '执行 ' + (msg.tool || '命令') + (msg.tier ? '（Tier ' + msg.tier + '）' : ''), '#58a6ff');
+        break;
+      case 'startup_result':
+        {
+          const closed = msg.closed || [];
+          if (closed.length) {
+            startupItemsCache = startupItemsCache.filter(function (it) { return !closed.includes(it.name); });
+            renderStartupTable(startupItemsCache);
+            appendLiveStep('✅', '已关闭 ' + closed.length + ' 项：' + closed.join('、'), '#3fb950');
+          }
+        }
+        break;
+      case 'startup_list':
+        renderStartupTable(msg.items || []);
+        setCardState('startup', 'done');
+        break;
+      case 'tool_result':
+        appendLiveStep(msg.denied ? '🚫' : '✅',
+          (msg.tool || '命令') + (msg.denied ? ' 已拒绝' : ' 执行完成') + (msg.content ? '（' + String(msg.content).length + ' 字符）' : ''),
+          msg.denied ? '#f85149' : '#3fb950');
+        break;
+      case 'bridge_status':
+        bridgeConnected = !!msg.connected;
+        setBridgeState(msg.connected);
+        break;
+      case 'ai_message':
+        if (currentRunningKey) {
+          // 诊断工具触发 → 结果进「诊断结果」页签
+          // ⚠️ 一次诊断可能有多条 ai_message（分段发送）——累积拼接，直到 ai_done 才结束
+          diagBuffer.push(msg.content);
+          renderResult(ROOM, diagBuffer.join('\n\n'));
+          // 不在此处 markDone——否则后续分段会误入「对话」页签
+        } else {
+          // 底部输入框自由对话 → 进「对话」页签
+          onChatReply(msg.content);
+          chatSending = false;
+        }
+        break;
+      case 'ai_done':
+        // 诊断结束：此时才标记完成并清空缓冲/运行标记
+        diagBuffer = [];
+        markDone(currentRunningKey);
+        chatSending = false;
+        break;
+      case 'error':
+        showError(msg.content);
+        markFailed(currentRunningKey);
+        break;
+      case 'pong': break;
+    }
+  };
+
+  ws.onclose = () => {
+    setConnState(false);
+    if (reconnectAttempts < 8) {
+      reconnectAttempts++;
+      const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts - 1));
+      setConnState(false, Math.round(delay/1000) + 's 后重连（第 ' + reconnectAttempts + ' 次）…');
+      setTimeout(connect, delay);
+    }
+  };
+  ws.onerror = () => { setConnState(false); };
+}
+
+function setConnState(ok, reconnecting) {
+  const dot = document.querySelector('.status-dot');
+  if (dot) { dot.style.background = ok ? '#3fb950' : '#f85149'; dot.style.boxShadow = ok ? '0 0 6px #3fb950' : 'none'; }
+  const el = document.getElementById('hdr-svc');
+  if (!el) return;
+  if (ok) {
+    el.textContent = '服务已连接';
+    el.style.color = '';
+  } else if (reconnecting) {
+    // 顶栏直接显示重连进度（原左下角浮标签的功能并入此处）
+    el.textContent = '服务断开 · ' + reconnecting;
+    el.style.color = '#d29922';
+  } else {
+    el.textContent = '服务断开';
+    el.style.color = '#f85149';
+  }
+}
+function setBridgeState(ok) {
+  bridgeConnected = !!ok;
+  const el = document.getElementById('hdr-bridge');
+  if (el) {
+    el.textContent = ok ? '桥接器已连接' : '桥接器未连接';
+    el.style.color = ok ? '#3fb950' : '#f85149';
+  }
+}
+
+// ── 点标签 → 跑诊断 ──
+let currentRunningKey = null;
+let diagBuffer = [];   // 一次诊断的 AI 分段输出缓冲（分段拼接后渲染）
+function pick(el) {
+  document.querySelectorAll('.diag-card').forEach(x => x.style.outline = 'none');
+  el.style.outline = '2px solid #58a6ff';
+  setTimeout(() => el.style.outline = 'none', 900);
+
+  const key = el.dataset.key;
+  const titleEl = el.querySelector('.dc-title');
+  const iconEl = el.querySelector('.dc-icon');
+  const title = titleEl ? titleEl.textContent.trim() : key;
+  const icon = iconEl ? iconEl.textContent.trim() : '';
+
+  if (!ws || ws.readyState !== WebSocket.OPEN) { showError('服务未连接——请稍候重试'); return; }
+  if (!bridgeConnected) { showError('桥接器未连接——请先让客户机上的 bridge 上线'); return; }
+
+  // 开机自启动 / 驱动获取：脚本模式，结果直接显示在「诊断结果」页签（2026-09-16）
+  if (key === 'startup') { runStartupScan(icon, title); return; }
+  if (key === 'driver') { runDriverFetch(icon, title); return; }
+
+  currentRunningKey = key;
+  diagBuffer = [];
+  setCardState(key, 'running');
+  showLoading(icon + ' ' + title + ' · 调查中…');
+  const FIVE = '输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。';
+  const base = PROMPTS[key] || ('请对这台电脑执行【' + title + '调查】，逐项采集并输出五段：');
+  // 去掉 prompt 里已有的"输出用N段"尾巴（避免重复），再统一追加五段要求
+  const prompt = base.replace(/输出用[三四五]段：[\s\S]*$/, '');
+  ws.send(JSON.stringify({
+    type: 'chat',
+    content: prompt + FIVE
+  }));
+}
+
+// ── 状态渲染 ──
+// 实时执行过程面板（方案C 2026-09-16）：边跑边显示每个采集项的进展
+let liveStart = 0, liveTimer = null;
+function showLoading(t) {
+  const p = document.getElementById('result-panel');
+  if (!p) return;
+  liveStart = Date.now();
+  p.innerHTML =
+    '<div class="result-title" id="live-title">⏳ ' + esc(t) + '</div>'
+    + '<div class="sec-label">🔍 执行过程（实时）</div>'
+    + '<div class="manifest" id="live-steps">'
+    +   '<div class="mani-row" id="live-wait"><span class="mani-icon">⏳</span>'
+    +   '<span class="mani-text" style="color:#8b949e">正在执行诊断命令…</span></div>'
+    + '</div>'
+    + '<div style="margin-top:10px;font-size:12px;color:#6e7681;" id="live-elapsed">已用时 0 秒（诊断通常需要 1-3 分钟）</div>';
+  if (liveTimer) clearInterval(liveTimer);
+  liveTimer = setInterval(function () {
+    const el = document.getElementById('live-elapsed');
+    if (!el) { clearInterval(liveTimer); return; }
+    const s = Math.round((Date.now() - liveStart) / 1000);
+    el.textContent = '已用时 ' + s + ' 秒' + (s > 60 ? '（超过 1 分钟，诊断较复杂，请稍候）' : '（诊断通常需要 1-3 分钟）');
+  }, 1000);
+}
+
+// 追加一条执行步骤（tool_start / status / tool_result 触发）
+function appendLiveStep(icon, text, color) {
+  const box = document.getElementById('live-steps');
+  if (!box) return;
+  const wait = document.getElementById('live-wait');
+  if (wait) wait.remove();
+  const el = document.createElement('div');
+  el.className = 'mani-row';
+  el.innerHTML = '<span class="mani-icon">' + icon + '</span>'
+    + '<span class="mani-text" style="color:' + (color || '#e6edf3') + '">' + esc(text) + '</span>';
+  box.appendChild(el);
+  const rp = document.querySelector('.result-panel');
+  if (rp) rp.scrollTop = rp.scrollHeight;
+}
+
+function clearLoadingTimer() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
+function showError(t) {
+  const p = document.getElementById('result-panel');
+  if (p) p.innerHTML = '<div class="gap-box" style="border-color:#f85149;color:#ff9d97;background:rgba(248,81,73,.07)">❌ ' + esc(t) + '</div>';
+}
+function showInfo(t) {
+  const p = document.getElementById('result-panel');
+  if (p) p.innerHTML = '<div class="clue-box">ℹ️ ' + esc(t) + '</div>';
+}
+
+function setCardState(key, state) {
+  const card = document.querySelector('.diag-card[data-key="' + key + '"]');
+  if (!card) return;
+  card.classList.remove('running', 'done');
+  const st = card.querySelector('.dc-status');
+  if (state === 'running') { card.classList.add('running'); if (st) { st.className = 'dc-status run'; st.textContent = '运行中…'; } }
+  else if (state === 'done') { card.classList.add('done'); if (st) { st.className = 'dc-status ok'; st.textContent = '✓ 已完成'; } }
+  else if (st) { st.className = 'dc-status'; st.textContent = '未运行'; }
+  if (state) diagState[key] = state;
+}
+function markDone(key) { if (key) setCardState(key, 'done'); currentRunningKey = null; }
+function markFailed(key) { diagBuffer = []; if (key) { const c = document.querySelector('.diag-card[data-key="'+key+'"]'); if (c) { c.classList.remove('running'); const s = c.querySelector('.dc-status'); if (s) { s.className='dc-status'; s.textContent='失败'; } } } currentRunningKey = null; }
+function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── 四段式结果渲染（与对话页同一套逻辑）──
+function renderResult(room, md) {
+  const p = document.getElementById('result-panel');
+  if (!p) return;
+  switchTab('diag');   // 诊断结果自动切到诊断页签
+  clearLoadingTimer();
+  const prog = document.getElementById('diag-progress');
+  if (prog) prog.remove();
+  let html = '<div class="result-title">📋 诊断结果</div>';
+  html += renderDiagnosis(md);
+  html += '<div style="margin-top:18px;"><button class="hdr-btn" onclick="showRaw()">📄 查看原始输出</button></div>';
+  html += '<div id="raw-out" style="display:none;margin-top:10px;padding:12px;background:#010409;border:1px solid #30363d;border-radius:8px;font-size:12.5px;white-space:pre-wrap;color:#c9d1d9;">' + esc(md) + '</div>';
+  p.innerHTML = html;
+}
+function showRaw() { const el = document.getElementById('raw-out'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
+
+function renderDiagnosis(md) {
+  md = String(md || '');
+  if (md.indexOf('【采集项】') === -1) return '<div class="obs-box">' + renderMd(md) + '</div>';
+  var parts = md.split(/【(采集项|观察|依据|缺失|初步判读)】/);
+  var html = '';
+  for (var i = 0; i < parts.length; i++) {
+    var key = parts[i], val = parts[i + 1];
+    if (key === '采集项' && val !== undefined) { html += renderManifest(val); i++; }
+    else if (key === '初步判读' && val !== undefined) {
+      html += '<div class="sec-label">🧭 初步判读（方向提示，非结论）</div>'
+        + '<div class="read-box">' + renderMd(val.trim()) + '</div>';
+      if (hasAssertiveWording(val)) {
+        html += '<div class="warn-flag">⚠️ 检测到武断措辞（如"肯定是/必须更换"）——该判读仅作方向参考，请以【观察】中的实际数据为准。</div>';
+      }
+      i++;
+    }
+    else if ((key === '观察' || key === '依据' || key === '缺失') && val !== undefined) {
+      var label = { '观察': '📊 观察（事实）', '依据': '🔗 依据（支撑来源）', '缺失': '⚠️ 缺失（应采未采）' }[key];
+      var cls = key === '缺失' ? 'gap-box' : 'obs-box';
+      html += '<div class="sec-label">' + label + '</div><div class="' + cls + '">' + renderMd(val.trim()) + '</div>';
+      i++;
+    } else if (key.trim()) { html += '<div class="obs-box" style="margin-bottom:10px;">' + renderMd(key) + '</div>'; }
+  }
+  return html;
+}
+
+// 武断措辞检测（第五段初步判读——不应出现绝对断言）
+function hasAssertiveWording(text) {
+  return /肯定是|一定是|必然是|绝对|就是.{0,6}(坏|故障|问题)|必须更换|需要更换|建议更换|肯定要换/.test(String(text || ''));
+}
+
+function renderManifest(text) {
+  var lines = esc(text).split(/\n/).map(function (l) { return l.trim(); }).filter(function (l) { return l; });
+  var rows = '';
+  lines.forEach(function (l) {
+    var clean = l.replace(/^[-*•]\s*/, '').replace(/`/g, '');
+    var tail = clean.split(/[—-]{1,2}/).pop() || clean;
+    var color = '#8b949e', icon = '•';
+    if (/不适用|无此硬件|台式机|没有.*硬件/i.test(tail)) { color = '#6e7681'; icon = '⚪'; }
+    else if (/失败|超时|无法|读取不到/i.test(tail)) { color = '#f85149'; icon = '❌'; }
+    else if (/成功|完成|已获取|正常|ok\b/i.test(tail)) { color = '#3fb950'; icon = '✅'; }
+    else if (/失败|超时|无法/i.test(clean)) { color = '#f85149'; icon = '❌'; }
+    else if (/成功|完成|已获取/i.test(clean)) { color = '#3fb950'; icon = '✅'; }
+    var cls = icon === '✅' ? 'mani-ok' : (icon === '❌' ? 'mani-fail' : (icon === '⚪' ? 'mani-na' : ''));
+    rows += '<div class="mani-row ' + cls + '"><span class="mani-icon">' + icon + '</span><span class="mani-text">' + clean + '</span></div>';
+  });
+  if (!rows) return '';
+  return '<div class="sec-label">📋 采集项清单</div><div class="manifest">' + rows + '</div>';
+}
+
+// 简易 markdown（表格/加粗/代码/换行）
+function renderMd(md) {
+  var h = esc(md);
+  h = h.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // 表格
+  h = h.replace(/((?:^\|.+\|\s*$\n?)+)/gm, function (block) {
+    var rows = block.trim().split('\n').filter(function(r){ return r.trim(); });
+    if (rows.length < 2) return block;
+    var out = '<table>';
+    rows.forEach(function (r, idx) {
+      if (/^\|[\s\-:|]+\|$/.test(r)) return;
+      var cells = r.split('|').slice(1, -1);
+      var tag = idx === 0 ? 'th' : 'td';
+      out += '<tr>' + cells.map(function (c) { return '<' + tag + '>' + c.trim() + '</' + tag + '>'; }).join('') + '</tr>';
+    });
+    return out + '</table>';
+  });
+  h = h.replace(/\n/g, '<br>');
+  return h;
+}
+
+// ── 历史记录（最近一次诊断结果回填）──
+async function loadHistory() {
+  try {
+    const r = await fetch('/api/history/' + encodeURIComponent(ROOM));
+    if (!r.ok) return;
+    const d = await r.json();
+    const msgs = (d.messages || d || []).filter(m => m.role === 'ai');
+    if (msgs.length) {
+      const last = msgs[msgs.length - 1];
+      renderResult(ROOM, last.content || '');
+      const p = document.getElementById('result-panel');
+      if (p) p.insertAdjacentHTML('afterbegin', '<div style="font-size:12px;color:#6e7681;margin-bottom:8px;">📜 已加载该房间最近一次诊断输出</div>');
+    } else {
+      const p = document.getElementById('result-panel');
+      if (p) p.innerHTML = '<div style="padding:30px 0;color:#8b949e;font-size:13.5px;">👈 从左侧选择一个诊断项目开始调查</div>';
+    }
+  } catch (e) { /* 忽略 */ }
+}
+
+// ══ 开机自启动查询（结果进「诊断结果」页签）══
+function runStartupScan(icon, title) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { showError('服务未连接——请稍候重试'); return; }
+  if (!bridgeConnected) { showError('桥接器未连接——请先让客户机上的 bridge 上线'); return; }
+  setCardState('startup', 'running');
+  const p = document.getElementById('result-panel');
+  if (p) p.innerHTML = '<div class="result-title">' + icon + ' ' + esc(title) + '</div>'
+    + '<div class="sec-label">🔍 执行过程（实时）</div>'
+    + '<div class="manifest" id="live-steps"><div class="mani-row" id="live-wait">'
+    + '<span class="mani-icon">⏳</span><span class="mani-text" style="color:#8b949e">正在查询开机自启动项…</span></div></div>';
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_scan]' }));
+}
+
+let startupItemsCache = [];
+
+function renderStartupTable(items) {
+  const p = document.getElementById('result-panel');
+  if (!p) return;
+  startupItemsCache = items || [];
+  if (!items || !items.length) {
+    p.innerHTML = '<div class="result-title">⚙️ 开机自启动</div><div class="obs-box">未发现开机自启动项。</div>';
+    return;
+  }
+  const CAT = { necessary: ['🟢 必需', '#3fb950'], common: ['🟡 常用', '#d29922'],
+                advisory: ['🔴 建议关闭', '#f85149'], suspicious: ['⚠️ 可疑', '#f85149'] };
+  let rows = '';
+  items.forEach(function (it, idx) {
+    const cat = it.category || 'common';
+    const isNecessary = cat === 'necessary';
+    const checked = !!it.recommend && !isNecessary;
+    const catInfo = CAT[cat] || ['—', '#8b949e'];
+    rows += '<div class="st-row' + (isNecessary ? ' st-dis' : '') + '">'
+      + '<input type="checkbox" data-idx="' + idx + '"' + (checked ? ' checked' : '') + (isNecessary ? ' disabled' : '')
+      + ' style="margin-top:3px;flex:0 0 auto;">'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:13px;font-weight:600;color:' + (isNecessary ? '#6e7681' : '#e6edf3') + ';">' + esc(it.name || '?') + '</div>'
+      + (it.display && it.display !== it.name ? '<div style="font-size:11.5px;color:#8b949e;">' + esc(it.display) + '</div>' : '')
+      + '<div style="font-size:11px;color:#6e7681;word-break:break-all;margin-top:2px;">' + esc(it.command || '') + '</div>'
+      + '</div>'
+      + '<span style="flex:0 0 auto;font-size:11px;color:' + catInfo[1] + ';">' + catInfo[0] + '</span>'
+      + '</div>';
+  });
+  p.innerHTML = '<div class="result-title">⚙️ 开机自启动（共 ' + items.length + ' 项）</div>'
+    + '<div class="sec-label">📋 启动项清单（可勾选关闭）</div>'
+    + '<div class="obs-box" id="startup-list" style="padding:8px 12px;">' + rows + '</div>'
+    + '<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
+    +   '<button class="hdr-btn" style="background:rgba(56,139,253,.15);color:#58a6ff;border-color:#58a6ff;" onclick="confirmStartupClose()">✔ 关闭所选</button>'
+    +   '<button class="hdr-btn" onclick="document.querySelectorAll(\'#startup-list input:not(:disabled)\').forEach(cb=>cb.checked=false)">全不选</button>'
+    +   '<span style="font-size:11.5px;color:#6e7681;">🔴 建议关闭项已预勾选 · 🟢 系统必需不可关闭（关闭前自动备份到客户机桌面）</span>'
+    + '</div>';
+}
+
+function confirmStartupClose() {
+  const items = [];
+  const names = [];
+  document.querySelectorAll('#startup-list input:checked').forEach(function (cb) {
+    const it = startupItemsCache[parseInt(cb.dataset.idx, 10)];
+    if (it) { items.push({ name: it.name, location: it.location, command: it.command }); names.push(it.display || it.name); }
+  });
+  if (!items.length) { alert('请先勾选要关闭的启动项'); return; }
+  if (!confirm('将关闭以下开机自启动项（执行前自动备份到客户机桌面）：\n\n' + names.join('、') + '\n\n确定执行？')) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立'); return; }
+  appendLiveStep('🔧', '正在关闭所选启动项…', '#d29922');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_close] ' + JSON.stringify({ items: items }) }));
+}
+
+// ══ 驱动获取（结果进「诊断结果」页签）══
+async function runDriverFetch(icon, title) {
+  if (!bridgeConnected) { showError('桥接器未连接——请先让客户机上的 bridge 上线'); return; }
+  setCardState('driver', 'running');
+  const p = document.getElementById('result-panel');
+  let waited = 0;
+  if (p) p.innerHTML = '<div class="result-title">' + icon + ' ' + esc(title) + '</div>'
+    + '<div class="sec-label">🔍 执行过程（实时）</div>'
+    + '<div class="manifest" id="live-steps"><div class="mani-row" id="live-wait">'
+    + '<span class="mani-icon">⏳</span><span class="mani-text" style="color:#8b949e" id="drv-wait">正在识别机器并抓取联想官网驱动清单…（首次 1-3 分钟，之后走缓存）</span></div></div>';
+  const timer = setInterval(function () {
+    waited += 10;
+    const el = document.getElementById('drv-wait');
+    if (el) el.textContent = '正在抓取联想官网驱动…已等待 ' + waited + ' 秒（官网较慢，请耐心等待）';
+  }, 10000);
+  try {
+    const r = await fetch('/api/tools/drivers/fetch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: ROOM }),
+    });
+    clearInterval(timer);
+    const d = await r.json();
+    if (!r.ok || d.error) { showError('驱动获取失败：' + (d.error || r.status)); setCardState('driver', 'idle'); return; }
+    renderDriverTable(d);
+    setCardState('driver', 'done');
+  } catch (e) {
+    clearInterval(timer);
+    showError('驱动获取异常：' + e.message);
+    setCardState('driver', 'idle');
+  }
+}
+
+function renderDriverTable(d) {
+  const p = document.getElementById('result-panel');
+  if (!p) return;
+  const list = d.drivers || d.items || d.list || [];
+  const mach = d.machine || {};
+  const model = mach.model || mach.mt || d.machine_model || d.model || '';
+  const sn = mach.sn || '';
+  if (!list.length) {
+    p.innerHTML = '<div class="result-title">📥 驱动获取</div><div class="obs-box">未获取到驱动清单（' + esc(d.message || d.note || '官网查询无结果') + '）</div>';
+    return;
+  }
+  // 按 category 分组（与对话页一致）
+  const groups = {};
+  list.forEach(function (dr) { const k = dr.category || '其他'; (groups[k] = groups[k] || []).push(dr); });
+
+  let html = '<div class="result-title">📥 联想官网驱动清单' + (d.cached ? ' <span style="font-size:11px;color:#3fb950;">（缓存）</span>' : '') + '</div>';
+  html += '<div style="font-size:12.5px;color:#8b949e;margin-bottom:10px;">机型：<b style="color:#e6edf3">' + esc(model || '-') + '</b>'
+    + (sn ? ' | SN：' + esc(sn) : '') + ' | 共 <b style="color:#e6edf3">' + list.length + '</b> 项'
+    + (d.note ? '<br>📝 ' + esc(d.note) : '') + '</div>';
+
+  Object.keys(groups).forEach(function (cat) {
+    const arr = groups[cat];
+    let rows = '';
+    arr.forEach(function (dr) {
+      const name = dr.name || dr.title || dr.driver_name || '?';
+      const ver = dr.version || dr.ver || '';
+      const date = dr.date || dr.release_date || '';
+      const size = dr.size || dr.filesize || '';
+      const url = dr.url || dr.download_url || dr.link || '';
+      rows += '<tr><td style="font-size:12px;">' + esc(name) + '</td>'
+        + '<td style="font-size:11.5px;color:#8b949e;">' + esc(ver) + '</td>'
+        + '<td style="font-size:11.5px;color:#8b949e;">' + esc(date) + '</td>'
+        + '<td style="font-size:11.5px;color:#8b949e;">' + esc(size) + '</td>'
+        + '<td>' + (url ? '<a href="' + esc(url) + '" target="_blank" style="color:#58a6ff;">下载</a>' : '—') + '</td></tr>';
+    });
+    html += '<div class="sec-label">📂 ' + esc(cat) + '（' + arr.length + '）</div>'
+      + '<div class="obs-box" style="padding:6px 12px;"><table>'
+      + '<tr><th>驱动名称</th><th>版本</th><th>日期</th><th>大小</th><th>链接</th></tr>' + rows + '</table></div>';
+  });
+  p.innerHTML = html;
+}
+
+// ══ 审批弹窗（Tier 2/3 安全边界——与对话页一致）══
+let pendingApprovalId = null;
+let approvalDeadline = 0;
+let approvalTimerInterval = null;
+
+function showApprovalDialog(msg) {
+  pendingApprovalId = msg.id;
+  approvalDeadline = Date.now() + (msg.timeout || 300) * 1000;
+
+  const humanEl = document.getElementById('approval-human');
+  if (humanEl) humanEl.textContent = msg.human_desc || (msg.tool || '执行操作');
+  setText('approval-tool', msg.tool || '');
+  const argsEl = document.getElementById('approval-args');
+  if (argsEl) argsEl.textContent = JSON.stringify(msg.args || {}, null, 2);
+  const det = document.getElementById('approval-detail');
+  if (det) det.style.display = 'none';
+  const tb = document.getElementById('approval-toggle-detail');
+  if (tb) tb.textContent = '▸ 查看命令详情';
+  const dr = document.getElementById('deny-reason');
+  if (dr) { dr.style.display = 'none'; dr.value = ''; }
+
+  const ov = document.getElementById('approval-overlay');
+  if (ov) ov.style.display = 'flex';
+
+  clearInterval(approvalTimerInterval);
+  approvalTimerInterval = setInterval(updateApprovalTimer, 1000);
+  updateApprovalTimer();
+}
+
+function updateApprovalTimer() {
+  const el = document.getElementById('approval-timer');
+  const remaining = Math.max(0, Math.round((approvalDeadline - Date.now()) / 1000));
+  const mins = Math.floor(remaining / 60), secs = remaining % 60;
+  if (el) {
+    el.textContent = '剩余时间: ' + mins + ':' + (secs < 10 ? '0' : '') + secs;
+    el.style.color = remaining <= 10 ? '#f85149' : '';
+  }
+  if (remaining <= 0) {
+    clearInterval(approvalTimerInterval);
+    const id = pendingApprovalId;
+    const ov = document.getElementById('approval-overlay');
+    if (ov) ov.style.display = 'none';
+    pendingApprovalId = null;
+    if (ws && ws.readyState === WebSocket.OPEN && id) {
+      ws.send(JSON.stringify({ type: 'approval_response', id: id, approved: false, reason: 'approval_timeout' }));
+    }
+  }
+}
+
+function respondApproval(approved) {
+  clearInterval(approvalTimerInterval);
+  let reason = '';
+  if (!approved) {
+    const dr = document.getElementById('deny-reason');
+    reason = dr ? dr.value.trim() : '';
+  }
+  const id = pendingApprovalId;
+  const ov = document.getElementById('approval-overlay');
+  if (ov) ov.style.display = 'none';
+  pendingApprovalId = null;
+  if (ws && ws.readyState === WebSocket.OPEN && id) {
+    ws.send(JSON.stringify({ type: 'approval_response', id: id, approved: approved, reason: reason }));
+  }
+}
+
+function toggleApprovalDetail() {
+  const det = document.getElementById('approval-detail');
+  const tb = document.getElementById('approval-toggle-detail');
+  if (!det) return;
+  const show = det.style.display === 'none';
+  det.style.display = show ? 'block' : 'none';
+  if (tb) tb.textContent = show ? '▾ 收起命令详情' : '▸ 查看命令详情';
+}
+
+// 诊断进度提示（复用诊断结果区顶部一行）
+function showProgress(t) {
+  let el = document.getElementById('diag-progress');
+  if (!el) {
+    const rp = document.getElementById('result-panel');
+    if (!rp) return;
+    rp.insertAdjacentHTML('afterbegin', '<div id="diag-progress" style="font-size:12.5px;color:#8b949e;margin-bottom:8px;"></div>');
+    el = document.getElementById('diag-progress');
+  }
+  if (el) el.textContent = '⏳ ' + t;
+}
+
+// ── 页签切换（B方案 2026-09-16）──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const tab = document.getElementById('tab-' + name);
+  const panel = document.getElementById('panel-' + name);
+  if (tab) tab.classList.add('active');
+  if (panel) panel.classList.add('active');
+  if (name === 'chat') {
+    const b = document.getElementById('chat-badge');
+    if (b) b.style.display = 'none';
+  }
+  const inp = document.getElementById('chat-input');
+  if (name === 'chat' && inp) inp.focus();
+}
+
+// ── 对话：发送 + 渲染 ──
+let chatSending = false;
+function sendChat() {
+  const inp = document.getElementById('chat-input');
+  if (!inp) return;
+  const text = (inp.value || '').trim();
+  if (!text) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) { appendChatMsg('system', '服务未连接——请稍候重试'); return; }
+  appendChatMsg('user', text);
+  inp.value = '';
+  chatSending = true;
+  switchTab('chat');
+  ws.send(JSON.stringify({ type: 'chat', content: text }));
+}
+
+function appendChatMsg(role, content, timeStr) {
+  const flow = document.getElementById('chat-flow');
+  if (!flow) return;
+  const empty = flow.querySelector('div[style*="padding:26px"]');
+  if (empty) empty.remove();
+  const el = document.createElement('div');
+  el.className = 'msg ' + (role === 'user' ? 'user' : (role === 'system' ? 'system' : 'ai'));
+  const avatar = role === 'user' ? '👤' : (role === 'system' ? 'ℹ️' : '🤖');
+  let body = '';
+  if (role === 'ai') {
+    body = (String(content).indexOf('【采集项】') > -1) ? renderDiagnosis(content) : renderMd(content);
+  } else {
+    body = esc(content);
+  }
+  el.innerHTML = '<div class="avatar">' + avatar + '</div>'
+    + '<div class="bubble">' + body
+    + '<div class="mtime">' + (timeStr || new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0,5)) + '</div></div>';
+  flow.appendChild(el);
+  const rp = document.querySelector('.result-panel');
+  if (rp) rp.scrollTop = rp.scrollHeight;
+}
+
+// AI 对话回复：若当前在诊断页签 → 提示未读
+function onChatReply(content) {
+  appendChatMsg('ai', content);
+  const activeTab = document.querySelector('.tab.active');
+  if (!activeTab || activeTab.id !== 'tab-chat') {
+    const b = document.getElementById('chat-badge');
+    if (b) b.style.display = 'inline-block';
+  }
+}
+
+// 历史对话加载（与诊断历史区分：user/ai 消息按顺序渲染）
+async function loadChatHistory() {
+  try {
+    const r = await fetch('/api/history/' + encodeURIComponent(ROOM));
+    if (!r.ok) return;
+    const d = await r.json();
+    const msgs = d.messages || (Array.isArray(d) ? d : []);
+    if (!msgs.length) return;
+    const flow = document.getElementById('chat-flow');
+    if (!flow) return;
+    const empty = flow.querySelector('div[style*="padding:26px"]');
+    if (empty) empty.remove();
+    msgs.slice(-30).forEach(function (m) {
+      if (m.role === 'user' || m.role === 'ai') appendChatMsg(m.role, m.content || '', (m.created_at || '').slice(11, 16));
+    });
+  } catch (e) { /* 忽略 */ }
+}
+
+// ══ 连接你的电脑（一键连接命令）══
+let roomConnData = null;
+let curConnTab = 'ps';
+
+async function toggleConnectPanel() {
+  const p = document.getElementById('connect-panel');
+  if (!p) return;
+  const show = p.style.display === 'none';
+  if (show && !roomConnData) {
+    try {
+      const r = await fetch('/api/room_connect/' + encodeURIComponent(ROOM));
+      if (r.ok) roomConnData = await r.json();
+    } catch (e) { /* 忽略 */ }
+  }
+  p.style.display = show ? 'block' : 'none';
+  const b = document.getElementById('btn-connect');
+  if (b) b.textContent = show ? '📶 收起连接 ▴' : '📶 连接你的电脑 ▾';
+  if (show) renderConnectCmd();
+}
+
+function switchConnectTab(t) { curConnTab = t; document.querySelectorAll('.cp-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === t)); renderConnectCmd(); }
+
+function renderConnectCmd() {
+  const el = document.getElementById('cp-cmd');
+  const hint = document.getElementById('cp-hint');
+  if (!el) return;
+  const d = roomConnData || {};
+  const conn = d.connect || {};
+  const os = (d.os || '').toLowerCase();
+  let text = '', h = '';
+  if (curConnTab === 'ps') {
+    text = conn.powershell || '（未获取到 PowerShell 命令）';
+    h = '在客户机 PowerShell（管理员）中整段粘贴执行';
+  } else if (curConnTab === 'exe') {
+    const dl = d.downloads || {};
+    text = dl.exe ? ('下载并运行：' + dl.exe + '\n\n然后在客户机上运行 bridge.exe 并填入房间码 ' + ROOM) : '（未获取到下载地址）';
+    h = '适合无法使用命令行的场景';
+  } else {
+    text = conn.linux_sh ? ('curl -fsSL ' + ((d.downloads || {}).linux_sh || '') + ' | bash') : (conn.powershell || '（未获取到 Linux 命令）');
+    h = '在客户机终端执行';
+  }
+  el.textContent = text;
+  if (hint) hint.textContent = h + (os ? '（本房间系统：' + os + '）' : '');
+}
+
+function copyConnectCmd() {
+  const el = document.getElementById('cp-cmd');
+  if (!el) return;
+  const t = el.textContent || '';
+  navigator.clipboard.writeText(t).then(() => {
+    const h = document.getElementById('cp-hint');
+    if (h) { const old = h.textContent; h.textContent = '✅ 已复制到剪贴板'; setTimeout(() => { h.textContent = old; }, 2000); }
+  }).catch(() => {
+    // 降级：选中让用户手动复制
+    const r = document.createRange(); r.selectNodeContents(el);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  });
+}
+
+// ══ 结束诊断 ══
+async function closeRoom() {
+  if (!ROOM) return;
+  if (!confirm('结束诊断后：桥接器将断开、房间关闭、历史封存（仅管理员可查看）。\n\n确定结束诊断吗？')) return;
+  try {
+    const r = await fetch('/api/room_close/' + encodeURIComponent(ROOM), { method: 'POST' });
+    if (r.ok) {
+      await exportReport(true);
+      alert('房间已结束诊断');
+      location.href = '/dashboard';
+    } else {
+      const d = await r.json().catch(() => ({}));
+      alert('操作失败: ' + (d.error || r.status));
+    }
+  } catch (e) { alert('网络错误: ' + e.message); }
+}
+
+// ══ 导出报告（诊断结果 + 对话）══
+async function exportReport(silent) {
+  const lines = [];
+  const now = new Date().toLocaleString('zh-CN');
+  lines.push('云端 AI 远程诊断报告');
+  lines.push('时间: ' + now);
+  lines.push('房间: ' + ROOM);
+  lines.push('序列号: ' + (document.getElementById('hdr-sn') ? document.getElementById('hdr-sn').textContent : '-'));
+  lines.push('工单: ' + (document.getElementById('hdr-ticket') ? document.getElementById('hdr-ticket').textContent : '-'));
+  lines.push('='.repeat(60));
+  lines.push('');
+  lines.push('【诊断结果】');
+  lines.push('');
+  const rp = document.getElementById('result-panel');
+  lines.push(rp ? rp.innerText.trim() : '（无）');
+  lines.push('');
+  lines.push('='.repeat(60));
+  lines.push('');
+  lines.push('【对话记录】');
+  lines.push('');
+  const flow = document.getElementById('chat-flow');
+  if (flow) {
+    flow.querySelectorAll('.msg').forEach(function (m) {
+      const who = m.classList.contains('user') ? '工程师' : (m.classList.contains('system') ? '系统' : 'AI');
+      lines.push('[' + who + '] ' + m.querySelector('.bubble').innerText.trim());
+      lines.push('');
+    });
+  }
+  const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '诊断报告_' + ROOM + '_' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a); a.click(); a.remove();
+  if (!silent) {
+    const b = document.getElementById('btn-export');
+    if (b) { const old = b.textContent; b.textContent = '✅ 已导出'; setTimeout(() => { b.textContent = old; }, 2000); }
+  }
+}
+
+// ── 返回对话界面 ──
+function backToChat() { location.href = '/chat?room=' + encodeURIComponent(ROOM); }
+
+// ── 启动 ──
+(async function () {
+  await loadPrompts();
+  await loadRoomInfo();
+  // 输入框事件
+  const inp = document.getElementById('chat-input');
+  const btn = document.getElementById('chat-send');
+  if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
+  if (btn) btn.addEventListener('click', sendChat);
+  connect();
+})();
+</script>
+</body>
+</html>

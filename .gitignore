@@ -1,0 +1,46 @@
+# CloudDiag Suite · 版本控制忽略规则
+# ⚠️ 含密钥/数据的文件绝不入库
+
+# ═══════ 密钥与配置 ═══════
+.env
+.env.*
+!.env.example
+
+# ═══════ Python ═══════
+__pycache__/
+*.py[cod]
+*.so
+venv/
+.venv/
+env/
+
+# ═══════ 运行时数据（每个部署环境自生，不入库）═══════
+logs/
+*.log
+*.db
+data/
+uploads/
+uploads_tmp/
+reports/
+hermes_queue/
+context/
+drivers_cache/
+backups/
+
+# ═══════ 临时与备份 ═══════
+*.bak
+*.bak-*
+*.tmp
+*.swp
+*~
+.git-backup-*/
+
+# ═══════ 系统 ═══════
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ═══════ 构建产物（桥接器源码在 clouddiag-bridge/，产物随发布提供）═══════
+# 如需随仓库分发编译好的桥接器，请保留下面两行注释状态
+# static/clouddiag-bridge-*
+# clouddiag-bridge/clouddiag-bridge-*

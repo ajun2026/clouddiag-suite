@@ -1,0 +1,1749 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云端 AI 远程运维助手</title>
+<style>
+  :root {
+    /* 对齐整体(GitHub 暗色系):与 dashboard/IDG 统一 */
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --accent: #f778ba; --text: #e6edf3; --text2: #8b949e;
+    --border: #30363d; --success: #3fb950; --warn: #d29922;
+    --error: #f85149; --info: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh;
+  }
+
+  #app {
+    /* 撑满 iframe 全宽(去 max-width 1400 居中——宽屏时两侧露底色形成"嵌入边框"感);
+       背景与 dashboard 内容区一致(--bg),无边界融合 */
+    width: 100%; height: 100vh;
+    display: flex; flex-direction: column; background: var(--bg);
+  }
+
+  /* ====== Header ====== */
+  #header {
+    padding: 12px 20px; background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  #header .title { font-size: 16px; font-weight: 600; }
+  #status-dot {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; margin-right: 6px;
+  }
+  #status-dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  #status-dot.offline { background: var(--error); }
+  #status-dot.connecting { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  #status-text { font-size: 13px; color: var(--text2); }
+
+  #room-display {
+    font-family: monospace; font-size: 14px; color: var(--info);
+    background: var(--bg); padding: 4px 12px; border-radius: 6px; letter-spacing: 2px;
+  }
+
+
+  /* Auto-approve toggle */
+  #auto-approve-btn {
+    font-size: 11px; padding: 4px 10px; border-radius: 20px; align-self: center;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text2); cursor: pointer;
+    white-space: nowrap; flex-shrink: 0; display: none;
+  }
+  #auto-approve-btn.enabled { background: rgba(210,153,34,0.15); color: var(--warn); border-color: var(--warn); }
+
+  /* ====== Messages ====== */
+  #messages {
+    flex: 1; overflow-y: auto; padding: 20px 28px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+
+  .msg {
+    max-width: 78%; padding: 10px 14px; border-radius: 12px;
+    line-height: 1.6; font-size: 14px; word-break: break-word;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .msg .msg-body { min-width: 0; flex: 1; }
+  .msg .msg-time { font-size: 11px; opacity: 0.65; flex-shrink: 0; margin-top: 3px; white-space: nowrap; }
+  .msg.user { align-self: flex-end; background: #1f6feb; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.user .msg-time { order: 2; }
+  .msg.ai {
+    align-self: flex-start; background: var(--surface2);
+    border: 1px solid var(--border); border-bottom-left-radius: 4px;
+    max-width: 920px;
+  }
+  .msg.ai .msg-time { order: 0; }
+  .msg.ai h1, .msg.ai h2, .msg.ai h3 { margin: 8px 0 4px; font-size: 15px; }
+  .msg.ai ul, .msg.ai ol { padding-left: 20px; }
+  .msg.ai code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .msg.ai pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
+  .msg.ai strong { color: var(--warn); }
+
+  .msg.system { align-self: center; font-size: 12px; color: var(--text2); background: transparent; padding: 4px 8px; display: block; }
+  .msg.error {
+    align-self: center; font-size: 13px;
+    background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.3); color: var(--error);
+    display: block;
+  }
+
+  /* Tool card */
+  .msg.tool {
+    align-self: flex-start; width: 100%; max-width: 100%;
+    font-size: 13px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+  }
+  .tool-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; cursor: pointer; user-select: none;
+  }
+  .tool-header .icon { font-size: 16px; }
+  .tool-header .name { font-weight: 600; color: var(--info); }
+  .tool-header .status { font-size: 12px; margin-left: auto; }
+  .tool-body {
+    padding: 8px 12px 12px; border-top: 1px solid var(--border);
+    display: none; overflow-x: auto;
+  }
+  .tool-body.open { display: block; }
+  .tool-body pre {
+    font-size: 11px; max-height: 300px; overflow-y: auto; white-space: pre-wrap;
+    background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; margin: 0;
+  }
+
+  .tool-status.running { color: var(--warn); }
+  .tool-status.done { color: var(--success); }
+  .tool-status.error { color: var(--error); }
+  .tool-status.denied { color: var(--error); }
+
+  /* Tier badge */
+  .tier-badge { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+  .tier-badge.t2 { background: rgba(210,153,34,0.2); color: var(--warn); }
+  .tier-badge.t3 { background: rgba(248,81,73,0.2); color: var(--error); }
+
+  /* ====== Approval Dialog ====== */
+  #approval-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    display: none; justify-content: center; align-items: center; z-index: 9999;
+  }
+  #approval-dialog {
+    background: var(--surface); border: 1px solid var(--info); border-radius: 14px;
+    padding: 24px; width: 420px; max-width: 95vw;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+  }
+  #approval-dialog h3 { margin-bottom: 8px; color: var(--text); font-size: 18px; }
+  #approval-dialog .human-desc {
+    font-size: 15px; font-weight: 600; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border);
+    padding: 12px 14px; border-radius: 8px; margin: 10px 0 6px;
+  }
+  #approval-dialog .detail-toggle {
+    background: none; border: none; color: var(--info); font-size: 12px;
+    cursor: pointer; padding: 4px 0; margin-top: 4px;
+  }
+  #approval-dialog .tool-info {
+    background: var(--bg); padding: 12px; border-radius: 8px; margin: 8px 0;
+    font-size: 13px; display: none;
+  }
+  #approval-dialog .tool-info code {
+    background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 11px;
+  }
+  #approval-dialog .args-display {
+    font-size: 11px; color: var(--text2); word-break: break-all; max-height: 120px; overflow-y: auto;
+  }
+  #approval-dialog .timer { font-size: 13px; color: var(--text2); margin: 10px 0; }
+  #approval-dialog .btn-row { display: flex; gap: 10px; margin-top: 12px; }
+  #approval-dialog button {
+    flex: 1; padding: 12px; border: none; border-radius: 8px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  #approval-dialog .btn-deny { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+  #approval-dialog .btn-deny:hover { background: var(--bg); }
+  #approval-dialog .btn-approve { background: var(--info); color: #fff; font-weight: 700; }
+  #approval-dialog .btn-approve:hover { opacity: 0.85; }
+  #approval-dialog .deny-reason {
+    width: 100%; padding: 8px; margin-top: 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg); color: var(--text); font-size: 12px; outline: none;
+    display: none;
+  }
+
+  /* ====== Input ====== */
+  #input-area {
+    padding: 14px 28px; border-top: 1px solid var(--border);
+    display: flex; gap: 10px; flex-shrink: 0; background: var(--surface);
+  }
+  #input-box {
+    flex: 1; padding: 10px 14px; border: 1px solid var(--border);
+    border-radius: 24px; background: var(--bg); color: var(--text);
+    font-size: 14px; outline: none; resize: none;
+    min-height: 42px; max-height: 120px; font-family: inherit;
+  }
+  #input-box:focus { border-color: var(--info); }
+  .qa-btn {
+    padding: 5px 12px; font-size: 12px; background: var(--surface2);
+    color: var(--text2); border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer;
+  }
+  .qa-btn:hover:not(:disabled) { border-color: var(--info); color: var(--info); }
+  .qa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* 快捷功能按钮分组:组内 flex 紧凑排列,组间留白 */
+  .qa-group { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .qa-group:last-child { margin-bottom: 0; }
+  /* 快捷诊断工具:默认收起(小屏/笔记本不占对话空间),点击展开 */
+  #quick-bar { display: none !important; }
+  #quick-bar.qa-open { display: flex !important; flex-direction: column; }
+  .qa-toggle { border-style: dashed; opacity: .85; }
+  /* 导出菜单项 */
+  .em-item { padding: 8px 12px; font-size: 12px; cursor: pointer; color: var(--text); }
+  .em-item:hover { background: var(--surface); color: var(--info); }
+  /* 启动项面板 */
+  .startup-panel {
+    margin: 8px 14px; padding: 12px 14px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 10px; font-size: 13px;
+  }
+  .startup-panel h4 { margin: 0 0 8px; font-size: 14px; }
+  .startup-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .startup-item:hover { background: rgba(88,166,255,0.08); }
+  .startup-item.disabled { opacity: 0.55; cursor: not-allowed; }
+  .startup-item input { accent-color: var(--info); }
+  .st-name { font-weight: 600; min-width: 140px; }
+  .st-desc { color: var(--text2); flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-path { display: block; color: var(--text2); font-size: 11px; opacity: 0.65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-pub { color: var(--text2); font-size: 11px; opacity: 0.75; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  .st-cat { font-size: 11px; padding: 1px 7px; border-radius: 8px; white-space: nowrap; }
+  .st-cat.necessary { background: rgba(46,204,113,0.15); color: #2ecc71; }
+  .st-cat.common { background: rgba(224,168,0,0.15); color: #e0a800; }
+  .st-cat.advisory { background: rgba(231,76,60,0.15); color: #e74c3c; }
+  .st-cat.suspicious { background: rgba(155,89,182,0.15); color: #9b59b6; }
+  .startup-actions { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
+  #send-btn {
+    padding: 10px 24px; border: none; border-radius: 24px;
+    background: var(--accent); color: #fff; font-size: 14px;
+    font-weight: 600; cursor: pointer; transition: opacity 0.2s;
+  }
+  #send-btn:hover { opacity: 0.85; }
+  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+
+  /* Close button for connect dialog */
+  #connect-dialog { position: relative; }
+  .dialog-close {
+    position: absolute; top: 14px; right: 14px;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text2); font-size: 16px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .dialog-close:hover { color: var(--error); border-color: var(--error); background: rgba(248,81,73,0.12); }
+
+  /* ====== Download Section ====== */
+  .dl-section { margin-top: 14px; text-align: left; }
+  .dl-title { font-size: 13px; font-weight: 600; color: var(--info); margin: 12px 0 6px; }
+  .dl-btn {
+    display: block; text-align: center; padding: 10px;
+    background: var(--surface2); color: var(--info);
+    border-radius: 8px; text-decoration: none; font-size: 13px;
+    font-weight: 600; border: 1px solid var(--border);
+  }
+  .dl-btn:hover { border-color: var(--info); }
+  .dl-arch-row { display: flex; gap: 6px; }
+  .dl-arch-btn {
+    flex: 1; text-align: center; padding: 8px 4px;
+    background: var(--bg); color: var(--text2);
+    border-radius: 6px; text-decoration: none; font-size: 12px;
+    font-weight: 600; border: 1px solid var(--border);
+  }
+  .dl-arch-btn:hover { border-color: var(--info); color: var(--info); }
+  .dl-cmd {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; font-size: 11px;
+    font-family: monospace; color: var(--text2); margin: 8px 0;
+    word-break: break-all;
+  }
+  .dl-copy { float: right; font-size: 11px; color: var(--info); cursor: pointer; margin-left: 8px; }
+  .dl-copy:hover { text-decoration: underline; }
+  .dl-toggle {
+    display: block; font-size: 12px; color: var(--info);
+    cursor: pointer; text-decoration: underline; margin-top: 6px;
+  }
+  .dl-help {
+    margin-top: 8px; font-size: 12px; color: var(--text2);
+    line-height: 1.7; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; display: none;
+  }
+  .dl-help code { background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+  .dl-help table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 11px; }
+  .dl-help th, .dl-help td { border: 1px solid var(--border); padding: 4px 6px; text-align: left; }
+  .dl-help th { background: var(--surface2); color: var(--info); }
+  /* Linux guide: step cards (2-column on wide dialog) */
+  .dl-guide { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .dl-guide-head { font-size: 13px; font-weight: 700; color: var(--info); margin-bottom: 2px; grid-column: 1 / -1; }
+  .dl-step {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .dl-step.wide { grid-column: 1 / -1; }
+  .dl-guide-foot { grid-column: 1 / -1; }
+  .dl-step-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .dl-step-title .num {
+    display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
+    text-align: center; background: var(--accent); color: #fff;
+    border-radius: 50%; font-size: 11px; font-weight: 700; margin-right: 6px;
+  }
+  .dl-cmd-block {
+    display: block; background: rgba(0,0,0,0.45); color: var(--info);
+    padding: 8px 10px; border-radius: 6px; font-family: monospace;
+    font-size: 11px; white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+    margin: 4px 0;
+  }
+  .dl-step-note { font-size: 11px; color: var(--text2); margin-top: 6px; }
+  .dl-guide-foot { font-size: 11px; color: var(--text2); border-top: 1px dashed var(--border); padding-top: 8px; margin-top: 2px; line-height: 1.7; }
+  #connect-dialog { max-height: 92vh; overflow-y: auto; }
+
+  /* ====== Responsive: mobile / narrow screens ====== */
+  @media (max-width: 720px) {
+    #header { flex-wrap: wrap; gap: 6px 10px; padding: 10px 14px; }
+    #header .title { font-size: 14px; }
+    #messages { padding: 14px 12px; }
+    #input-area { padding: 10px 12px; }
+    .msg { max-width: 94%; }
+    .msg.ai { max-width: 100%; }
+    #connect-dialog { padding: 20px 16px; width: 100%; max-width: 96vw; }
+    #approval-dialog { padding: 18px 16px; width: 100%; max-width: 96vw; }
+    .dl-guide { grid-template-columns: 1fr; }
+    .dl-step.wide { grid-column: auto; }
+    .dl-arch-row { flex-wrap: wrap; }
+    .dl-arch-btn { flex: 1 1 45%; }
+    .tool-header { flex-wrap: wrap; }
+    .tool-header .args { width: 100%; order: 3; }
+    .tool-body pre { max-height: 220px; }
+    #room-display { font-size: 12px; letter-spacing: 1px; padding: 3px 8px; }
+  }
+
+  /* ====== Download panel (room one-click connect) ====== */
+  .dl-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .dl-tab {
+    flex: 1; padding: 8px; text-align: center; font-size: 13px; font-weight: 600;
+    background: var(--bg); color: var(--text2); border: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer;
+  }
+  .dl-tab.active { background: var(--surface2); color: var(--info); border-color: var(--info); }
+  .dl-tab-panel { display: none; }
+  .dl-tab-panel.active { display: block; }
+  .dl-note { font-size: 11px; color: var(--text2); line-height: 1.6; margin-top: 8px; }
+
+  /* ====== Scrollbar ====== */
+  #messages::-webkit-scrollbar { width: 6px; }
+  #messages::-webkit-scrollbar-track { background: transparent; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="header">
+    <div style="display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
+      <span id="status-dot" class="connecting" style="flex-shrink:0;"></span>
+      <span id="status-text" data-i18n="status_connecting" style="font-size:12px;flex-shrink:0;">正在连接...</span>
+      <span id="room-info-compact" style="display:none;align-items:center;gap:10px;font-size:12px;color:var(--text2);margin-left:6px;padding-left:10px;border-left:1px solid var(--border);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;">
+        <span>📋 房间 <b id="ri-code" style="color:var(--info);letter-spacing:1px;"></b></span>
+        <span>SN: <span id="ri-sn"></span></span>
+        <span>工单: <span id="ri-ticket"></span></span>
+        <span id="ri-validity">--</span>
+        <span id="ri-status" style="color:var(--info);"></span>
+      </span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+      <button id="connect-toggle" onclick="toggleConnectPanel()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;" title="展开/收起一键连接命令">📶 连接你的电脑 ▾</button>
+      <button id="room-close-btn" onclick="closeRoom()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--error);border:1px solid var(--error);border-radius:4px;cursor:pointer;">⛔ 结束诊断</button>
+      <div style="position:relative;display:inline-block;">
+        <button id="export-btn" onclick="toggleExportMenu(event)" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" title="导出对话 / 生成报告">📄 导出 ▾</button>
+        <div id="export-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--surface2);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.4);z-index:100;min-width:150px;overflow:hidden;">
+          <div class="em-item" onclick="doExportChat(event)" title="导出完整对话记录(含 AI 分析)">💬 导出完整对话</div>
+          <div class="em-item" onclick="doExportReport(event)" title="生成诊断观察报告(仅执行记录与采集数据,不含 AI 分析)">📊 生成诊断报告</div>
+        </div>
+      </div>
+      <button id="reconnect-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;display:none;" data-i18n="reconnect_btn">重新连接</button>
+      <div id="room-display" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div id="connect-panel" style="display:none;padding:12px 14px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:13px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <span style="font-size:13px;font-weight:600;color:var(--info);">🔗 一键连接命令</span>
+      <span style="font-size:11px;color:var(--text2);">点击上方「📶 收起连接」可折叠本面板</span>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <button class="cp-tab" data-tab="ps" onclick="cpTab('ps')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--info);border-radius:4px;cursor:pointer;">PowerShell</button>
+      <button class="cp-tab" data-tab="exe" onclick="cpTab('exe')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Windows 双击版</button>
+      <button class="cp-tab" data-tab="linux" onclick="cpTab('linux')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Linux</button>
+    </div>
+    <div style="position:relative;">
+      <pre id="cp-content" style="white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 80px 10px 10px;margin:0;font-size:12px;color:var(--text);overflow-x:auto;"></pre>
+      <button id="cp-copy" onclick="cpCopy()" style="position:absolute;top:8px;right:8px;padding:3px 10px;font-size:12px;background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;">📋 复制</button>
+    </div>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
+      <a id="cp-dl-btn" href="#" download style="display:none;padding:12px 28px;font-size:14px;font-weight:600;background:var(--info);color:#fff;border-radius:8px;text-decoration:none;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25);">⬇️ 下载 一键连接.bat</a>
+      <span id="cp-dl-note" style="font-size:12px;color:var(--text2);display:none;">双击下载的 .bat → 自动下载桥接器并连接房间</span>
+    </div>
+    <div id="cp-meta" style="margin-top:8px;font-size:12px;color:var(--text2);"></div>
+    <div style="margin-top:4px;font-size:12px;color:#e0a800;">⚠️ 本连接含房间凭证，请勿转发</div>
+  </div>
+
+  <div id="messages"></div>
+
+  <!-- 上门工程师（field）：连接功能可用，无对话权限提示条 -->
+  <div id="field-tip" style="display:none;padding:8px 14px;background:rgba(224,168,0,0.12);color:#e0a800;font-size:12px;border-bottom:1px solid var(--border);">
+    ⚠ 上门工程师账号：可使用「📶 连接你的电脑」与快捷工具；对话诊断由远程工程师处理（不可发送消息）
+  </div>
+
+  <div id="quick-actions" style="display:flex;gap:8px;padding:8px 14px 0;flex-wrap:wrap;">
+    <!-- 快捷诊断工具:默认收起为一行,点击展开(小屏/笔记本不占对话空间) -->
+    <button class="qa-btn qa-toggle" onclick="toggleQuickBar()" title="展开/收起快捷诊断工具">
+      ⚡ 快捷诊断工具 <span id="qa-arrow">▾</span>
+    </button>
+  </div>
+
+  <!-- 快捷诊断选项卡（11 类——按平台显隐——点击自动发送预设诊断指令） -->
+  <div id="quick-bar" style="display:none;padding:8px 12px;border-top:1px solid var(--border);flex-wrap:wrap;gap:6px;background:var(--surface);"></div>
+
+  <div id="input-area">
+    <textarea id="input-box" data-i18n-placeholder="input_placeholder" placeholder="描述你的电脑问题，例如：帮我检查系统有没有异常" rows="1"></textarea>
+    <button id="auto-approve-btn" title="Tier 2 自动审批：开启后鼠标/键盘等交互操作无需弹窗确认（发送左侧）" onclick="toggleAutoApprove()">T2 Auto OFF</button>
+    <button id="send-btn" disabled data-i18n="send_btn">发送</button>
+  </div>
+</div>
+
+<!-- Connect Dialog -->
+
+<!-- 会话空闲提醒（30min 无操作 → 60s 倒计时 → 自动登出） -->
+<div id="idle-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:none;justify-content:center;align-items:center;z-index:9998;">
+  <div style="background:var(--surface);border:1px solid var(--info);border-radius:14px;padding:24px;width:380px;max-width:95vw;box-shadow:0 8px 40px rgba(0,0,0,0.35);">
+    <h3 style="margin:0 0 8px;color:var(--text);font-size:18px;">⏰ 会话空闲提醒</h3>
+    <p style="font-size:13px;color:var(--text2);margin:0 0 16px;">页面已空闲 30 分钟，<b id="idle-count" style="color:var(--warn);">60</b> 秒后自动退出登录</p>
+    <div style="display:flex;gap:10px;">
+      <button onclick="continueSession()" style="flex:1;padding:10px;border:none;border-radius:8px;background:var(--info);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">继续使用</button>
+      <button onclick="forceLogout()" style="flex:1;padding:10px;border:none;border-radius:8px;background:var(--surface2);color:var(--text2);font-size:14px;font-weight:600;cursor:pointer;">立即退出</button>
+    </div>
+  </div>
+</div>
+
+<!-- Approval Dialog -->
+<div id="approval-overlay">
+  <div id="approval-dialog">
+    <h3 id="approval-title" data-i18n="approval_title">操作确认</h3>
+    <p id="approval-desc" style="font-size:13px;color:var(--text2);" data-i18n="approval_desc">助手想执行以下操作：</p>
+    <p style="font-size:12px;color:var(--success);margin:0 0 6px;">✅ 允许后，本次任务后续操作将不再询问（自动放行）</p>
+    <div class="human-desc" id="approval-human"></div>
+    <button class="detail-toggle" id="approval-toggle-detail" onclick="toggleApprovalDetail()">▸ 查看命令详情</button>
+    <div class="tool-info" id="approval-detail">
+      <strong id="approval-tool" style="color:var(--info);"></strong>
+      <div class="args-display" id="approval-args" style="margin-top: 8px;"></div>
+    </div>
+    <p class="timer" id="approval-timer"></p>
+    <div class="btn-row">
+      <button class="btn-deny" onclick="respondApproval(false)" data-i18n="approval_deny">取消</button>
+      <button class="btn-approve" onclick="respondApproval(true)" data-i18n="approval_approve">允许</button>
+    </div>
+    <textarea class="deny-reason" id="deny-reason" data-i18n-placeholder="approval_reason_placeholder" placeholder="拒绝理由（可选）"></textarea>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Debug: version marker + error reporting
+// ============================================================
+const UI_VERSION = '2026-08-02-fix2';
+console.log('[UI] version:', UI_VERSION, 'approval-title exists:', !!document.getElementById('approval-title'));
+try {
+  fetch('/api/debug_log', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ msg: 'UI LOADED', version: UI_VERSION, approval_title: !!document.getElementById('approval-title'), approval_desc: !!document.getElementById('approval-desc'), url: location.href })
+  }).catch(function(){});
+} catch (e) {}
+window.onerror = function(msg, src, line, col, err) {
+  try {
+    console.error('[UI ERROR]', msg, src, line, col, err);
+    fetch('/api/debug_log', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ msg: String(msg), src: src, line: line, col: col, stack: err ? String(err.stack).slice(0, 500) : '', version: UI_VERSION })
+    }).catch(function(){});
+  } catch (e) {}
+  return false;
+};
+</script>
+<script>
+// ============================================================
+// i18n
+// ============================================================
+const I18N = {
+  'zh-CN': {
+    app_title: '⚡ 云端AI运维',
+    status_connecting: '正在连接...',
+    status_disconnected: '未连接',
+    status_waiting_bridge: '等待桥接器',
+    status_bridge_ok: '桥接器已连接',
+    status_bridge_wait: '等待桥接器 [--]',
+    status_connection_lost: '与服务器的连接已断开',
+    export_btn: '导出对话',
+    reconnect_btn: '重新连接',
+    send_btn: '发送',
+    input_placeholder: '描述你的电脑问题，例如：帮我检查系统有没有异常',
+    room_prefix: '房间: ',
+    dialog_title: '[+] 加入远程诊断',
+    dialog_subtitle: '输入 8 位房间码，或创建一个新房间',
+    dialog_join: '加入房间',
+    dialog_create: '创建新房间',
+    dialog_instructions: '<strong>使用说明：</strong><br>'
+      + '1. 下载下方 <strong>clouddiag-bridge-win64.exe</strong>（Windows 桥接器）<br>'
+      + '2. 在需要诊断的 Windows 电脑上双击运行 clouddiag-bridge-win64.exe<br>'
+      + '3. 输入上面创建的房间码完成配对<br>'
+      + '4. 在聊天框中用自然语言描述你的电脑问题即可<br>'
+      + '<br><strong>功能：</strong>49 个诊断工具 — 截图、进程监控、网络测试、事件日志、OCR 等。<br>'
+      + '<br><strong>安全：</strong>Tier 1 只读（安全）。Tier 2/3 交互工具会弹出审批确认。',
+    dialog_download: '[v] 下载 Windows 桥接器 (clouddiag-bridge-win64.exe, 4.8MB)',
+    client_toggle: '[+] 首次使用？下载桥接器客户端',
+    dl_win_note: '<strong>使用步骤：</strong><br>'
+      + '1. 下载 clouddiag-bridge-win64.exe<br>'
+      + '2. 双击运行，输入上方房间码<br>'
+      + '3. 回到聊天框描述你的电脑问题即可',
+    dl_copy: '复制',
+    dl_linux_toggle: '[+] Linux 安装教程',
+    dl_linux_help: '<div class="dl-guide">'
+      + '<div class="dl-guide-head">Linux 安装教程</div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">1</span>查看你的 CPU 架构</div>'
+      + '<span class="dl-cmd-block">uname -m</span>'
+      + '<table><tr><th>输出</th><th>选择版本</th></tr>'
+      + '<tr><td>x86_64</td><td>x86_64</td></tr>'
+      + '<tr><td>aarch64</td><td>ARM64</td></tr>'
+      + '<tr><td>loongarch64</td><td>龙芯</td></tr></table></div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">2</span>方式一：一键安装（自动识别架构）</div>'
+      + '<span class="dl-cmd-block">curl -sL {{PUBLIC_URL}}/static/install-linux.sh | bash</span></div>'
+      + '<div class="dl-step wide"><div class="dl-step-title"><span class="num">3</span>方式二：手动安装（以 x86_64 为例）</div>'
+      + '<span class="dl-cmd-block">wget {{PUBLIC_URL}}/static/clouddiag-bridge-linux-amd64\nchmod +x clouddiag-bridge-linux-amd64\n./clouddiag-bridge-linux-amd64</span>'
+      + '<div class="dl-step-note">按上方按钮下载对应架构的版本即可</div></div>'
+      + '<div class="dl-step"><div class="dl-step-title"><span class="num">4</span>输入房间码</div>'
+      + '<span class="dl-cmd-block">启动后输入上方房间码，回车即连接</span></div>'
+      + '<div class="dl-guide-foot"><strong>支持系统：</strong>Ubuntu / UOS 统信 / KOS 麒麟 / RedHat / CentOS（安装方式相同）<br>'
+      + '<strong>说明：</strong>一次性使用，重启后手动启动即可，无需常驻后台。</div>'
+      + '</div>',
+    msg_connected: '已连接到服务器',
+    msg_ws_failed: 'WebSocket 连接失败',
+    tool_running: '[...] 执行中...',
+    tool_done: '[OK] 完成',
+    tool_error: '[X] 出错',
+    tool_denied: '[X] 已拒绝',
+    tool_waiting: '等待结果...',
+    tool_tier3: 'Tier 3: 危险操作 — 需审批',
+    tool_tier2: 'Tier 2: 交互操作',
+    tool_tier1: 'Tier 1: 只读操作',
+    approval_title: '操作确认',
+    approval_desc: '助手想执行以下操作：',
+    approval_deny: '取消',
+    approval_approve: '允许',
+    approval_reason_placeholder: '拒绝理由（可选）',
+    auto_approve_title: '自动通过 Tier 2 审批',
+    auto_approve_enabled: 'T2 Auto: ON',
+    auto_approve_disabled: 'T2 Auto: OFF',
+    export_title: '云端 AI 远程运维助手 — 诊断报告',
+    export_time: '导出时间',
+    export_room: '房间',
+    export_bridge: '桥接器状态',
+    export_connected: '已连接',
+    export_disconnected: '未连接',
+    export_user: '用户',
+    export_ai: 'AI 分析',
+    export_tool: '工具',
+    export_error: '错误',
+    export_system: '系统',
+    alert_room_code: '请输入 8 位房间码',
+    alert_create_fail: '创建房间失败: ',
+  },
+};
+
+
+let currentLang = 'zh-CN';
+function t(key) { return (I18N[currentLang] && I18N[currentLang][key]) || I18N['zh-CN'][key] || key; }
+
+function applyLang(lang) {
+  currentLang = lang;
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    if (el.id === 'approval-desc') return; // 保留内部 span#approval-tier，弹窗显示时动态重建
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.dataset.i18nPlaceholder); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  document.title = t('app_title');
+  if (roomCode) document.getElementById('room-display').textContent = t('room_prefix') + roomCode;
+}
+
+// ============================================================
+// Linux download helpers
+// ============================================================
+function toggleLinuxHelp() {
+  const help = document.getElementById('linux-help');
+  const toggle = document.querySelector('.dl-toggle');
+  if (!help) return;
+  if (help.style.display === 'block') {
+    help.style.display = 'none';
+    toggle.textContent = t('dl_linux_toggle');
+  } else {
+    help.style.display = 'block';
+    toggle.textContent = '[-] Linux 安装教程';
+  }
+}
+
+function copyLinuxCmd(el) {
+  const txt = document.getElementById('linux-cmd-text');
+  if (!txt) return;
+  const text = txt.textContent.trim();
+  const done = () => { el.textContent = t('dl_copy') + ' ✓'; setTimeout(() => { el.textContent = t('dl_copy'); }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  } else {
+    fallbackCopy(text, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {}
+  document.body.removeChild(ta);
+}
+
+// ============================================================
+// State
+// ============================================================
+let ws = null;
+let roomCode = null;
+let bridgeConnected = false;
+let myRole = '';
+let myUsername = '';
+// 加载时获取当前用户角色（用于 field 上门工程师权限控制）
+fetch('/api/auth/me').then(r => r.json()).then(d => {
+  if (d && d.role) {
+    myRole = d.role;
+    myUsername = d.username || '';
+    if (myRole === 'field') {
+      // 上门工程师：连接功能可用——仅禁用聊天输入（不可发消息）
+      const tip = document.getElementById('field-tip');
+      if (tip) { tip.style.display = 'block'; }
+      const ia = document.getElementById('input-area');
+      if (ia) ia.style.display = 'none';
+      // 快捷工具按钮保留（开机自启动/蓝屏分析=服务器直处理，不经 AI）
+    }
+  }
+}).catch(() => {});
+let pendingApprovalId = null;
+let approvalTimerInterval = null;
+let approvalDeadline = 0;
+let autoApproveT2 = localStorage.getItem('auto_approve_t2') === 'true';
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+let heartbeatTimer = null;  // ws 心跳保活定时器（25s 一个 ping）
+
+const messagesEl = document.getElementById('messages');
+const inputBox = document.getElementById('input-box');
+const sendBtn = document.getElementById('send-btn');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const roomDisplay = document.getElementById('room-display');
+const exportBtn = document.getElementById('export-btn');
+const approvalOverlay = document.getElementById('approval-overlay');
+const autoApproveBtn = document.getElementById('auto-approve-btn');
+
+// ============================================================
+// Connection
+// ============================================================
+function setStatus(state) {
+  statusDot.className = state;
+  if (state === 'online') {
+    statusText.textContent = bridgeConnected ? t('status_bridge_ok') : t('status_waiting_bridge');
+    if (!bridgeConnected) statusDot.className = 'connecting';
+  } else if (state === 'offline') {
+    statusText.textContent = t('status_disconnected');
+  } else if (state === 'connecting') {
+    statusText.textContent = t('status_connecting');
+  }
+}
+
+function updateBridgeStatus(connected) {
+  bridgeConnected = connected;
+  setStatus(connected ? 'online' : ws ? 'online' : 'offline');
+  statusDot.className = connected ? 'online' : 'connecting';
+  statusText.textContent = connected ? t('status_bridge_ok') : t('status_bridge_wait');
+  sendBtn.disabled = !connected;
+  autoApproveBtn.style.display = connected ? 'inline-block' : 'none';
+  updateAutoApproveBtnState();
+  // 一键连接信息栏的桥接器状态
+  const ri = document.getElementById('ri-bridge');
+  if (ri) { ri.innerHTML = connected ? '<span style="color:#2ecc71;">● 在线</span>' : '<span style="color:#888;">● 离线</span>'; }
+  updateQuickActions();  // 快捷功能按钮随桥接器连接状态启停
+}
+
+function updateAutoApproveBtnState() {
+  if (autoApproveT2) {
+    autoApproveBtn.className = 'enabled';
+    autoApproveBtn.textContent = t('auto_approve_enabled');
+  } else {
+    autoApproveBtn.className = '';
+    autoApproveBtn.textContent = t('auto_approve_disabled');
+  }
+}
+
+function toggleAutoApprove() {
+  autoApproveT2 = !autoApproveT2;
+  localStorage.setItem('auto_approve_t2', autoApproveT2);
+  updateAutoApproveBtnState();
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'auto_approve_toggle', enabled: autoApproveT2 }));
+  }
+}
+
+function connect(room) {
+  roomCode = room;
+  roomDisplay.textContent = t('room_prefix') + room;
+  loadRoomConnect(room);  // 一键连接信息（信息栏 + 连接面板）
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = proto + '//' + location.host + '/ws/browser/' + room;
+  setStatus('connecting');
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    reconnectAttempts = 0;
+    document.getElementById('reconnect-btn').style.display = 'none';
+    exportBtn.style.display = 'inline-block';
+    addSystemMsg(t('msg_connected'));
+    loadHistory(roomCode);  // 断线重连/刷新后恢复历史对话
+    // Sync auto-approve state with server
+    ws.send(JSON.stringify({ type: 'auto_approve_toggle', enabled: autoApproveT2 }));
+    // 心跳保活：每 25s 发一个 ping——防止中间设备（NAT/防火墙 60s 无数据）静默切断长连接
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) {}
+      }
+    }, 25000);
+  };
+
+  ws.onmessage = (event) => {
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch (e) {
+      console.error('Bad WS message:', event.data);
+      return;
+    }
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    setStatus('offline'); sendBtn.disabled = true;
+    addSystemMsg(t('status_connection_lost'));
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => { addErrorMsg(t('msg_ws_failed')); };
+}
+
+// 返回工作台：dashboard iframe 内调用父窗口切 tab；独立打开则跳转
+function goBackToWorkbench() {
+  try {
+    if (window.parent && window.parent !== window && typeof window.parent.switchToWorkorders === 'function') {
+      window.parent.switchToWorkorders();
+      return;
+    }
+  } catch (e) { /* 跨域或异常时忽略，走跳转 */ }
+  location.href = '/dashboard';
+}
+
+// 从 SQLite 拉取该房间历史并渲染（登录用户可访问 /api/history/{room}）
+async function loadHistory(room) {
+  if (myRole === 'field') {
+    // 上门工程师：不加载对话历史（连接功能不受影响）
+    return;
+  }
+  try {
+    const resp = await fetch('/api/history/' + room);
+    if (resp.status === 401) { addSystemMsg('登录已过期，请重新登录后查看历史记录'); return; }
+    if (!resp.ok) { addSystemMsg('(历史加载失败: HTTP ' + resp.status + ')'); return; }
+    const data = await resp.json();
+    messagesEl.innerHTML = '';
+    for (const m of data.messages) {
+      if (m.role === 'user') addUserMessage(m.content);
+      else if (m.role === 'ai') addAiMessage(m.content);
+      else if (m.role === 'system') addSystemMsg(m.content);
+      else if (m.role === 'error') addErrorMsg(m.content);
+      // tool 消息不恢复（工具卡片与实时审批状态耦合，避免混乱）
+    }
+    scrollBottom();
+  } catch (e) { console.error('loadHistory failed', e); }
+}
+
+// ===== 一键连接（信息栏 + 连接面板）=====
+let roomConnectData = null;
+let roomConnectTab = 'ps';
+
+async function loadRoomConnect(room) {
+  const bar = document.getElementById('room-info-compact');
+  if (!bar) return;
+  try {
+    const resp = await fetch('/api/room_connect/' + encodeURIComponent(room));
+    if (!resp.ok) return;
+    const d = await resp.json();
+    roomConnectData = d;
+    renderQuickBar();
+    bar.style.display = 'flex';
+    document.getElementById('ri-code').textContent = d.room_code;
+    document.getElementById('ri-sn').textContent = d.sn || '-';
+    document.getElementById('ri-ticket').textContent = d.ticket_no || '-';
+    // 有效期显示（room_connect 返回 days_left）
+    const riVal = document.getElementById('ri-validity');
+    if (riVal) {
+      const dl = d.days_left;
+      if (dl === null || dl === undefined) riVal.innerHTML = '<span style="color:var(--text2);">永久</span>';
+      else if (dl < 0) riVal.innerHTML = '<span style="color:#e74c3c;font-weight:600;">已过期</span>';
+      else if (dl <= 3) riVal.innerHTML = '<span style="color:#e0a800;font-weight:600;">剩 ' + dl + ' 天</span>';
+      else riVal.innerHTML = '<span style="color:var(--text2);">剩 ' + dl + ' 天</span>';
+    }
+    // 房间状态显示（room_connect 返回 status）
+    const riStatus = document.getElementById('ri-status');
+    if (riStatus) {
+      const st = d.status || 'active';
+      if (st === 'idle') { riStatus.innerHTML = '<span style="color:#888;">已闲置（可恢复）</span>'; }
+      else if (st === 'archived') { riStatus.innerHTML = '<span style="color:#e74c3c;font-weight:600;">已归档（只读）</span>'; }
+      else { riStatus.innerHTML = '<span style="color:#2ecc71;">诊断中</span>'; }
+      // 归档房间：只读（禁用发送）
+      const sendBtn = document.getElementById('send-btn');
+      const inputBox = document.getElementById('input-box');
+      if (st === 'archived' && sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.title = '房间已归档，仅可查看历史';
+        if (inputBox) inputBox.placeholder = '房间已归档，仅可查看历史记录';
+      }
+    }
+    document.getElementById('cp-meta').textContent = '标记: SN=' + (d.sn || '-') + ' · 工单=' + (d.ticket_no || '-') + ' · 创建人=' + d.engineer_username + ' · ' + (d.created_at || '');
+    if (new URLSearchParams(location.search).get('connect') === '1') toggleConnectPanel();
+  } catch (e) { console.error('loadRoomConnect failed', e); }
+}
+
+function toggleConnectPanel() {
+  const p = document.getElementById('connect-panel');
+  if (!p || !roomConnectData) return;
+  const show = p.style.display === 'none';
+  p.style.display = show ? 'block' : 'none';
+  const tb = document.getElementById('connect-toggle');
+  if (tb) { tb.textContent = show ? '📶 收起连接 ▴' : '📶 连接你的电脑 ▾'; }
+  if (show) {
+    applyOsTabs();  // 按房间系统收敛命令 tab（Linux 机器不显示 PowerShell）
+    renderConnectTab();
+  }
+}
+
+// 按客户机系统收敛连接命令 tab：os 已记录 → 只显示对应平台命令；未知 → 3 种全显示
+function applyOsTabs() {
+  const os = (roomConnectData.os || '').toLowerCase();
+  const psTab = document.querySelector('.cp-tab[data-tab="ps"]');
+  const exeTab = document.querySelector('.cp-tab[data-tab="exe"]');
+  const linuxTab = document.querySelector('.cp-tab[data-tab="linux"]');
+  if (os === 'linux') {
+    if (psTab) psTab.style.display = 'none';
+    if (exeTab) exeTab.style.display = 'none';
+    if (linuxTab) linuxTab.style.display = '';
+    roomConnectTab = 'linux';
+  } else if (os === 'windows') {
+    if (psTab) psTab.style.display = '';
+    if (exeTab) exeTab.style.display = '';
+    if (linuxTab) linuxTab.style.display = 'none';
+    roomConnectTab = 'ps';
+  } else {
+    if (psTab) psTab.style.display = '';
+    if (exeTab) exeTab.style.display = '';
+    if (linuxTab) linuxTab.style.display = '';
+  }
+}
+
+function cpTab(tab) {
+  roomConnectTab = tab;
+  document.querySelectorAll('.cp-tab').forEach(b => {
+    b.style.borderColor = b.dataset.tab === tab ? 'var(--info)' : 'var(--border)';
+  });
+  renderConnectTab();
+}
+
+function renderConnectTab() {
+  const pre = document.getElementById('cp-content');
+  const copy = document.getElementById('cp-copy');
+  if (!pre || !roomConnectData) return;
+  const c = roomConnectData.connect;
+  if (roomConnectTab === 'exe') {
+    // Windows：只需下载按钮（.bat 自动下载 exe + 连接），无需复制命令
+    pre.style.display = 'none';
+    copy.style.display = 'none';
+    const dl = document.getElementById('cp-dl-btn');
+    if (dl) {
+      dl.style.display = 'inline-block';
+      dl.href = '/api/room_bat/' + encodeURIComponent(roomConnectData.room_code);
+      dl.setAttribute('download', 'connect-' + roomConnectData.room_code + '.bat');
+      dl.textContent = '⬇️ 下载 一键连接.bat';
+    }
+    const note = document.getElementById('cp-dl-note');
+    if (note) note.style.display = 'inline';
+  } else {
+    pre.style.display = 'block';
+    copy.style.display = 'inline-block';
+    pre.textContent = roomConnectTab === 'ps' ? c.powershell : c.linux;
+    const dl = document.getElementById('cp-dl-btn');
+    if (dl) dl.style.display = 'none';
+    const note = document.getElementById('cp-dl-note');
+    if (note) note.style.display = 'none';
+  }
+}
+
+function cpCopy() {
+  const pre = document.getElementById('cp-content');
+  if (!pre || !pre.textContent) return;
+  const done = () => {
+    const b = document.getElementById('cp-copy');
+    b.textContent = '✅ 已复制';
+    setTimeout(() => { b.textContent = '📋 复制'; }, 1500);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(pre.textContent).then(done).catch(() => fallbackCopy(pre.textContent, done));
+  } else {
+    fallbackCopy(pre.textContent, done);
+  }
+}
+
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {}
+  document.body.removeChild(ta);
+}
+
+// ===== 结束诊断（一键关闭：令牌作废 + 房间归档 + 断开桥接器）=====
+async function downloadReport() {
+  if (!roomCode) return;
+  try {
+    const resp = await fetch('/api/report/' + encodeURIComponent(roomCode));
+    if (!resp.ok) { alert('报告生成失败（' + resp.status + '）'); return; }
+    const text = await resp.text();
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'report-' + roomCode + '.txt';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  } catch (e) { alert('网络错误: ' + e.message); }
+}
+
+async function closeRoom() {
+  if (!roomCode) return;
+  if (!confirm('结束诊断后：桥接器将断开、房间关闭、历史封存（仅管理员可查看）。\n确定结束诊断吗？')) return;
+  try {
+    const resp = await fetch('/api/room_close/' + encodeURIComponent(roomCode), { method: 'POST' });
+    if (resp.ok) {
+      await downloadReport();  // 结束诊断时自动生成并下载观察报告
+      alert('房间已结束诊断');
+      // 对话页可能嵌在 dashboard 的 iframe 中：iframe 内跳转会嵌套 dashboard——顶层跳转
+      if (window.self !== window.top) {
+        window.top.location.href = '/dashboard';
+      } else {
+        location.href = '/dashboard';
+      }
+    } else {
+      const d = await resp.json().catch(() => ({}));
+      alert('操作失败: ' + (d.error || resp.status));
+    }
+  } catch (e) { alert('网络错误: ' + e.message); }
+}
+
+// ===== 会话空闲检测（30min 无操作 → 60s 倒计时 → 自动登出）=====
+let idleTimer = null;
+let idleCountdown = null;
+const IDLE_LIMIT_MS = 30 * 60 * 1000;
+
+function resetIdleTimer() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(showIdleWarning, IDLE_LIMIT_MS);
+}
+
+function showIdleWarning() {
+  const ov = document.getElementById('idle-overlay');
+  if (!ov) return;
+  ov.style.display = 'flex';
+  let remaining = 60;
+  const count = document.getElementById('idle-count');
+  if (count) count.textContent = remaining;
+  clearInterval(idleCountdown);
+  idleCountdown = setInterval(() => {
+    remaining--;
+    if (count) count.textContent = remaining;
+    if (remaining <= 0) { clearInterval(idleCountdown); forceLogout(); }
+  }, 1000);
+}
+
+function continueSession() {
+  clearInterval(idleCountdown);
+  const ov = document.getElementById('idle-overlay');
+  if (ov) ov.style.display = 'none';
+  resetIdleTimer();
+}
+
+async function forceLogout() {
+  clearInterval(idleCountdown);
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+  location.href = '/login';
+}
+
+// 用户交互重置空闲计时
+['mousemove', 'keydown', 'click', 'touchstart', 'scroll'].forEach(ev => {
+  document.addEventListener(ev, resetIdleTimer, { passive: true });
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resetIdleTimer(); });
+resetIdleTimer();
+
+// 自动重连：无限重试（指数退避，封顶 30s——网络抖动自动恢复，无需手动刷新）
+function scheduleReconnect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (!roomCode || !ws || ws.readyState !== WebSocket.CLOSED) return;
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+  reconnectAttempts++;
+  addSystemMsg('[' + reconnectAttempts + '] 自动重连中，' + (delay / 1000) + 's');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!roomCode) return;
+    addSystemMsg(t('status_connecting'));
+    connect(roomCode);
+  }, delay);
+}
+// ============================================================
+// Message handler
+// ============================================================
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'status':
+      if (msg.bridge_connected !== undefined) updateBridgeStatus(msg.bridge_connected);
+      addSystemMsg(msg.content);
+      break;
+    case 'tool_start':
+      addToolCard(msg.tool, msg.args, msg.tier);
+      break;
+    case 'tool_result':
+      updateToolResult(msg.tool, msg.content, msg.denied);
+      break;
+    case 'approval_required':
+      showApprovalDialog(msg);
+      break;
+    case 'ai_message':
+      addAiMessage(msg.content);
+      break;
+    case 'startup_list':
+      renderStartupPanel(msg.items || []);
+      break;
+    case 'startup_result':
+      handleStartupResult(msg);
+      break;
+    case 'ai_done':
+      sendBtn.disabled = false; inputBox.focus();
+      break;
+    case 'error':
+      addErrorMsg(msg.content); sendBtn.disabled = false;
+      break;
+    case 'pong': break;
+    default:
+      console.log('Unknown message type:', msg.type, msg);
+  }
+}
+
+// ============================================================
+// 快捷功能：开机自启动（QUICK_ACTION）
+// ============================================================
+const CAT_LABEL = { necessary: '🟢 必需', common: '🟡 常用', advisory: '🔴 建议关闭', suspicious: '⚠️ 可疑' };
+let startupPanelEl = null;
+
+function quickStartupScan() {
+  if (!bridgeConnected) { alert('请先连接客户机（📶 连接你的电脑）后再使用此功能'); return; }
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立，请稍候'); return; }
+  addSystemMsg('正在查询本机开机自启动项...');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_scan]' }));
+}
+
+function renderStartupPanel(items) {
+  if (startupPanelEl && startupPanelEl.parentNode) startupPanelEl.remove();
+  const panel = document.createElement('div');
+  panel.className = 'startup-panel';
+  let rows = '';
+  items.slice(0, 30).forEach((it, idx) => {
+    const cat = it.category || 'common';
+    const disabled = cat === 'necessary';
+    const checked = !!it.recommend && !disabled;
+    rows += '<div class="startup-item' + (disabled ? ' disabled' : '') + '" onclick="toggleStartupItem(this,' + idx + ')">'
+      + '<input type="checkbox" data-idx="' + idx + '" ' + (checked ? 'checked' : '') + (disabled ? ' disabled' : '') + '>'
+      + '<span class="st-name" title="' + escapeHtml(it.name || '') + '">' + escapeHtml(it.name || '?') + '</span>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<span class="st-desc">' + escapeHtml((it.display && it.display !== it.name ? it.display + ' — ' : '') + (it.desc || '')) + '</span>'
+      + '<span class="st-path" title="' + escapeHtml(it.command || '') + '">' + escapeHtml(it.command || '') + '</span>'
+      + '</div>'
+      + (it.publisher ? '<span class="st-pub">' + escapeHtml(it.publisher) + '</span>' : '')
+      + '<span class="st-cat ' + cat + '">' + (CAT_LABEL[cat] || cat) + '</span>'
+      + '</div>';
+  });
+  panel.innerHTML = '<h4>🔌 开机自启动项（共 ' + items.length + ' 项）</h4>'
+    + rows
+    + '<div class="startup-actions">'
+    + '<button class="qa-btn" style="background:var(--accent);color:#fff;border:none;font-weight:600;" onclick="confirmStartupClose()">✔ 关闭所选</button>'
+    + '<button class="qa-btn" onclick="clearStartupSel()">全不选</button>'
+    + '<span style="font-size:12px;color:var(--text2);" id="st-count">已选 0 项</span>'
+    + '<span style="font-size:11px;color:var(--text2);margin-left:auto;">🔴 建议关闭项已预勾选 · 🟢 系统必需不可关闭</span>'
+    + '</div>';
+  panel._items = items;
+  messagesEl.appendChild(panel);
+  startupPanelEl = panel;
+  updateStartupCount();
+  scrollBottom();
+}
+
+function toggleStartupItem(row, idx) {
+  const cb = row.querySelector('input');
+  if (cb.disabled) return;
+  cb.checked = !cb.checked;
+  updateStartupCount();
+}
+
+function clearStartupSel() {
+  if (!startupPanelEl) return;
+  startupPanelEl.querySelectorAll('input[type=checkbox]:not(:disabled)').forEach(cb => { cb.checked = false; });
+  updateStartupCount();
+}
+
+function updateStartupCount() {
+  if (!startupPanelEl) return;
+  const n = startupPanelEl.querySelectorAll('input[type=checkbox]:checked').length;
+  const el = startupPanelEl.querySelector('#st-count');
+  if (el) el.textContent = '已选 ' + n + ' 项';
+}
+
+function confirmStartupClose() {
+  if (!startupPanelEl) return;
+  const items = [];
+  const displays = [];
+  startupPanelEl.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {
+    const it = startupPanelEl._items[parseInt(cb.dataset.idx)];
+    if (it) { items.push({ name: it.name, location: it.location, command: it.command }); displays.push(it.display || it.name); }
+  });
+  if (items.length === 0) { alert('请先勾选要关闭的启动项'); return; }
+  if (!confirm('将关闭以下开机自启动项（执行前自动备份到桌面）：\n\n' + displays.join('、') + '\n\n确定执行？')) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立'); return; }
+  addSystemMsg('正在关闭所选启动项...');
+  ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_close] ' + JSON.stringify({ items: items }) }));
+}
+
+function handleStartupResult(msg) {
+  const closed = msg.closed || [];
+  if (startupPanelEl && startupPanelEl._items) {
+    const remain = startupPanelEl._items.filter(it => !closed.includes(it.name));
+    renderStartupPanel(remain);
+  }
+  let txt = '✅ 已关闭 ' + closed.length + ' 项' + (closed.length ? '：' + closed.join('、') : '');
+  if (msg.failed && msg.failed.length) txt += '\n❌ 失败：' + msg.failed.join('、');
+  if (msg.backup) txt += '\n💾 备份位置：' + msg.backup;
+  txt += '\n（误删可恢复：reg import 备份文件 / 复制回原启动文件）';
+  addSystemMsg(txt);
+}
+
+// 桥接器连接状态联动快捷按钮
+function updateQuickActions() {
+  const btns = document.querySelectorAll('.qa-btn');
+  btns.forEach(b => { b.disabled = !bridgeConnected; });
+}
+
+// ============================================================
+// Approval dialog
+// ============================================================
+function showApprovalDialog(msg) {
+  pendingApprovalId = msg.id;
+  approvalDeadline = Date.now() + (msg.timeout || 300) * 1000;
+
+  // 人话说明（后端 humanize_tool 生成；兜底用工具名）
+  const humanEl = document.getElementById('approval-human');
+  humanEl.textContent = msg.human_desc || (msg.tool || '执行操作');
+
+  // 命令详情默认折叠（想看的用户点开）
+  document.getElementById('approval-tool').textContent = msg.tool;
+  const argsEl = document.getElementById('approval-args');
+  argsEl.textContent = JSON.stringify(msg.args || {}, null, 2);
+  document.getElementById('approval-detail').style.display = 'none';
+  const toggleBtn = document.getElementById('approval-toggle-detail');
+  toggleBtn.textContent = '▸ 查看命令详情';
+
+  document.getElementById('deny-reason').style.display = 'none';
+  document.getElementById('deny-reason').value = '';
+
+  approvalOverlay.style.display = 'flex';
+  document.getElementById('approval-title').textContent = t('approval_title');
+  document.getElementById('approval-desc').textContent = t('approval_desc');
+
+  // 温和的页面标题提示（不再闪烁 [!!!]）
+  let originalTitle = document.title;
+  document.title = t('approval_title') + ' · ' + originalTitle;
+  setTimeout(function () { document.title = originalTitle; }, 3000);
+  approvalOverlay._originalTitle = originalTitle;
+
+  updateApprovalTimer();
+  approvalTimerInterval = setInterval(updateApprovalTimer, 1000);
+
+  // Show deny reason when hovering over deny button
+  const denyBtn = document.querySelector('.btn-deny');
+  denyBtn.onmouseenter = () => { document.getElementById('deny-reason').style.display = 'block'; };
+}
+
+// 折叠/展开命令详情
+function toggleApprovalDetail() {
+  const detail = document.getElementById('approval-detail');
+  const btn = document.getElementById('approval-toggle-detail');
+  const show = detail.style.display !== 'block';
+  detail.style.display = show ? 'block' : 'none';
+  btn.textContent = show ? '▾ 收起命令详情' : '▸ 查看命令详情';
+}
+
+function updateApprovalTimer() {
+  const remaining = Math.max(0, Math.round((approvalDeadline - Date.now()) / 1000));
+  const timer = document.getElementById('approval-timer');
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  timer.textContent = (currentLang === 'zh-CN' ? '剩余时间: ' :
+                       '剩余时间: ')
+                     + mins + ':' + (secs < 10 ? '0' : '') + secs;
+
+  if (remaining <= 10) timer.style.color = 'var(--error)';
+  if (remaining <= 0) {
+    clearInterval(approvalTimerInterval);
+    const id = pendingApprovalId;
+    approvalOverlay.style.display = 'none';
+    pendingApprovalId = null;
+    // Auto-deny on timeout
+    if (ws && ws.readyState === WebSocket.OPEN && id) {
+      ws.send(JSON.stringify({ type: 'approval_response', id: id, approved: false, reason: 'approval_timeout' }));
+    }
+  }
+}
+
+function respondApproval(approved) {
+  clearInterval(approvalTimerInterval);
+  // Stop the title flash
+  if (approvalOverlay._flashInterval) {
+    clearInterval(approvalOverlay._flashInterval);
+    document.title = approvalOverlay._originalTitle || document.title;
+  }
+  let reason = '';
+  if (!approved) {
+    reason = document.getElementById('deny-reason').value.trim();
+  }
+  const id = pendingApprovalId;
+  approvalOverlay.style.display = 'none';
+  pendingApprovalId = null;
+  if (ws && ws.readyState === WebSocket.OPEN && id) {
+    ws.send(JSON.stringify({
+      type: 'approval_response',
+      id: id,
+      approved: approved,
+      reason: reason,
+    }));
+  } else {
+    console.log('Cannot send approval: ws=' + (ws ? ws.readyState : 'null') + ' id=' + id);
+  }
+}
+
+// Deny reason input enter key
+document.getElementById('deny-reason').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault();
+    respondApproval(false);
+  }
+});
+
+// ============================================================
+// Message rendering
+// ============================================================
+let sysmsgSeq = 0;
+function addSystemMsg(text) {
+  const el = document.createElement('div'); el.className = 'msg system';
+  el.id = 'sysmsg-' + (++sysmsgSeq);
+  el.textContent = text; messagesEl.appendChild(el); scrollBottom();
+  return sysmsgSeq;  // 返回序号,便于后续更新该条消息
+}
+function addSystemMsgHtml(html) {
+  const el = document.createElement('div'); el.className = 'msg system';
+  el.innerHTML = html; messagesEl.appendChild(el); scrollBottom();
+}
+
+function addErrorMsg(text) {
+  const el = document.createElement('div'); el.className = 'msg error';
+  el.textContent = '[!] ' + text; messagesEl.appendChild(el); scrollBottom();
+}
+
+function fmtMsgTime() {
+  const d = new Date();
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function addAiMessage(content) {
+  const el = document.createElement('div'); el.className = 'msg ai';
+  const time = document.createElement('span'); time.className = 'msg-time'; time.textContent = fmtMsgTime();
+  const body = document.createElement('div'); body.className = 'msg-body';
+  body.innerHTML = renderDiagnosis(content);
+  el.appendChild(time); el.appendChild(body);
+  messagesEl.appendChild(el); scrollBottom();
+}
+
+// 诊断报告渲染（方案A 2026-09-14）：识别【采集项】【观察】【依据】【缺失】四段
+// 【采集项】渲染成状态清单（成功/失败/不适用）；其余段落正常 markdown
+function renderDiagnosis(md) {
+  if (!md || md.indexOf('【采集项】') === -1) return renderMarkdown(md);
+  var parts = md.split(/【(采集项|观察|依据|缺失|初步判读)】/);
+  var html = '';
+  for (var i = 0; i < parts.length; i++) {
+    var key = parts[i], val = parts[i + 1];
+    if (key === '采集项' && val !== undefined) {
+      html += renderManifest(val);
+      i++;  // 跳过内容
+    } else if (key === '初步判读' && val !== undefined) {
+      html += '<div style="margin:10px 0 4px;font-weight:600;font-size:13px;color:#bc8cff;">🧭 初步判读（方向提示，非结论）</div>';
+      html += '<div style="margin-bottom:6px;padding:10px 14px;background:rgba(188,140,255,.07);border-left:3px solid #bc8cff;border-radius:0 8px 8px 0;color:#d8b9ff;">' + renderMarkdown(val.trim()) + '</div>';
+      i++;
+    } else if ((key === '观察' || key === '依据' || key === '缺失') && val !== undefined) {
+      var label = { '观察': '📊 观察', '依据': '🔗 依据', '缺失': '⚠️ 缺失' }[key];
+      html += '<div style="margin:10px 0 4px;font-weight:600;font-size:13px;color:#8b949e;">' + label + '</div>';
+      html += '<div style="margin-bottom:6px;">' + renderMarkdown(val.trim()) + '</div>';
+      i++;
+    } else if (key.trim()) {
+      html += renderMarkdown(key);
+    }
+  }
+  return html;
+}
+
+// 采集项清单渲染：识别 成功/失败/不适用 状态 → 彩色清单
+function renderManifest(text) {
+  var lines = String(text).split(/\n/).map(function (l) { return l.trim(); }).filter(function (l) { return l; });
+  var rows = '';
+  lines.forEach(function (l) {
+    var clean = l.replace(/^[-*•]\s*/, '').replace(/`/g, '');
+    // 判定顺序：先看「—— 成功/不适用」这类显式状态词（在破折号后），再兜底关键词
+    var color = '#8b949e', icon = '•';
+    var tail = clean.split(/[—-]{1,2}/).pop() || clean;   // 取状态描述部分（"—— 成功，近 90 天 3 次"）
+    if (/不适用|无此硬件|台式机|没有.*硬件/i.test(tail)) { color = '#8b949e'; icon = '⚪'; }
+    else if (/失败|超时|无法|读取不到/i.test(tail)) { color = '#f85149'; icon = '❌'; }
+    else if (/成功|完成|已获取|正常|ok\b/i.test(tail)) { color = '#3fb950'; icon = '✅'; }
+    else if (/不适用|N\/A/i.test(clean)) { color = '#8b949e'; icon = '⚪'; }
+    else if (/失败|超时|无法/i.test(clean)) { color = '#f85149'; icon = '❌'; }
+    else if (/成功|完成|已获取/i.test(clean)) { color = '#3fb950'; icon = '✅'; }
+    rows += '<div style="display:flex;gap:8px;padding:3px 0;font-size:13px;align-items:flex-start;">'
+      + '<span style="flex:0 0 auto;">' + icon + '</span>'
+      + '<span style="color:' + color + ';">' + clean.replace(/</g, '&lt;') + '</span></div>';
+  });
+  if (!rows) return '';
+  return '<div style="margin:8px 0;padding:10px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;">'
+    + '<div style="font-size:12px;color:#8b949e;font-weight:600;margin-bottom:6px;">📋 采集项清单</div>'
+    + rows + '</div>';
+}
+
+function addUserMessage(text) {
+  const el = document.createElement('div'); el.className = 'msg user';
+  const body = document.createElement('div'); body.className = 'msg-body'; body.textContent = text;
+  const time = document.createElement('span'); time.className = 'msg-time'; time.textContent = fmtMsgTime();
+  el.appendChild(body); el.appendChild(time);
+  messagesEl.appendChild(el); scrollBottom();
+}
+
+function renderMarkdown(md) {
+  let html = md.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // 保护代码块：占位符避免内部被后续 markdown 规则污染
+  const codeBlocks = [];
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
+    codeBlocks.push('<pre><code>' + code + '</code></pre>');
+    return '%%CODEBLOCK' + (codeBlocks.length - 1) + '%%';
+  });
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // 无序列表：连续 - 行 → <ul><li>...</li></ul>
+  html = html.replace(/(?:^[-*] .+(?:\n|$))+/gm, function(m) {
+    const items = m.trim().split('\n')
+      .map(l => '<li>' + l.replace(/^[-*]\s+/, '') + '</li>').join('');
+    return '<ul>' + items + '</ul>';
+  });
+  // 有序列表：连续数字行 → <ol><li>...</li></ol>
+  html = html.replace(/(?:^\d+\. .+(?:\n|$))+/gm, function(m) {
+    const items = m.trim().split('\n')
+      .map(l => '<li>' + l.replace(/^\d+\.\s+/, '') + '</li>').join('');
+    return '<ol>' + items + '</ol>';
+  });
+  html = html.replace(/\n\n/g, '<br><br>'); html = html.replace(/\n/g, '<br>');
+  // 还原代码块（内部换行保持原样）
+  html = html.replace(/%%CODEBLOCK(\d+)%%/g, function(m, i) { return codeBlocks[+i]; });
+  return html;
+}
+
+const TIER3 = ['Shell','App','PlaySound','FileWrite','FileUpload','KillProcess','RegWrite','ServiceStart','ServiceStop','TaskCreate','TaskDelete','SetClipboard','LockScreen'];
+const TIER2 = ['Click','Type','Move','Scroll','Shortcut','FocusWindow','MinimizeAll','Scrape','CancelTask','ReconnectSession'];
+
+function getTierBadge(toolName, tier) {
+  let tierLevel = tier || 1;
+  if (!tier) {
+    if (TIER3.includes(toolName)) tierLevel = 3;
+    else if (TIER2.includes(toolName)) tierLevel = 2;
+  }
+  if (tierLevel === 3) return '<span class="tier-badge t3" title="' + t('tool_tier3') + '">T3</span>';
+  if (tierLevel === 2) return '<span class="tier-badge t2" title="' + t('tool_tier2') + '">T2</span>';
+  return '';
+}
+
+function addToolCard(toolName, args, tier) {
+  const el = document.createElement('div');
+  el.className = 'msg tool'; el.dataset.tool = toolName;
+  const argsText = args && Object.keys(args).length > 0 ? JSON.stringify(args) : '';
+  const badge = getTierBadge(toolName, tier);
+  el.innerHTML = '<div class="tool-header" onclick="this.parentElement.querySelector(\'.tool-body\').classList.toggle(\'open\')">'
+    + '<span class="icon">[*]</span>' + badge
+    + '<span class="name">' + escapeHtml(toolName) + '</span>'
+    + '<span class="args" style="font-size:11px;color:var(--text2)">' + escapeHtml(argsText) + '</span>'
+    + '<span class="status tool-status running">' + escapeHtml(t('tool_running')) + '</span>'
+    + '</div><div class="tool-body"><pre>' + escapeHtml(t('tool_waiting')) + '</pre></div>';
+  messagesEl.appendChild(el); scrollBottom();
+}
+
+function updateToolResult(toolName, content, denied) {
+  const cards = messagesEl.querySelectorAll('.msg.tool');
+  let card = null;
+  for (let i = cards.length - 1; i >= 0; i--) {
+    if (cards[i].dataset.tool === toolName) { card = cards[i]; break; }
+  }
+  if (!card) return;
+  const statusEl = card.querySelector('.tool-status');
+  const body = card.querySelector('.tool-body');
+  const pre = body.querySelector('pre');
+  pre.textContent = content;
+
+  if (denied || content.includes('[approval_denied]')) {
+    statusEl.textContent = t('tool_denied');
+    statusEl.className = 'status tool-status denied';
+  } else {
+    const isErr = content.includes('[error]') || content.includes('[timeout]')
+      || content.includes('[exception]') || content.includes('[stderr]');
+    if (isErr) {
+      statusEl.textContent = t('tool_error');
+      statusEl.className = 'status tool-status error';
+    } else {
+      statusEl.textContent = t('tool_done');
+      statusEl.className = 'status tool-status done';
+    }
+  }
+}
+
+function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ============================================================
+// User actions
+// ============================================================
+// ============================================================
+// 快捷诊断选项卡(按分组排列——系统/硬件/外设网络/实用工具)
+// platform: all=通用 / win=Windows 专用 / linux=Linux 专用
+// ============================================================
+const QUICK_DIAGNOSES = [
+  // ── 系统诊断 ──
+  { key: 'system', icon: '🖥', title: '系统问题', platform: 'all', group: '系统诊断', action: 'startup',
+    prompt: '请对这台电脑执行【系统状态调查】，逐项采集（检查项包：🧾 事件日志 · 📅 更新状态 · 🧯 系统文件完整性 · 🧰 运行库组件 · 🧪 虚拟机/WSL）：1) 系统版本与激活状态 2) 事件日志（关键/错误——按来源与事件ID归类）3) TPM/BitLocker 安全状态 4) 系统文件完整性（检查 sfc/DISM 历史记录）5) 更新历史（失败更新与错误码）6) 时间同步/证书状态 7) 运行库组件（VC++/.NET）状态 8) 虚拟机/WSL 相关服务状态。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'bsod', icon: '💥', title: '蓝屏分析', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【蓝屏调查】，逐项采集（检查项包：🧠 内存诊断 · 🎮 显卡驱动崩溃/TDR · 🧲 驱动状态 · 🧾 事件日志）：1) 90 天内蓝屏记录（BugCheck 事件 1001）2) Minidump 文件解析（停止码+参数）3) WHEA 硬件错误事件 4) Kernel-Power 41 事件 5) 内存诊断记录（事件 1101/1102 + WHEA 内存类）6) 显卡 TDR 超时（事件 4101）7) 驱动冲突线索（近期驱动安装/回滚、设备管理器异常）8) 近期系统更新记录（19 服务/更新事件）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'reboot', icon: '🔄', title: '意外重启', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【意外重启调查】（微软官方系统事件日志方法），逐项采集（检查项包：🧾 事件日志 · 🔌 电源/充电 · 🧠 内存诊断 · 🌡 风扇异常/降频）：1) 重启历史（Kernel-General 12/13 + EventLog 6005/6009——近 90 天频率）2) 类型判定（Kernel-Power 41 + EventLog 6008 = 意外；User32 1074 带原因码 = 正常）3) 原因关联（事件 19 更新安装 / 1001 WER 含停止码 / 7045 新服务）4) 电源相关（电源计划、断电类事件）5) 温度记录（热区温度、降频事件）6) 内存诊断记录（1101/1102）7) 睡眠/唤醒事件（异常唤醒、powercfg /lastwake 等效信息）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'slow', icon: '🐢', title: '性能卡顿', platform: 'all', group: '系统诊断',
+    prompt: '请对这台电脑执行【性能调查】，逐项采集（检查项包：⚙️ 资源占用 · 📊 性能监视/开机耗时 · 🧹 磁盘空间 · 🧠 内存诊断）：1) 开机自启动项（注册表/启动文件夹/计划任务）2) 进程 CPU/内存占用 Top（按资源占用排序）3) 磁盘空间占用（各分区已用/可用）4) 磁盘/CPU 占用源分析（资源监视器类数据）5) 开机耗时记录（启动性能事件）6) 内存诊断记录（1101/1102）7) 事件日志错误（关键错误事件）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'thermal', icon: '🌡', title: '温度散热', platform: 'all', group: '系统诊断',
+    prompt: '请对这台电脑执行【温度调查】，逐项采集（检查项包：🌡 风扇异常/降频 · 🔧 散热效能）：1) 机器型号识别（判断是否 ThinkStation 中高端——决定 SIO 日志可用性）2) 温度读数（WMI 热区温度）3) 风扇状态与转速 4) 降频记录（处理器降频事件）5) 温度相关事件日志 6) 如支持，SIO 硬件日志事件分析。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'sleep', icon: '💤', title: '睡眠唤醒', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【睡眠/唤醒调查】，逐项采集（检查项包：💤 睡眠唤醒 · 🔌 电源/充电 · 🧲 驱动状态 · 🧾 事件日志）：1) 睡眠与唤醒事件记录（Kernel-Power/睡眠转换事件）2) 异常唤醒源（等效 powercfg /lastwake 信息——哪个设备唤醒了机器）3) 睡眠研究数据（等效 powercfg /sleepstudy——睡眠期间耗电与中断）4) 电源计划设置（睡眠超时/混合睡眠/快速启动）5) 唤醒定时器（计划任务唤醒）6) 相关驱动（网卡/鼠标键盘的唤醒权限设置）7) 睡眠相关事件日志。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'appcrash', icon: '🧩', title: '应用崩溃', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【应用崩溃调查】，逐项采集（检查项包：🧩 应用崩溃检查 · 🧰 运行库组件 · 🧲 驱动状态 · 🧾 事件日志）：1) 应用程序错误事件（Application 日志——事件 1000/1001 崩溃记录）2) 崩溃程序与错误模块（DLL/模块名、异常代码）3) .NET/VC++ 运行库状态与版本 4) 相关程序近期更新记录 5) 系统事件日志中的关联错误 6) 崩溃频率与时间分布（偶发/必现线索）7) 相关驱动状态（如涉及图形/输入设备）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'security', icon: '🛡', title: '安全威胁', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【安全状态调查】，逐项采集（检查项包：🛡 安全威胁检查 · 🕵️ 弹窗广告 · 🌍 浏览器劫持 · ⚙️ 计划任务/服务）：1) Defender 状态与威胁检测记录（隔离/清除历史）2) 可疑自启动项与计划任务 3) 可疑进程与服务（异常路径/无签名）4) 浏览器异常（可疑扩展/主页劫持线索——查注册表与 hosts 文件）5) hosts 文件内容 6) 系统更新状态（安全补丁缺失）7) 账户与登录审计事件（异常登录尝试）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'data', icon: '📁', title: '数据丢失', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【数据存放状态调查】，逐项采集（检查项包：💽 SMART/坏道 · 🗂 文件权限 · 🗃 还原点可用性 · 🧹 磁盘空间）：1) 磁盘空间与分区状态（是否空间不足/分区异常）2) 回收站状态与文件数量 3) 文件系统错误记录（chkdsk 类信息）4) 卷影副本/还原点状态（是否可恢复）5) 文件历史/备份状态 6) 磁盘 SMART 健康（是否硬件导致数据风险）7) 近期磁盘相关事件日志。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  // ── 硬件诊断 ──
+  { key: 'disk', icon: '🔧', title: '硬盘健康', platform: 'all', group: '硬件诊断',
+    prompt: '请对这台电脑执行【硬盘健康调查】，逐项采集（检查项包：🧹 磁盘空间 · 🗂 文件权限 · 🗃 还原点可用性 · 💽 SMART/坏道）：1) SMART 全量数据（重映射扇区/通电时长/温度/健康状态）2) 坏道检测结果与固件版本 3) 磁盘空间占用（各分区）4) 文件系统错误记录（chkdsk 结果类信息）5) 文件权限异常（如有报障）6) 备份/还原点状态（还原点是否可用）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'battery', icon: '🔋', title: '电池健康', platform: 'win', group: '硬件诊断',
+    prompt: '请对这台电脑执行【电池状态调查】，逐项采集（检查项包：🔌 电源/充电 · 💤 睡眠唤醒）：1) 电池报告（设计容量/满充容量/循环次数/健康度）2) 当前充电状态与适配器识别 3) 电源计划设置 4) 睡眠/唤醒事件（powercfg sleepstudy 类数据、异常唤醒源）5) 电池相关事件日志。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'display', icon: '🎨', title: '花屏显示', platform: 'win', group: '硬件诊断',
+    prompt: '请对这台电脑执行【显示调查】，逐项采集（检查项包：🎮 显卡驱动崩溃/TDR · 🎮 独显启用状态 · 🖥 外接显示/多屏 · 🖼 刷新率/分辨率）：1) 显卡设备与驱动状态（含版本/日期）2) 分辨率/刷新率当前设置 3) 显示器连接信息（外接/多屏识别）4) 显卡驱动崩溃记录（TDR 事件 4101）5) 显示相关事件日志 6) 显卡温度（如可读）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'keyboard', icon: '⌨', title: '键盘触控板', platform: 'win', group: '硬件诊断',
+    prompt: '请对这台电脑执行【键盘/触控板调查】，逐项采集（检查项包：🖱 鼠标/触摸屏/手写笔 · ⌨ 输入法/语言）：1) 键盘与触控板设备状态（设备管理器异常/禁用）2) 驱动版本与日期 3) 外接设备枚举状态（判断是否外设干扰）4) 鼠标/触摸屏/手写笔设备状态 5) 输入法/语言设置（输入法与快捷键冲突）6) 相关事件日志。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  // ── 外设网络 ──
+  { key: 'usb', icon: '🔌', title: 'USB 接口', platform: 'win', group: '外设网络',
+    prompt: '请对这台电脑执行【USB 调查】，逐项采集（检查项包：📶 蓝牙连接 · 📷 摄像头/麦克风 · 🖨 打印/扫描 · 📱 手机连接/投屏 · 🖱 鼠标/触摸屏/手写笔）：1) USB 设备枚举状态 2) USB 控制器驱动与电源管理设置 3) USB 相关事件日志 4) 蓝牙设备与配对状态 5) 摄像头/麦克风设备状态 6) 打印机/扫描仪状态（Print Spooler）7) 鼠标/触摸屏/手写笔状态。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'audio', icon: '🎵', title: '音频设备', platform: 'win', group: '外设网络',
+    prompt: '请对这台电脑执行【音频调查】，逐项采集（检查项包：📷 摄像头/麦克风 · 🎵 音频服务/驱动）：1) 音频设备状态（禁用/异常）2) 音频驱动版本与日期 3) 音频服务状态（Audiosrv/AudioEndpointBuilder）4) 摄像头/麦克风设备与隐私权限状态 5) 默认播放/录音设备设置 6) 相关事件日志。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'network', icon: '🌐', title: '网络诊断', platform: 'all', group: '外设网络',
+    prompt: '请对这台电脑执行【网络调查】，逐项采集（检查项包：🌐 DNS/代理/VPN · 📡 网络共享 · 🧭 端口占用/服务 · 📱 手机连接/投屏 · 📶 蓝牙连接）：1) 连通性测试（ping 网关/外网、丢包与延迟）2) 网卡设备与驱动状态 3) IP/DNS 配置（ipconfig 全量）4) DNS 解析测试（nslookup）5) 代理/VPN 设置（是否启用、VPN 网卡）6) 网络共享状态（SMB/网络发现）7) 端口占用情况（netstat 关键端口）8) 蓝牙连接状态。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  // ── 实用工具 ──
+  { key: 'startup', icon: '⚙️', title: '开机自启动', platform: 'all', group: '实用工具',
+    prompt: '' },
+  { key: 'driver', icon: '📥', title: '驱动获取', platform: 'win', group: '实用工具', script: true,
+    prompt: '' },
+  // ── 系统诊断 ──
+  { key: 'update', icon: '📅', title: '更新失败', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【系统更新调查】，逐项采集（检查项包：📅 更新状态 · 🧯 系统文件完整性 · 🕒 时间同步/证书 · 🧾 事件日志）：1) 更新历史与失败记录（Windows Update 历史、失败更新的 KB 号与错误码）2) Windows Update 相关服务状态（wuauserv/BITS/CryptSvc/TrustedInstaller）3) 组件存储健康度（DISM /Online /Cleanup-Image /CheckHealth 类信息）4) 软件分发文件夹状态（SoftwareDistribution 大小与可写性）5) 更新相关事件日志（WindowsUpdateClient 事件）6) 磁盘空间是否满足更新需求 7) 系统时间与证书状态（影响更新验证）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'sfc', icon: '🧯', title: '系统文件修复', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【系统文件完整性调查】，逐项采集（检查项包：🧯 系统文件完整性 · 🧰 运行库组件 · 🗃 还原点可用性 · 🧾 事件日志）：1) 系统文件校验历史（CBS.log 中 sfc 相关记录、是否有未修复项）2) 组件存储状态（WinSxS 健康度、DISM 可修复性）3) 系统文件相关事件日志（Wininit/Service Control Manager 报错）4) 磁盘文件系统错误记录（chkdsk 类信息）5) 系统还原点可用性（用于修复回退）6) 关键系统文件版本信息（kernel32/ntdll 等）7) 待处理更新（可能影响文件版本）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'adware', icon: '🕵️', title: '弹窗广告', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【弹窗广告来源调查】，逐项采集（检查项包：🕵️ 弹窗广告 · ⚙️ 计划任务/服务 · 🛡 安全威胁检查 · 🌍 浏览器劫持）：1) 自启动项清单（注册表 Run/RunOnce、启动文件夹、计划任务——标记可疑项）2) 浏览器扩展与主页设置（Chrome/Edge 扩展、默认搜索引擎、快捷方式参数）3) hosts 文件内容（是否被篡改）4) 可疑进程与服务（无签名/异常路径/随机命名）5) 已安装程序清单（可疑软件、捆绑安装）6) 弹窗相关计划任务（定时触发的可疑任务）7) 浏览器相关事件日志。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'bitlocker', icon: '🔒', title: 'BitLocker/TPM', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【加密与安全芯片调查】，逐项采集（检查项包：🔒 BitLocker/TPM · 🔑 系统激活 · 🕒 时间同步/证书 · 🧾 事件日志）：1) TPM 状态与版本（存在性、已启用/已拥有、规格版本、厂商）2) 安全启动状态（Secure Boot 是否开启）3) BitLocker 加密状态（各卷加密算法、保护状态、密钥保护器类型）4) 恢复密钥备份状态（是否已备份到 AD/账户）5) 相关服务状态（BDESVC/TPM 服务）6) 相关事件日志（BitLocker/TPM 报错）7) 系统固件模式（UEFI/Legacy——影响 BitLocker 与安全启动）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  // ── 外设网络 ──
+  { key: 'printer', icon: '🖨', title: '打印扫描', platform: 'win', group: '外设网络',
+    prompt: '请对这台电脑执行【打印扫描调查】，逐项采集（检查项包：🖨 打印/扫描 · 🧭 端口占用/服务 · 🧲 驱动状态 · 📡 网络共享）：1) 打印机设备清单与状态（名称/端口/驱动/是否离线）2) Print Spooler 服务状态与队列内容（是否有卡住的打印任务）3) 打印机驱动版本与日期 4) 打印相关事件日志（PrintService 事件）5) 网络打印机连通性（如为网络打印机，测试端口连通）6) 共享权限设置（如为共享打印机）7) 扫描仪设备枚举状态。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'camera', icon: '📷', title: '摄像头麦克风', platform: 'win', group: '外设网络',
+    prompt: '请对这台电脑执行【摄像头/麦克风调查】，逐项采集（检查项包：📷 摄像头/麦克风 · 🎵 音频服务/驱动 · 🔐 生物识别 · 🧲 驱动状态）：1) 摄像头/影像设备枚举与健康状态（Status/Problem 码）2) 声音设备与音频端点状态（在用/影子设备区分）3) 摄像头/音频驱动版本与日期 4) 隐私授权状态（用户级 HKCU 与计算机级 HKLM 的 webcam/microphone 授权）5) 逐应用授权记录（CapabilityAccessManager ConsentStore）6) 麦克风最近使用时间记录 7) 当前占用摄像头/麦克风的运行进程 8) 相关事件日志（如隐私访问审计）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'ime', icon: '⌨', title: '输入法/语言', platform: 'win', group: '外设网络',
+    prompt: '请对这台电脑执行【输入法/语言调查】，逐项采集（检查项包：⌨ 输入法/语言 · ⚙️ 计划任务/服务）：1) 已安装输入法与语言包清单 2) 默认输入法与键盘布局设置 3) 输入法相关进程/服务状态 4) 输入法快捷键冲突检查（热键注册情况）5) 输入法相关事件日志 6) 系统区域与语言设置（区域格式/非 Unicode 程序语言）7) 输入法框架版本（如 Microsoft Pinyin/第三方输入法版本）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'diskspace', icon: '🧹', title: '磁盘空间', platform: 'all', group: '外设网络',
+    prompt: '请对这台电脑执行【磁盘空间调查】，逐项采集（检查项包：🧹 磁盘空间 · 🗃 还原点可用性 · 🗂 文件权限 · 💽 SMART/坏道）：1) 各分区容量与可用空间（含使用率）2) 大文件与目录定位（占用最大的目录/文件）3) 临时文件与缓存占用（Temp/Windows Update 缓存/浏览器缓存）4) 系统还原点与卷影副本占用空间 5) WinSxS 组件存储占用 6) 回收站占用 7) 磁盘清理建议相关项（可清理的类别与大小）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  // ── 系统诊断 ──
+  { key: 'activation', icon: '🔑', title: '系统激活', platform: 'win', group: '系统诊断',
+    prompt: '请对这台电脑执行【系统激活状态调查】，逐项采集（检查项包：🔑 系统激活 · 🕒 时间同步/证书 · 🧾 事件日志）：1) Windows 激活状态（许可证类型/激活方式/是否已激活/剩余宽限期）2) 激活相关服务状态（Software Protection / sppsvc）3) 数字许可证与 KMS 信息（如适用）4) 激活到期时间与续期状态（KMS 场景）5) 系统版本与 SKU（版本信息、OEM/零售/批量标识）6) Office 激活状态（如已安装 Office）7) 激活相关事件日志（spp 事件报错）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  // ── 硬件诊断 ──
+  { key: 'raid', icon: '💾', title: 'RAID 阵列', platform: 'win', group: '硬件诊断',
+    prompt: '请对这台电脑执行【RAID 阵列健康调查】，逐项采集（检查项包：💾 RAID 阵列状态 · 💽 SMART/坏道 · 🧲 驱动状态 · 🧾 事件日志）：1) RAID 控制器信息（Intel VROC / RSTe / Broadcom-LSI / 其他）2) 阵列状态与 RAID 级别（正常/降级/重建中/失败）3) 物理磁盘成员状态（在线/离线/故障/重建进度）4) 磁盘 SMART 健康数据 5) RAID 控制器驱动与固件版本 6) RAID 相关事件日志 7) 磁盘容量与阵列可用空间。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  { key: 'gpuactive', icon: '🎮', title: '独显启用状态', platform: 'win', group: '硬件诊断',
+    prompt: '请对这台电脑执行【显卡启用状态调查】，逐项采集（检查项包：🎮 独显启用状态 · 🎮 显卡驱动崩溃/TDR · 🧲 驱动状态 · 🖥 外接显示/多屏）：1) 显卡设备枚举（独显/核显是否都识别）2) 当前使用中的显示适配器（哪个显卡在驱动显示）3) 显卡驱动版本与状态（是否有感叹号/异常）4) 显卡电源管理状态（省电/高性能模式）5) 显卡间切换相关设置（NVIDIA Optimus / AMD 交火 / 显卡控制面板配置）6) 显卡相关事件日志 7) 独显是否被禁用（设备管理器状态）。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+  // ── 外设网络 ──
+  { key: 'biometric', icon: '🔐', title: '生物识别', platform: 'win', group: '外设网络',
+    prompt: '请对这台电脑执行【生物识别设备调查】，逐项采集（检查项包：🔐 生物识别 · 📷 摄像头/麦克风 · 🧲 驱动状态 · ⚙️ 计划任务/服务）：1) 指纹识别设备枚举与状态（Windows Hello 生物识别设备）2) 人脸识别设备（红外摄像头/Windows Hello 人脸）3) 生物识别相关服务状态（Windows Biometric Service / WbioSrvc）4) 生物识别驱动版本与日期 5) 生物识别凭据配置状态（是否已录入指纹/人脸）6) 相关事件日志（生物识别失败记录）7) 摄像头/红外设备健康状态。输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。' },
+];
+
+let quickBarShown = false;
+
+function toggleQuickBar() {
+  const bar = document.getElementById('quick-bar');
+  const arrow = document.getElementById('qa-arrow');
+  if (!bar || !arrow) return;
+  const open = bar.classList.toggle('qa-open');
+  arrow.textContent = open ? '▴' : '▾';
+}
+
+function renderQuickBar() {
+  const bar = document.getElementById('quick-bar');
+  if (!bar) return;
+  const os = (roomConnectData && roomConnectData.os || '').toLowerCase();
+  const items = QUICK_DIAGNOSES.filter(d => {
+    if (d.platform === 'all') return true;
+    if (os === 'linux') return d.platform === 'linux';
+    if (os === 'windows' || os === 'win') return d.platform === 'win';
+    return true; // os 未知：全显示
+  });
+  // 按分组排列(系统诊断/硬件诊断/外设网络/实用工具),组间留白
+  const groups = {};
+  items.forEach(d => { (groups[d.group || '其他'] = groups[d.group || '其他'] || []).push(d); });
+  let html = '';
+  for (const g of Object.keys(groups)) {
+    html += '<div class="qa-group">' + groups[g].map(d =>
+      `<button class="qa-btn" onclick="quickDiagnose('${d.key}')" title="点击自动发送诊断指令：${d.title}">${d.icon} ${d.title}</button>`
+    ).join('') + '</div>';
+  }
+  bar.innerHTML = html;
+  quickBarShown = true;
+}
+
+function quickDiagnose(key) {
+  const item = QUICK_DIAGNOSES.find(d => d.key === key);
+  if (!item) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN || !bridgeConnected) {
+    alert('请先连接客户机（桥接器在线）后再使用快捷诊断');
+    return;
+  }
+  if (item.action === 'startup') { quickStartupScan(); return; }  // 开机自启动(server 直处理)
+  if (item.script) { runDriverFetch(); return; }  // 脚本模式(不经 AI 对话)
+  inputBox.value = item.prompt;
+  sendMessage();
+}
+
+// 驱动获取(脚本模式):识别机器 → 后端脚本抓联想官网驱动 → 表格展示,不经 AI 对话
+async function runDriverFetch() {
+  if (!roomCode) { alert('缺少房间码'); return; }
+  const waitMsg = addSystemMsg('📥 正在识别机器并抓取联想官网驱动清单（首次约 1~3 分钟，之后走缓存秒开）…');
+  // 等待计时(每 15 秒更新,让用户知道还在抓取)
+  let waited = 0;
+  const timer = setInterval(function () {
+    waited += 15;
+    const el = document.getElementById('sysmsg-' + waitMsg);
+    if (el) el.textContent = '📥 仍在抓取联想官网驱动…已等待 ' + waited + ' 秒（官网抓取较慢，请耐心等待）';
+  }, 15000);
+  try {
+    const resp = await fetch('/api/tools/drivers/fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room_code: roomCode }),
+    });
+    clearInterval(timer);
+    const doneEl = document.getElementById('sysmsg-' + waitMsg);
+    if (doneEl) doneEl.textContent = '✅ 驱动清单获取完成';
+    const data = await resp.json();
+    if (data.status === 'error' || data.error) {
+      addSystemMsg('❌ 驱动获取失败：' + (data.error || '未知错误') + (data.raw ? '<br><small>' + escapeHtml(String(data.raw).slice(0, 300)) + '</small>' : ''));
+      return;
+    }
+    const esc = escapeHtml;
+    let html = '<div class="drv-result" style="font-size:13px;">';
+    html += '<h4 style="margin:4px 0 6px;">📥 联想官网驱动清单' + (data.cached ? ' <small style="color:var(--success);">(缓存)</small>' : '') + '</h4>';
+    html += '<p style="font-size:12px;color:var(--text2);margin:0 0 8px;">机型：<b>' + esc(data.machine.model || data.machine.mt) + '</b> | SN：' + esc(data.machine.sn) + ' | 共 <b>' + data.count + '</b> 项' + (data.note ? '<br>📝 ' + esc(data.note) : '') + '</p>';
+    const groups = {};
+    (data.drivers || []).forEach(d => { (groups[d.category] = groups[d.category] || []).push(d); });
+    for (const cat of Object.keys(groups)) {
+      html += '<h5 style="margin:10px 0 4px;font-size:13px;">📂 ' + esc(cat) + '（' + groups[cat].length + '）</h5>';
+      html += '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+      html += '<thead><tr><th style="text-align:left;padding:4px;border-bottom:1px solid var(--border);">驱动名称</th><th style="text-align:left;padding:4px;border-bottom:1px solid var(--border);">版本</th><th style="padding:4px;border-bottom:1px solid var(--border);">日期</th><th style="padding:4px;border-bottom:1px solid var(--border);">大小</th><th style="padding:4px;border-bottom:1px solid var(--border);">下载</th></tr></thead><tbody>';
+      groups[cat].forEach(d => {
+        html += '<tr>'
+          + '<td style="padding:4px;border-bottom:1px solid var(--border);">' + esc(d.name) + '</td>'
+          + '<td style="padding:4px;border-bottom:1px solid var(--border);">' + esc(d.version) + '</td>'
+          + '<td style="padding:4px;border-bottom:1px solid var(--border);">' + esc(d.date) + '</td>'
+          + '<td style="padding:4px;border-bottom:1px solid var(--border);">' + esc(d.size) + '</td>'
+          + '<td style="padding:4px;border-bottom:1px solid var(--border);"><a href="' + esc(d.url) + '" target="_blank" rel="noopener noreferrer" style="color:var(--info);">下载 →</a></td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '<p style="font-size:11px;color:var(--text2);margin-top:8px;">⚠️ 联想下载链接带时效 token，如失效请到官网按 SN 查询；需要更新判断可在对话中继续询问 AI。</p>';
+    html += '</div>';
+    addSystemMsgHtml(html);
+  } catch (e) {
+    clearInterval(timer);
+    addSystemMsg('❌ 驱动获取失败：' + e.message);
+  }
+}
+
+// 页面加载即渲染（os 未知时全显示；连接后 loadRoomConnect 按 os 收敛）
+renderQuickBar();
+
+function sendMessage() {
+  const text = inputBox.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN || !bridgeConnected) return;
+  addUserMessage(text);
+  ws.send(JSON.stringify({ type: 'chat', content: text, lang: currentLang }));  // brain 默认 hermes（服务端）；lang 控制 AI 回复语言
+  inputBox.value = ''; inputBox.style.height = 'auto'; sendBtn.disabled = true;
+}
+
+sendBtn.addEventListener('click', sendMessage);
+inputBox.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+inputBox.addEventListener('input', () => {
+  inputBox.style.height = 'auto';
+  inputBox.style.height = Math.min(inputBox.scrollHeight, 120) + 'px';
+});
+
+
+// 手动重新连接：直接用当前房间码重连（不弹加入房间框）
+document.getElementById('reconnect-btn').addEventListener('click', () => {
+  document.getElementById('reconnect-btn').style.display = 'none';
+  if (roomCode) { connect(roomCode); }
+  else { location.href = '/dashboard'; }
+});
+
+// ============================================================
+// Export
+// ============================================================
+// 导出菜单:📄 导出 ▾ → 完整对话 / 诊断报告
+function toggleExportMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('export-menu');
+  if (!menu) return;
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+document.addEventListener('click', function () {
+  const menu = document.getElementById('export-menu');
+  if (menu) menu.style.display = 'none';
+});
+
+
+function doExportChat(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('export-menu');
+  if (menu) menu.style.display = 'none';
+  const lines = [];
+  const now = new Date().toLocaleString(currentLang === 'en' ? 'en-US' : 'zh-CN');
+  lines.push(t('export_title')); lines.push(t('export_time') + ': ' + now);
+  lines.push(t('export_room') + ': ' + roomCode);
+  lines.push(t('export_bridge') + ': ' + (bridgeConnected ? t('export_connected') : t('export_disconnected')));
+  lines.push('='.repeat(50)); lines.push('');
+  const children = messagesEl.children;
+  for (const el of children) {
+    if (el.classList.contains('user')) { lines.push('[' + t('export_user') + '] ' + el.textContent.trim()); }
+    else if (el.classList.contains('ai')) { lines.push('[' + t('export_ai') + ']'); lines.push(el.textContent.trim()); lines.push(''); }
+    else if (el.classList.contains('tool')) {
+      const name = (el.querySelector('.name') || {}).textContent || '';
+      const status = (el.querySelector('.tool-status') || {}).textContent || '';
+      const body = (el.querySelector('pre') || {}).textContent || '';
+      lines.push('--- ' + t('export_tool') + ': ' + name + ' (' + status + ') ---');
+      lines.push(body.trim()); lines.push('---'); lines.push('');
+    } else if (el.classList.contains('error')) { lines.push('[' + t('export_error') + '] ' + el.textContent.trim()); }
+    else if (el.classList.contains('system')) { lines.push('[' + t('export_system') + '] ' + el.textContent.trim()); }
+  }
+  const text = lines.join('\n');
+  const blob = new Blob([text], { type:'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'diagnostic_report_' + roomCode + '_' + new Date().toISOString().slice(0,10) + '.txt';
+  a.click(); URL.revokeObjectURL(url);
+}
+function doExportReport(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('export-menu');
+  if (menu) menu.style.display = 'none';
+  downloadReport();
+}
+
+// ============================================================
+// Init
+// ============================================================
+applyLang(currentLang);
+updateAutoApproveBtnState();
+updateQuickActions();  // 初始：未连接时快捷按钮禁用
+// 从 URL 参数进入房间；无参数则回工作台（创建/加入均在工作台完成）
+const urlParams = new URLSearchParams(location.search);
+const roomFromUrl = (urlParams.get('room') || '').trim().toUpperCase();
+if (roomFromUrl) {
+  connect(roomFromUrl);
+} else {
+  goBackToWorkbench();
+}
+</script>
+</body>
+</html>
