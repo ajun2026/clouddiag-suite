@@ -1,0 +1,29 @@
+# FRP 服务端配置（公网服务器上运行）
+# 用法：cp frps.toml.example /etc/frp/frps.toml && 修改 token 与端口
+
+bindPort = 7000
+
+# ⚠️ 必填：认证令牌（防止被他人白嫖/滥用）——请替换为随机长字符串
+auth.method = "token"
+auth.token = "CHANGE-ME-TO-A-RANDOM-LONG-STRING"
+
+# 管理面板（建议只绑本机或加认证，不要裸暴露公网）
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "CHANGE-ME-STRONG-PASSWORD"
+
+# 允许穿透的端口范围（按需调整）
+allowPorts = [
+  { start = 8000, end = 8010 },
+  { start = 8080, end = 8090 },
+  { start = 8443, end = 8450 }
+]
+
+# 日志
+log.to = "/var/log/frps.log"
+log.level = "info"
+log.maxDays = 7
+
+# ── 可选：如果要在 frps 侧直接处理 HTTPS（方式 2）──
+# vhostHTTPSPort = 443

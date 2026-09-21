@@ -12,7 +12,7 @@ A cloud-based AI remote diagnostics system for Windows computers. Users describe
 > **Admin Dashboard:** http://<公网入口IP>:8000/admin （需登录）
 > **Update Log:** 详见 [CHANGELOG.md](CHANGELOG.md)
 > **Project Evolution:** 项目演进史（Python → Go 重写原因、架构变化）详见 [HISTORY.md](HISTORY.md)
-> **Hermes 大脑集成记录:** [docs/Hermes大脑集成与调试记录.md](docs/Hermes大脑集成与调试记录.md)
+> **Hermes 大脑集成记录:** [../docs/archive/Hermes大脑集成与调试记录.md](../docs/archive/Hermes大脑集成与调试记录.md)
 
 ---
 
@@ -47,7 +47,7 @@ Browser (Web UI)  <-->  Cloud Server (server.py)  <-->  Remote PC (Go bridge)
 - **Hermes Brain (default)** -- Hermes Agent 作为服务器端大脑，通过 HTTP 桥（`POST /api/bridge/execute`）操作远程电脑；前端切换下拉已移除
 - **DeepSeek Brain (fallback)** -- 原 tool-calling 通道，代码保留作为兜底（`AGENT_BRAIN=deepseek` 可切回）
 - **Conversation memory** -- 两通道均携带该房间最近 20 条对话，上下文连续
-- **Safety first** -- Hermes api_server toolsets are locked down to `web + terminal`; a "security red line" in its system prompt forbids touching server files/processes (see [集成记录](docs/Hermes大脑集成与调试记录.md))
+- **Safety first** -- Hermes api_server toolsets are locked down to `web + terminal`; a "security red line" in its system prompt forbids touching server files/processes (see [集成记录](../docs/archive/Hermes大脑集成与调试记录.md))
 
 ### Safety and Approval System
 - **3-Tier Tool Classification** -- Tier 1 (read-only, safe), Tier 2 (interactive, awareness needed), Tier 3 (destructive, approval required)
@@ -241,7 +241,7 @@ SERVER_PORT=8000
 
 > ⚠️ 启用 Hermes Brain 需要本机部署 Hermes Agent（gateway + api_server 端口 8642），
 > 且必须把 `~/.hermes/config.yaml` 的 `platform_toolsets.api_server` 限制为 `[web, terminal]`，
-> 否则 Hermes 作为自治 agent 可能越权操作服务器（事故详情见 [集成记录](docs/Hermes大脑集成与调试记录.md)）。
+> 否则 Hermes 作为自治 agent 可能越权操作服务器（事故详情见 [集成记录](../docs/archive/Hermes大脑集成与调试记录.md)）。
 
 ## Project Structure
 

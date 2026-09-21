@@ -2,7 +2,7 @@
 
 统一的日志诊断分析系统，支持 **Windows 蓝屏诊断**、**Linux 系统日志**、**BMC/XCC 服务器日志** 三类日志包的自动识别、结构化分析和 AI 辅助诊断。
 
-> 原 PHP 版保留在 [`php-legacy`](../../tree/php-legacy) 分支。重构前快照：`v3.0-monolith` tag。
+> 原 PHP 版保留在 `php-legacy` 分支。重构前快照：`v3.0-monolith` tag。
 
 ---
 

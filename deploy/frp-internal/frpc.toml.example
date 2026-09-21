@@ -1,0 +1,42 @@
+# FRP 客户端配置（内网服务器上运行）
+# 用法：cp frpc.toml.example /etc/frp/frpc.toml && 修改 serverAddr 与 token
+
+# 公网 frps 地址与端口
+serverAddr = "CHANGE-ME-公网服务器IP"
+serverPort = 7000
+
+# 与 frps 一致的认证令牌
+auth.method = "token"
+auth.token = "CHANGE-ME-与-frps-一致"
+
+# 日志
+log.to = "/var/log/frpc.log"
+log.level = "info"
+log.maxDays = 7
+
+# ══════ 穿透规则 ══════
+
+# ① 诊断服务（必须）
+[[proxies]]
+name = "clouddiag-server"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8000
+remotePort = 8000
+
+# ② 备用端口 8443（可选——应对某些网络对 443 的 SNI 拦截）
+#    说明：若公网侧前置 Nginx/Caddy 做 HTTPS，8443 可映射到同一个本地端口
+#[[proxies]]
+#name = "clouddiag-8443"
+#type = "tcp"
+#localIP = "127.0.0.1"
+#localPort = 8000
+#remotePort = 8443
+
+# ③ 日志分析服务（一般不需要——通过诊断服务反代 /log-analyzer/ 路径访问即可）
+#[[proxies]]
+#name = "clouddiag-loganalyzer"
+#type = "tcp"
+#localIP = "127.0.0.1"
+#localPort = 8082
+#remotePort = 8082
