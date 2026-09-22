@@ -173,7 +173,9 @@ sudo apt install -y caddy
 
 | 版本 | 说明 |
 |---|---|
-| **v1.0.0** | 整合版首发（继承 `cloud-ai-remote-diag` v0.15.2 + `file-analyzer-web` v3.11） |
+| **v1.0.2** | 现网修复回灌（app_state 二次导入 / 空回复误判 / BMC 对话 500）+ 桥接器卸载能力 |
+| v1.0.1 | 新增第三种部署形态（内网穿透）+ 文档链接修复 |
+| v1.0.0 | 整合版首发（继承 `cloud-ai-remote-diag` v0.15.2 + `file-analyzer-web` v3.11） |
 
 历史版本（整合前）见各自仓库：
 - [cloud-ai-remote-diag](https://github.com/ajun2026/cloud-ai-remote-diag)（已归档）

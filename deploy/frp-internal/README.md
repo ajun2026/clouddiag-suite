@@ -475,7 +475,7 @@ client_max_body_size 500M;
 ## 相关文档
 
 - [部署指南（总）](../../docs/01-部署指南.md)
-- [场景 A：纯 HTTP../plain-http/README.md
-- [场景 B：域名 + HTTPS../domain-https/README.md
+- [场景 A：纯 HTTP](../plain-http/README.md)
+- [场景 B：域名 + HTTPS](../domain-https/README.md)
 - [常见问题](../../docs/04-常见问题.md)
 - [风险与事故记录](../../docs/风险与事故记录/README.md)
