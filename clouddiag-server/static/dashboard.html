@@ -663,6 +663,11 @@
                     <div class="dl-step-title"><span class="num">3</span><span data-i18n="dl_linux_way3_t">完成配对</span></div>
                     <div data-i18n="dl_linux_way3_d">看到 Connected 即连接成功，保持终端开启即可远程诊断。重启电脑后需重新启动桥接器（一次性使用，不驻留后台）。</div>
                   </div>
+                  <div class="dl-step">
+                    <div class="dl-step-title"><span class="num">4</span><span data-i18n="dl_linux_uninstall_t">用完清理（可选）</span></div>
+                    <div data-i18n="dl_linux_uninstall_d">诊断结束后不再需要时，一条命令卸载桥接器（删除程序与审计日志，并恢复系统自带的 bridge 命令）：</div>
+                    <div class="dl-cmd-block"><span class="dl-cmd-text">curl -sL {{PUBLIC_URL}}/static/uninstall-linux.sh | sudo bash</span><span class="dl-copy" data-i18n="copy" onclick="copyCmd(this)">复制</span></div>
+                  </div>
                 </div>
               </details>
             </div>
@@ -1465,6 +1470,7 @@ const I18N = {
     dl_linux_way1_t: '方式一：一键安装（推荐）', dl_linux_way1_d: '在客户机终端粘贴上面命令回车——自动检测架构、下载对应版本、安装到 /usr/local/bin/bridge，然后按提示输入 8 位房间码启动。需要 root 权限（自动用 sudo）。',
     dl_linux_way2_t: '方式二：手动安装（已下载二进制）', dl_linux_way2_d: '① 给执行权限：', dl_linux_way2_d2: '② 放入系统目录（任意目录也可，这里以 /usr/local/bin 为例）：', dl_linux_way2_d3: '③ 启动（把 ABC12345 换成你的房间码）：',
     dl_linux_way3_t: '完成配对', dl_linux_way3_d: '看到 Connected 即连接成功，保持终端开启即可远程诊断。重启电脑后需重新启动桥接器（一次性使用，不驻留后台）。',
+    dl_linux_uninstall_t: '用完清理（可选）', dl_linux_uninstall_d: '诊断结束后不再需要时，一条命令卸载桥接器（删除程序与审计日志，并恢复系统自带的 bridge 命令）：',
     dl_step1: '安装桥接器', dl_step2: '输入房间码', dl_step3: '对话诊断',
     dl_recommend: '推荐',
     dl_card_win_t: 'Windows 客户端 (.exe)', dl_card_win_desc: '下载后双击运行，输入 8 位房间码即连接。主力方案，最省心。', dl_card_win_btn: '⬇ 下载 clouddiag-bridge-win64.exe (4.8MB)', dl_card_win_note: '双击自动请求管理员权限（UAC 弹窗点「是」即可）',

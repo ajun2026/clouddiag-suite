@@ -327,7 +327,7 @@ def _ai_channels() -> list:
 
 async def _call_deepseek(messages: list) -> dict:
     """Call AI API（多通道自动故障切换——2026-08-28 ② 备用 AI 通道）。
-    主 → 备，每通道最多 3 次（2026-09-18：2→3 次，递增间隔）；content 非空为成功出口；
+    主 → 备，每通道最多 3 次（递增间隔 2s/4s）；成功出口 = content 非空 **或** 有 tool_calls（工具轮）；
     content 空但 reasoning_content 有内容时兜底返回（推理模型特性）；全部失败抛 RuntimeError。"""
     errors = []
     RETRIES = 3          # 2026-09-18：2 → 3 次（应对网关抖动/限流）
@@ -353,15 +353,21 @@ async def _call_deepseek(messages: list) -> dict:
                     )
                     resp.raise_for_status()
                     data = resp.json()
-                    _m = data["choices"][0]["message"]
-                    content = _m.get("content") or ""
-                    if content.strip():
+                    try:
+                        _msg = data["choices"][0]["message"]
+                    except (KeyError, IndexError, TypeError):
+                        _msg = {}
+                    content = (_msg.get("content") or "").strip()
+                    # 2026-09-18 修复：模型"只调工具、不带文字"（content 空 + tool_calls）
+                    # 是 Function Calling 的正常一步，不能当"空回复"重试——否则
+                    # 只要第一轮要调工具，多轮工具链就永远失败（报"空回复"500）。
+                    if content or _msg.get("tool_calls"):
                         return data  # ✅ 成功出口
                     # 2026-09-18 兜底：推理模型（deepseek-v4-flash 等）content 可能为空，
                     # 正文缺失但 reasoning_content 有思考内容 —— 取它，避免误判"空回复"
-                    reasoning = (_m.get("reasoning_content") or "").strip()
+                    reasoning = (_msg.get("reasoning_content") or "").strip()
                     if reasoning:
-                        _m["content"] = reasoning + "\n\n（注：以上为模型思考内容——本次正式回答为空，已兜底返回）"
+                        _msg["content"] = reasoning + "\n\n（注：以上为模型思考内容——本次正式回答为空，已兜底返回）"
                         return data
                     errors.append(f"{ch['url']}: 空回复(第{attempt+1}次)")
             except Exception as e:

@@ -4,6 +4,7 @@ from datetime import datetime
 from collections import Counter
 import json
 import re
+from app_state import get_jobs  # 2026-09-18：不要 import main（会二次导入 main.py）
 
 # REPORT_DIR is defined in detectors.py — reference it via main's import
 # We compute it here for standalone use (e.g., testing)
@@ -679,15 +680,13 @@ def analyze_linux_summary(log_dir: Path) -> dict:
             continue
 
     # Try to find job by matching tslog_path in-memory
-    # We import jobs lazily to avoid circular import
-    try:
-        from main import jobs as _jobs
-        for job_key in list(_jobs.keys()):
-            if _jobs[job_key].get('tslog_path') == str(log_dir):
-                current_job = job_key
-                break
-    except ImportError:
-        pass
+    # 2026-09-18 修复：不再 `from main import jobs`（会把 main.py 二次导入，
+    # 使 chat 用的 jobs 变成旧快照 → 新任务 AI 对话报「日志目录不存在」）
+    _jobs = get_jobs()
+    for job_key in list(_jobs.keys()):
+        if _jobs[job_key].get('tslog_path') == str(log_dir):
+            current_job = job_key
+            break
 
     # If we can't find the job, try to infer from report files
     if not current_job:

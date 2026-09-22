@@ -16,7 +16,9 @@
 
 SERVER="{{PUBLIC_URL}}"
 # 443 被拦时自动切换到 8443 备选端口（探测 /api/health）
-if ! curl -sf --max-time 5 "$SERVER/api/health" >/dev/null 2>&1; then
+# 2026-09-22 修复：仅 https 部署才降级——http/IP 部署不得拼接 :8443
+#（否则会拼出 IP:8000:8443 这类坏地址）
+if [ "${SERVER#https://}" != "$SERVER" ] && ! curl -sf --max-time 5 "$SERVER/api/health" >/dev/null 2>&1; then
     echo "  443 端口不可达，自动使用 8443 备选端口..."
     SERVER="${SERVER}:8443"
 fi
@@ -89,6 +91,22 @@ else
     fi
 fi
 echo -e "${GREEN}  已安装: $INSTALL_DIR/clouddiag-bridge ($(ls -la "$INSTALL_DIR/clouddiag-bridge" | awk '{print $5}') bytes)${NC}"
+
+# 2026-09-22 新增：清理历史误装名（早期版本装成 /usr/local/bin/bridge，
+# 会顶掉系统 bridge-utils 提供的网络桥接命令）。
+# 只删确认是本程序的文件（包含 clouddiag 特征字符串），不动系统/客户原有命令。
+LEGACY="/usr/local/bin/bridge"
+if [ -f "$LEGACY" ] && [ "$LEGACY" != "$INSTALL_DIR/clouddiag-bridge" ]; then
+    if grep -qa "clouddiag" "$LEGACY" 2>/dev/null; then
+        echo "  清理历史安装 $LEGACY（旧版会顶掉系统网桥命令 bridge）..."
+        SUDO_RM=""
+        [ -w "$(dirname "$LEGACY")" ] || SUDO_RM="sudo"
+        $SUDO_RM rm -f "$LEGACY"
+        hash -r 2>/dev/null || true
+    else
+        echo -e "  ${YELLOW}提示: $LEGACY 已存在且不是本程序，保留未动（避免破坏系统/客户原有命令）${NC}"
+    fi
+fi
 
 # ---------- 4. 启动 ----------
 echo -e "${YELLOW}[4/4]${NC} 启动桥接器..."

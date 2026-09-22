@@ -5,6 +5,7 @@ from collections import Counter
 import json, re, os
 from analyzers.dump_parser import parse_single_dump, get_bugcheck_info
 from detectors import detect_encoding, iter_evtx_cached, CHINA_TZ, REPORT_DIR
+from app_state import get_jobs, get_main_attr  # 2026-09-18：不要 import main（会二次导入）
 
 # ── LiveKernelEvent codes ──
 LKE_CODES = {
@@ -1039,27 +1040,24 @@ def analyze_summary(tslog: Path) -> dict:
     import re
     job_id = None
     # Try to find job by matching tslog_path in-memory
-    try:
-        from main import jobs as _jobs
-        for rp in REPORT_DIR.glob("*_overview.json"):
-            jid = rp.stem.replace("_overview", "")
-            if jid in _jobs and _jobs[jid].get("tslog_path") == str(tslog):
-                job_id = jid
-                break
-    except ImportError:
-        pass
+    # 2026-09-18 修复：原来这里 `from main import jobs as _jobs` 会把 main.py 二次导入
+    # （模块名 main），第二遍的 `_fc.jobs = jobs` 会让 chat 用的 jobs 换成一个旧快照
+    # → 新上传任务 AI 对话一律报「日志目录不存在」。改为从运行中的主进程取。
+    _jobs = get_jobs()
+    for rp in REPORT_DIR.glob("*_overview.json"):
+        jid = rp.stem.replace("_overview", "")
+        if jid in _jobs and _jobs[jid].get("tslog_path") == str(tslog):
+            job_id = jid
+            break
 
-    # Lazy import to avoid circular deps with main
-    try:
-        from main import _STANDARD_TYPES as _st, ANALYZERS as _az
-    except ImportError:
-        _st = ["overview", "diagnostics", "dump", "siolog"]
-        _az = {
-            "overview": analyze_overview,
-            "diagnostics": analyze_system_diagnostics,
-            "dump": analyze_dump,
-            "siolog": analyze_siolog,
-        }
+    # 同上：改用 app_state 从运行中的主程序模块取属性，避免二次导入 main.py
+    _st = get_main_attr("_STANDARD_TYPES", ["overview", "diagnostics", "dump", "siolog"])
+    _az = get_main_attr("ANALYZERS", {
+        "overview": analyze_overview,
+        "diagnostics": analyze_system_diagnostics,
+        "dump": analyze_dump,
+        "siolog": analyze_siolog,
+    })
 
     for atype in _st:
         try:

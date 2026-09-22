@@ -1133,7 +1133,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.1", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.2", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1823,6 +1823,8 @@ def get_ws_url(request: Request) -> str:
 _SCRIPT_TEMPLATES = {
     "bridge.ps1": "text/plain; charset=utf-8",
     "install-linux.sh": "text/x-shellscript; charset=utf-8",
+    # 2026-09-22：桥接器卸载脚本（现场交付"能装也能干净卸载"）
+    "uninstall-linux.sh": "text/x-shellscript; charset=utf-8",
 }
 
 
@@ -1846,6 +1848,12 @@ async def static_bridge_ps1(request: Request):
 @app.api_route("/static/install-linux.sh", methods=["GET", "HEAD"], include_in_schema=False)
 async def static_install_linux(request: Request):
     return await _render_script("install-linux.sh", request)
+
+
+@app.api_route("/static/uninstall-linux.sh", methods=["GET", "HEAD"], include_in_schema=False)
+async def static_uninstall_linux(request: Request):
+    """Linux 桥接器卸载脚本（2026-09-22 新增——现场交付需"能装也能干净卸载"）。"""
+    return await _render_script("uninstall-linux.sh", request)
 
 
 @app.get("/api/config", include_in_schema=False)
@@ -1932,7 +1940,7 @@ async def quick_diagnoses(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.1"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.2"}
 
 
 @app.post("/api/debug_log")
@@ -2649,7 +2657,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "1.0.1",
+        "version": "1.0.2",
     }
 
 

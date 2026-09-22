@@ -1,3 +1,61 @@
+## v1.0.2 — 2026-09-22（现网修复回灌 + 卸载能力）
+
+> 来源：现网部署端逐文件比对清单——整合包中部分文件仍为旧逻辑，
+> 现网已修复的问题在此回灌。（换算：1 个新增文件 + 5 个文件小改，不涉架构）
+
+### 修复
+
+- **P0 · 日志分析 app_state 修复**（新增 `log-analyzer/app_state.py` +
+  改 `chat/function_call.py` / `analyzers/windows.py` / `analyzers/linux.py`）
+
+  *现象*：服务重启后新上传的日志包，AI 对话一律报「日志目录不存在，请重新上传」；
+  整体总结匹配不到新任务的缓存报告。（重启前上传的老任务正常）
+
+  *根因*：主程序以 `python main.py` 启动，模块名是 `__main__`；
+  `analyzers/` 与 `chat/` 里用 `from main import jobs` 懒加载，会让 Python
+  **把 main.py 再执行一遍**（模块名 `main`），第二遍执行到 `_fc.jobs = jobs`
+  时，把 chat 用的 `jobs` 重新指向「第二个 main」自己的旧快照 —— 从此与真正
+  在服务的那份脱钩，只有「重启之后新上传」的任务会报错。
+
+  *修复*：子模块不再 `import main`，改为经 `app_state.py`（`sys.modules` 查询）
+  向正在运行的主进程要状态。
+
+- **P0 · Function Calling「空回复」误判**（`chat/function_call.py`）
+
+  *现象*：多轮工具链第一步（模型只返回 `tool_calls`、`content` 为空）被判空回复，
+  重试 3 次后报 500。
+
+  *修复*：成功出口增加 `tool_calls` 判断；取值改防御式（缺字段不再 KeyError）。
+
+- **BMC/other 对话 500**（`chat/context_inject.py`，本次实测发现）
+
+  *现象*：BMC/other 类型日志包的 AI 对话必然 `NameError` 500。
+
+  *根因*：该模块调用了 `_clean_name()` 与 `DEEPSEEK_MODEL`，但未定义/未导入。
+
+  *修复*：本地定义 `_clean_name()`（与 main.py 一致）；补导入 `DEEPSEEK_MODEL`。
+
+- **Linux 一键安装脚本**（`static/install-linux.sh.tmpl`）
+
+  - 443 探测限定为 https 部署——HTTP/IP 部署不再拼出 `IP:8000:8443` 坏地址
+  - 新增：安装后清理历史误装名 `/usr/local/bin/bridge`
+    （早期版本会顶掉系统 bridge-utils 的网络桥接命令；只删确认是本程序的文件）
+
+### 新增
+
+- **桥接器卸载能力**（现场交付「能装也能干净卸载」）
+  - `static/uninstall-linux.sh`（模板 + 路由）——停进程、删程序（含历史误装名）、
+    删审计日志 `~/.clouddiag`、报告系统 bridge 命令状态；只动本程序自己的文件
+  - `static/uninstall-windows.bat`——Windows 对应版本（自动提权）
+  - `static/dashboard.html`——Linux 下载卡片新增「第 4 步：用完清理（可选）」
+
+- **`clouddiag-bridge/build.sh`**——交叉编译脚本（Windows + Linux×3），
+  自动同步产物到 `clouddiag-server/static/`（README 此前引用了该文件但缺失）
+
+### 变更
+
+- 日志分析分析提示词去掉公司名（统一口径称「售后」）
+
 ## v1.0.1 — 2026-09-21（新增第三种部署形态：内网穿透）
 
 ### 新增

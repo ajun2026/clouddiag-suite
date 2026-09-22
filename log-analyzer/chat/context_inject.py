@@ -4,7 +4,20 @@ import httpx
 from pathlib import Path
 from fastapi.responses import JSONResponse
 from detectors import detect_encoding
-from chat.function_call import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
+from chat.function_call import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+
+
+def _clean_name(s: str) -> str:
+    """清洗文件名：surrogate/非法字符 → '?'（防 JSON 编码崩溃——GBK 文件名场景）。
+
+    2026-09-22 修复：本模块原来直接调用 main.py 里的 _clean_name 但没有导入它
+    （整合时漏了依赖），导致 BMC/other 类型日志包的 AI 对话必然 NameError 500。
+    这里本地定义一份，与 main.py 中的实现保持一致（不 import main，避免二次导入）。
+    """
+    try:
+        return s.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+    except Exception:
+        return "?"
 
 async def _chat_context_inject(job_id: str, user_message: str, tslog, os_type: str):
     """Context injection mode for BMC/other — gather all readable files, inject as system prompt, one-shot."""
