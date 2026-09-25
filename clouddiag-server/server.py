@@ -1133,7 +1133,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.3", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.4", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1940,7 +1940,7 @@ async def quick_diagnoses(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.3"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.4"}
 
 
 @app.post("/api/debug_log")
@@ -2657,7 +2657,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "1.0.3",
+        "version": "1.0.4",
     }
 
 
@@ -3218,6 +3218,25 @@ async def run_agent(
     browser_ws: WebSocket,
     lang: str = "zh-CN",
 ) -> str:
+    # 2026-09-24：把发送包成 safe_send——工程师关页面/刷新/断网时
+    # WebSocket 已关闭，直接 await send_json 会抛 WebSocketDisconnect
+    # （实测：诊断跑到 2 分钟时关页面 → Agent 整体崩掉、任务中断、结果丢失）。
+    # 这里统一兜住：推送失败只记日志，绝不影响诊断继续执行与结果落库。
+    _ws_closed = False
+
+    async def safe_send(payload: dict) -> bool:
+        nonlocal _ws_closed
+        if _ws_closed:
+            return False
+        try:
+            # 注意：这里必须用 browser_ws.send_json（不能是 safe_send，否则无限递归）
+            await browser_ws.send_json(payload)
+            return True
+        except Exception as e:
+            _ws_closed = True
+            run_logger.warning(f"[{room.code}] browser send failed (client gone?): {e}")
+            return False
+
     messages = [
         {"role": "system", "content": build_system_prompt(room, lang)},
         *get_recent_context(room.code, user_message),
@@ -3289,7 +3308,7 @@ async def run_agent(
                 tier, cmd_cat, cmd_class_reason = classify_command(fn_args.get("command", ""))
                 run_logger.info(f"[{room.code}] {fn_name} classified as tier={tier} ({cmd_cat}): {cmd_class_reason}")
 
-            await browser_ws.send_json({
+            await safe_send({
                 "type": "tool_start",
                 "tool": fn_name,
                 "args": fn_args,
@@ -3303,7 +3322,7 @@ async def run_agent(
                 save_approval(room.code, fn_name, fn_args, 1, -1)
                 save_message(room.code, "tool", result, fn_name, 1)
                 run_logger.warning(f"[{room.code}] Path hard-blocked: {fn_name} {str(fn_args)[:120]}")
-                await browser_ws.send_json({
+                await safe_send({
                     "type": "tool_result",
                     "tool": fn_name,
                     "content": result[:3000],
@@ -3327,7 +3346,7 @@ async def run_agent(
                 save_message(room.code, "tool", result, fn_name, 3)
                 run_logger.warning(f"[{room.code}] Blocked dangerous RunCommand: {fn_args.get('command', '')[:120]}")
 
-                await browser_ws.send_json({
+                await safe_send({
                     "type": "tool_result",
                     "tool": fn_name,
                     "content": result[:3000],
@@ -3353,7 +3372,7 @@ async def run_agent(
                     run_logger.info(f"[{room.code}] Auto-approved Tier 2: {fn_name}")
                 else:
                     # Send tool_start to frontend FIRST so user sees what's coming
-                    await browser_ws.send_json({
+                    await safe_send({
                         "type": "tool_waiting_approval",
                         "tool": fn_name,
                         "args": fn_args,
@@ -3379,7 +3398,7 @@ async def run_agent(
                         save_approval(room.code, fn_name, fn_args, tier, -1)
                         save_message(room.code, "tool", result, fn_name, tier)
 
-                        await browser_ws.send_json({
+                        await safe_send({
                             "type": "tool_result",
                             "tool": fn_name,
                             "content": result[:3000],
@@ -3407,7 +3426,7 @@ async def run_agent(
             args_brief = json.dumps(fn_args, ensure_ascii=False)[:60] if fn_args else ""
             exec_summary.append(f"{status} {loop_count}. {fn_name}({args_brief}) → {result[:80].strip()}")
 
-            await browser_ws.send_json({
+            await safe_send({
                 "type": "tool_result",
                 "tool": fn_name,
                 "content": result[:3000],

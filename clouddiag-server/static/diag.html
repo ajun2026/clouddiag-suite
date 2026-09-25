@@ -188,13 +188,15 @@
   <button class="hdr-btn" id="btn-export" onclick="exportReport()">📄 导出报告</button>
 </header>
 
-<!-- 连接面板（一键连接命令——与对话页一致） -->
+<!-- 连接面板（一键连接命令）—— 2026-09-23：按房间系统只显示对应方式的页签 -->
 <div id="connect-panel" style="display:none;background:var(--surface);border-bottom:1px solid var(--border);padding:14px 18px;">
-  <div style="font-size:13px;font-weight:650;color:var(--text);margin-bottom:8px;">📶 在客户机上执行以下命令（任选其一）</div>
-  <div style="display:flex;gap:6px;margin-bottom:10px;">
-    <button class="cp-tab active" data-tab="ps" onclick="switchConnectTab('ps')">PowerShell 命令（推荐）</button>
-    <button class="cp-tab" data-tab="exe" onclick="switchConnectTab('exe')">exe 下载</button>
-    <button class="cp-tab" data-tab="linux" onclick="switchConnectTab('linux')">Linux</button>
+  <div id="cp-title" style="font-size:13px;font-weight:650;color:var(--text);margin-bottom:8px;">📶 在客户机上执行以下命令</div>
+  <div id="cp-tabs" style="display:flex;gap:6px;margin-bottom:10px;">
+    <!-- Windows：PowerShell 命令（推荐）/ exe 下载 -->
+    <button class="cp-tab active" data-tab="ps" data-os="windows" onclick="switchConnectTab('ps')">PowerShell 命令（推荐）</button>
+    <button class="cp-tab" data-tab="exe" data-os="windows" onclick="switchConnectTab('exe')">exe 下载</button>
+    <!-- Linux：一键安装命令 -->
+    <button class="cp-tab" data-tab="linux" data-os="linux" onclick="switchConnectTab('linux')">Linux</button>
   </div>
   <div id="cp-body" style="font-size:12px;color:var(--text2);">
     <div id="cp-cmd" style="background:#010409;border:1px solid var(--border);border-radius:7px;padding:11px 13px;
@@ -213,7 +215,7 @@
 
     <div class="group-title">系统诊断</div>
 
-    <div class="diag-card" data-key="system" onclick="pick(this)">
+    <div class="diag-card" data-key="system" data-platform="all" onclick="pick(this)">
       <span class="dc-icon">🖥</span>
       <div class="dc-body">
         <div class="dc-title">系统问题</div>
@@ -222,7 +224,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="bsod" onclick="pick(this)">
+    <div class="diag-card" data-key="bsod" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">💥</span>
       <div class="dc-body">
         <div class="dc-title">蓝屏分析</div>
@@ -231,7 +233,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="reboot" onclick="pick(this)">
+    <div class="diag-card" data-key="reboot" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🔄</span>
       <div class="dc-body">
         <div class="dc-title">意外重启</div>
@@ -240,7 +242,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="slow" onclick="pick(this)">
+    <div class="diag-card" data-key="slow" data-platform="all" onclick="pick(this)">
       <span class="dc-icon">🐢</span>
       <div class="dc-body">
         <div class="dc-title">性能卡顿</div>
@@ -249,7 +251,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="thermal" onclick="pick(this)">
+    <div class="diag-card" data-key="thermal" data-platform="all" onclick="pick(this)">
       <span class="dc-icon">🌡</span>
       <div class="dc-body">
         <div class="dc-title">温度散热</div>
@@ -258,7 +260,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="sleep" onclick="pick(this)">
+    <div class="diag-card" data-key="sleep" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">💤</span>
       <div class="dc-body">
         <div class="dc-title">睡眠唤醒</div>
@@ -267,7 +269,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="appcrash" onclick="pick(this)">
+    <div class="diag-card" data-key="appcrash" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🧩</span>
       <div class="dc-body">
         <div class="dc-title">应用崩溃</div>
@@ -276,7 +278,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="security" onclick="pick(this)">
+    <div class="diag-card" data-key="security" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🛡</span>
       <div class="dc-body">
         <div class="dc-title">安全威胁</div>
@@ -285,7 +287,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="activation" onclick="pick(this)">
+    <div class="diag-card" data-key="activation" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🔑</span>
       <div class="dc-body">
         <div class="dc-title">系统激活</div>
@@ -294,7 +296,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="data" onclick="pick(this)">
+    <div class="diag-card" data-key="data" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">📁</span>
       <div class="dc-body">
         <div class="dc-title">数据丢失</div>
@@ -304,7 +306,7 @@
     </div>
 
 
-    <div class="diag-card" data-key="update" onclick="pick(this)">
+    <div class="diag-card" data-key="update" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">📅</span>
       <div class="dc-body">
         <div class="dc-title">更新失败</div>
@@ -313,7 +315,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="sfc" onclick="pick(this)">
+    <div class="diag-card" data-key="sfc" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🧯</span>
       <div class="dc-body">
         <div class="dc-title">系统文件修复</div>
@@ -322,7 +324,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="adware" onclick="pick(this)">
+    <div class="diag-card" data-key="adware" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🕵️</span>
       <div class="dc-body">
         <div class="dc-title">弹窗广告</div>
@@ -331,7 +333,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="bitlocker" onclick="pick(this)">
+    <div class="diag-card" data-key="bitlocker" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🔒</span>
       <div class="dc-body">
         <div class="dc-title">BitLocker/TPM</div>
@@ -340,9 +342,54 @@
       <span class="dc-status">未运行</span>
     </div>
 
+    <div class="diag-card" data-key="kernel" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">🧬</span>
+      <div class="dc-body">
+        <div class="dc-title">内核日志</div>
+        <div class="dc-desc">dmesg 错误 · Oops/Panic · 驱动加载 · MCE · I/O 报错</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="service" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">⚙️</span>
+      <div class="dc-body">
+        <div class="dc-title">系统服务</div>
+        <div class="dc-desc">失败单元 · 重启循环 · 启动耗时 · 依赖缺失</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="bootfail" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">🥾</span>
+      <div class="dc-body">
+        <div class="dc-title">启动失败</div>
+        <div class="dc-desc">引导加载 · initramfs · 挂载异常 · 超时单元</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="oom" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">🧠</span>
+      <div class="dc-body">
+        <div class="dc-title">内存与 OOM</div>
+        <div class="dc-desc">内存占用 · OOM Killer · swap 使用 · slab 缓存</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="pkg" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">📦</span>
+      <div class="dc-body">
+        <div class="dc-title">包管理状态</div>
+        <div class="dc-desc">包管理器 · 破损依赖 · 锁文件 · 更新状态</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
     <div class="group-title">硬件诊断</div>
 
-    <div class="diag-card" data-key="disk" onclick="pick(this)">
+    <div class="diag-card" data-key="disk" data-platform="all" onclick="pick(this)">
       <span class="dc-icon">🔧</span>
       <div class="dc-body">
         <div class="dc-title">硬盘健康</div>
@@ -351,7 +398,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="raid" onclick="pick(this)">
+    <div class="diag-card" data-key="raid" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">💾</span>
       <div class="dc-body">
         <div class="dc-title">RAID 阵列</div>
@@ -360,7 +407,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="gpuactive" onclick="pick(this)">
+    <div class="diag-card" data-key="gpuactive" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🎮</span>
       <div class="dc-body">
         <div class="dc-title">独显启用状态</div>
@@ -369,7 +416,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="battery" onclick="pick(this)">
+    <div class="diag-card" data-key="battery" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🔋</span>
       <div class="dc-body">
         <div class="dc-title">电池健康</div>
@@ -378,7 +425,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="display" onclick="pick(this)">
+    <div class="diag-card" data-key="display" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🎨</span>
       <div class="dc-body">
         <div class="dc-title">花屏显示</div>
@@ -387,7 +434,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="keyboard" onclick="pick(this)">
+    <div class="diag-card" data-key="keyboard" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">⌨</span>
       <div class="dc-body">
         <div class="dc-title">键盘触控板</div>
@@ -396,9 +443,27 @@
       <span class="dc-status">未运行</span>
     </div>
 
+    <div class="diag-card" data-key="fsdisk" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">💽</span>
+      <div class="dc-body">
+        <div class="dc-title">磁盘与文件系统</div>
+        <div class="dc-desc">块设备 · 挂载与只读 · SMART · inode · FS 错误</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="sensor" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">🌡</span>
+      <div class="dc-body">
+        <div class="dc-title">温度与风扇</div>
+        <div class="dc-desc">传感器读数 · 风扇转速 · 过热降频事件</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
     <div class="group-title">外设网络</div>
 
-    <div class="diag-card" data-key="usb" onclick="pick(this)">
+    <div class="diag-card" data-key="usb" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🔌</span>
       <div class="dc-body">
         <div class="dc-title">USB 接口</div>
@@ -407,7 +472,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="audio" onclick="pick(this)">
+    <div class="diag-card" data-key="audio" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🎵</span>
       <div class="dc-body">
         <div class="dc-title">音频设备</div>
@@ -416,7 +481,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="network" onclick="pick(this)">
+    <div class="diag-card" data-key="network" data-platform="all" onclick="pick(this)">
       <span class="dc-icon">🌐</span>
       <div class="dc-body">
         <div class="dc-title">网络诊断</div>
@@ -426,7 +491,7 @@
     </div>
 
 
-    <div class="diag-card" data-key="printer" onclick="pick(this)">
+    <div class="diag-card" data-key="printer" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🖨</span>
       <div class="dc-body">
         <div class="dc-title">打印扫描</div>
@@ -435,7 +500,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="camera" onclick="pick(this)">
+    <div class="diag-card" data-key="camera" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">📷</span>
       <div class="dc-body">
         <div class="dc-title">摄像头麦克风</div>
@@ -444,7 +509,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="biometric" onclick="pick(this)">
+    <div class="diag-card" data-key="biometric" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">🔐</span>
       <div class="dc-body">
         <div class="dc-title">生物识别</div>
@@ -453,7 +518,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="ime" onclick="pick(this)">
+    <div class="diag-card" data-key="ime" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">⌨</span>
       <div class="dc-body">
         <div class="dc-title">输入法/语言</div>
@@ -462,7 +527,7 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="diskspace" onclick="pick(this)">
+    <div class="diag-card" data-key="diskspace" data-platform="all" onclick="pick(this)">
       <span class="dc-icon">🧹</span>
       <div class="dc-body">
         <div class="dc-title">磁盘空间</div>
@@ -471,9 +536,27 @@
       <span class="dc-status">未运行</span>
     </div>
 
+    <div class="diag-card" data-key="netcfg" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">🌐</span>
+      <div class="dc-body">
+        <div class="dc-title">网络配置</div>
+        <div class="dc-desc">网卡与地址 · 路由 · DNS · 链路状态 · 丢包</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="pci" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">🔌</span>
+      <div class="dc-body">
+        <div class="dc-title">USB 与 PCI 设备</div>
+        <div class="dc-desc">USB 设备树 · PCI 设备 · 驱动绑定 · 总线错误</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
     <div class="group-title">实用工具</div>
 
-    <div class="diag-card" data-key="startup" onclick="pick(this)">
+    <div class="diag-card" data-key="startup" data-platform="all" onclick="pick(this)">
       <span class="dc-icon">⚙️</span>
       <div class="dc-body">
         <div class="dc-title">开机自启动</div>
@@ -482,11 +565,20 @@
       <span class="dc-status">未运行</span>
     </div>
 
-    <div class="diag-card" data-key="driver" onclick="pick(this)">
+    <div class="diag-card" data-key="driver" data-platform="win" onclick="pick(this)">
       <span class="dc-icon">📥</span>
       <div class="dc-body">
         <div class="dc-title">驱动获取</div>
         <div class="dc-desc">按 SN/机型从官网获取驱动包</div>
+      </div>
+      <span class="dc-status">未运行</span>
+    </div>
+
+    <div class="diag-card" data-key="logspace" data-platform="linux" onclick="pick(this)">
+      <span class="dc-icon">🧹</span>
+      <div class="dc-body">
+        <div class="dc-title">日志与空间治理</div>
+        <div class="dc-desc">/var/log 膨胀 · journal 大小 · 轮转 · 大文件定位</div>
       </div>
       <span class="dc-status">未运行</span>
     </div>
@@ -584,6 +676,11 @@ async function loadRoomInfo() {
     // 工单信息条
     setText('tb-ticket', d.ticket_no ? ('AI' + (d.created_at || '').slice(2,10).replace(/-/g,'') + '-' + (d.sn||'') + '-01') : '-');
     setNote('诊断台 · 房间 ' + (d.room_code || ROOM));
+    // 2026-09-24：按房间系统过滤左侧诊断项
+    //   linux 房间 → 只保留「通用 + Linux 专属」；windows 房间 → 「通用 + Windows 专属」
+    //   避免 Linux 房间出现"蓝屏分析/电池健康"等点不通的 Windows 项
+    roomConnData = d;
+    applyDiagItemsByOS(d.os);
   } catch (e) {
     setNote('房间读取异常：' + e.message);
   }
@@ -1243,10 +1340,74 @@ async function toggleConnectPanel() {
   p.style.display = show ? 'block' : 'none';
   const b = document.getElementById('btn-connect');
   if (b) b.textContent = show ? '📶 收起连接 ▴' : '📶 连接你的电脑 ▾';
-  if (show) renderConnectCmd();
+  if (show) {
+    // 2026-09-23：按房间系统【只显示对应系统的连接方式】
+    //   linux 房间 → 只出 Linux 命令；windows 房间 → 只出 PowerShell / exe
+    //   （原来固定推荐 PowerShell，Linux 房间的客户会复制到 bash 语法错误的命令）
+    applyConnectTabsByOS();
+    renderConnectCmd();
+  }
+}
+
+// 依据房间系统过滤连接方式页签：不匹配的直接隐藏（不只是不选中）
+function applyConnectTabsByOS() {
+  const os = ((roomConnData || {}).os || '').toLowerCase();
+  const isLinux = (os === 'linux');
+  // 每组页签的可见性：windows 组 vs linux 组
+  document.querySelectorAll('#cp-tabs .cp-tab').forEach(btn => {
+    const tabOS = (btn.dataset.os || 'windows').toLowerCase();
+    const visible = isLinux ? (tabOS === 'linux') : (tabOS === 'windows');
+    btn.style.display = visible ? '' : 'none';
+  });
+  // 默认选中可见的第一个页签
+  const firstVisible = Array.from(document.querySelectorAll('#cp-tabs .cp-tab'))
+    .find(b => b.style.display !== 'none');
+  const target = firstVisible ? firstVisible.dataset.tab : 'ps';
+  curConnTab = target;
+  document.querySelectorAll('#cp-tabs .cp-tab').forEach(x =>
+    x.classList.toggle('active', x.dataset.tab === target));
+  // 标题按系统自适应
+  const t = document.getElementById('cp-title');
+  if (t) t.textContent = isLinux
+    ? '📶 在客户机（Linux）上执行以下命令'
+    : '📶 在客户机（Windows）上执行以下命令';
 }
 
 function switchConnectTab(t) { curConnTab = t; document.querySelectorAll('.cp-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === t)); renderConnectCmd(); }
+
+// ══ 诊断项按房间系统过滤（2026-09-24）══
+// 房间系统 = linux  → 只显示 data-platform="all" 与 "linux" 的诊断项
+// 房间系统 = windows → 只显示 data-platform="all" 与 "win" 的诊断项
+// 同时隐藏因此变空的分组标题（避免出现"硬件诊断"标题下没有卡片）
+function applyDiagItemsByOS(osRaw) {
+  const os = (osRaw || 'windows').toLowerCase();
+  const isLinux = (os === 'linux');
+  const cards = Array.from(document.querySelectorAll('.tags-panel .diag-card'));
+  let shown = 0;
+  cards.forEach(card => {
+    const pf = (card.dataset.platform || 'all').toLowerCase();
+    const visible = (pf === 'all') || (isLinux ? (pf === 'linux') : (pf === 'win' || pf === 'windows'));
+    card.style.display = visible ? '' : 'none';
+    if (visible) shown++;
+  });
+  // 隐藏变空的分组（group-title 与其后到下一个 group-title 之间无可见卡片）
+  const titles = Array.from(document.querySelectorAll('.tags-panel .group-title'));
+  titles.forEach((t, idx) => {
+    const next = titles[idx + 1];
+    let anyVisible = false;
+    let node = t.nextElementSibling;
+    while (node && node !== next) {
+      if (node.classList && node.classList.contains('diag-card') && node.style.display !== 'none') {
+        anyVisible = true;
+        break;
+      }
+      node = node.nextElementSibling;
+    }
+    t.style.display = anyVisible ? '' : 'none';
+  });
+  console.log('[diag] 诊断项按系统过滤: os=' + os + ' 显示 ' + shown + '/' + cards.length + ' 项');
+  return shown;
+}
 
 function renderConnectCmd() {
   const el = document.getElementById('cp-cmd');
@@ -1254,18 +1415,22 @@ function renderConnectCmd() {
   if (!el) return;
   const d = roomConnData || {};
   const conn = d.connect || {};
+  const dl = d.downloads || {};
   const os = (d.os || '').toLowerCase();
   let text = '', h = '';
   if (curConnTab === 'ps') {
     text = conn.powershell || '（未获取到 PowerShell 命令）';
     h = '在客户机 PowerShell（管理员）中整段粘贴执行';
   } else if (curConnTab === 'exe') {
-    const dl = d.downloads || {};
-    text = dl.exe ? ('下载并运行：' + dl.exe + '\n\n然后在客户机上运行 bridge.exe 并填入房间码 ' + ROOM) : '（未获取到下载地址）';
+    text = dl.exe ? ('下载并运行：' + dl.exe + '\n\n然后在客户机上运行桥接器并填入房间码 ' + ROOM) : '（未获取到下载地址）';
     h = '适合无法使用命令行的场景';
   } else {
-    text = conn.linux_sh ? ('curl -fsSL ' + ((d.downloads || {}).linux_sh || '') + ' | bash') : (conn.powershell || '（未获取到 Linux 命令）');
-    h = '在客户机终端执行';
+    // 2026-09-23 修复：键名应为 conn.linux（服务端返回 powershell / windows_bat / linux）。
+    // 原写 conn.linux_sh 取不到值 → 回退成 PowerShell 命令 → Linux 客户复制后必然语法错误。
+    text = conn.linux
+      || (dl.linux_sh ? ('curl -fsSL ' + dl.linux_sh + ' | bash -s -- ' + ROOM) : '')
+      || '（未获取到 Linux 命令）';
+    h = '在客户机终端（bash）执行';
   }
   el.textContent = text;
   if (hint) hint.textContent = h + (os ? '（本房间系统：' + os + '）' : '');

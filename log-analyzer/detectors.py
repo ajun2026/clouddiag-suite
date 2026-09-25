@@ -74,6 +74,30 @@ def detect_encoding(filepath: Path) -> str:
         except (UnicodeDecodeError, UnicodeError):
             continue
     return 'latin-1'
+def _extract_has_content(extract_dir) -> bool:
+    """校验解压结果是否真的有内容（2026-09-23 新增）。
+
+    背景：7z 遇到不支持的 RAR 压缩方法时，会报 "Unsupported Method" 但**返回 0**，
+    并生成 0 字节文件 → 上层误判"日志包为空、无法分析"。
+    这里检查解压目录里是否存在【非空文件】，避免把空解压当成成功。
+
+    返回 True 表示至少有一个非空文件；False 表示全是 0 字节（视为解压失败）。
+    """
+    try:
+        root = Path(extract_dir)
+        if not root.exists():
+            return False
+        for p in root.rglob("*"):
+            try:
+                if p.is_file() and p.stat().st_size > 0:
+                    return True
+            except OSError:
+                continue
+        return False
+    except Exception:
+        return False
+
+
 def extract_archive(filepath: Path) -> Path:
     extract_dir = filepath.parent / f"extract_{filepath.stem}"
     if extract_dir.exists():
@@ -95,12 +119,32 @@ def extract_archive(filepath: Path) -> Path:
         subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
                        capture_output=True, timeout=120)
     elif ext == '.rar':
-        # 2026-09-17：优先用 7z（服务器必有，且支持 rar/rar5），unrar 作兜底
-        r = subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
-                           capture_output=True, timeout=180)
-        if r.returncode != 0:
-            subprocess.run(['unrar', 'x', '-y', str(filepath), str(extract_dir)],
-                           capture_output=True, timeout=180)
+        # 2026-09-23 修复：改为【unrar 优先，7z 兜底】（原来反过来，导致解压出 0 字节空文件）
+        #
+        # 事故：RAR5 的部分压缩方法（本机遇到 "Unsupported Method"）7z 无法解压——
+        #       7z 只报错并生成 0 字节文件，不返回非零退出码 → 上层误判"日志包为空"。
+        #       客户端上传的 22.6MB 包（含 268MB evtx + 3.9MB dmp）因此全部变成 0 字节。
+        # 证据：同一 .rar 用 unrar 解压正常（268MB/3.9MB），用 7z 解压全为 0 字节。
+        #
+        # 策略：unrar（含 unrar-free）优先；失败再用 7z；最后校验解压结果是否非空。
+        ok = False
+        for cmd in (['unrar', 'x', '-y', str(filepath), str(extract_dir)],
+                    ['7z', 'x', '-y', str(filepath), f'-o{extract_dir}']):
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=300)
+            except FileNotFoundError:
+                continue
+            except subprocess.TimeoutExpired:
+                continue
+            if r.returncode == 0 and _extract_has_content(extract_dir):
+                ok = True
+                break
+        if not ok:
+            # 两种解压器都失败——抛出（由上层返回结构化错误，而不是静默产出空文件）
+            raise RuntimeError(
+                "RAR 解压失败（unrar 与 7z 均无法解出内容）——"
+                "该压缩包可能使用了新版 RAR 压缩算法，请重新打包为 zip 或 7z 后上传"
+            )
     elif ext == '.zip':
         try:
             extract_zip_safe(filepath, extract_dir)

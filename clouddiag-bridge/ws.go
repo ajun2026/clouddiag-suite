@@ -30,8 +30,15 @@ func NewClient(cfg *Config) *Client {
 }
 
 // Run 阻塞运行，内部自动重连
+//
+// 2026-09-25 修复【无限重连】：区分"临时故障"与"服务端永久拒绝"。
+// 事故：房间闲置后服务端每次都以"房间已闲置/令牌失效"关闭连接，
+//       而这里无条件重连 → 客户端空转 1392 次（约 18.5 小时）、
+//       日志狂涨、用户只看到"一直连不上"却不知要重新获取连接。
+//       现在：识别永久性拒绝 → 打印明确指引并退出（不再重试）。
 func (c *Client) Run() {
 	backoff := 3 * time.Second
+	const maxBackoff = 30 * time.Second
 	attempt := 0
 	for {
 		if c.closed {
@@ -42,17 +49,75 @@ func (c *Client) Run() {
 		if c.closed {
 			return
 		}
+		// 服务端明确拒绝（房间闲置/令牌失效/房间不存在/无权限）：
+		// 重连多少次都不会成功，直接停并提示用户重新获取连接。
+		if isPermanentReject(err) {
+			c.cfg.Logger.Error("连接被服务器永久拒绝：%v", err)
+			c.cfg.Logger.Error("该房间已失效（闲置/过期/令牌无效）。")
+			c.cfg.Logger.Error("请在浏览器打开诊断台，点击「连接你的电脑」重新获取一键连接命令后重试。")
+			c.cfg.Logger.Error("桥接器停止重连并退出。")
+			return
+		}
 		c.cfg.Logger.Warn("连接断开 (第 %d 次): %v，%s 后重连…", attempt, err, backoff)
 		select {
 		case <-c.stop:
 			return
 		case <-time.After(backoff):
 		}
-		if backoff < 30*time.Second {
+		if backoff < maxBackoff {
 			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
 		}
 	}
 }
+
+// isPermanentReject 判断错误是否为"服务端永久性拒绝"（重连无意义）
+//
+// 判定依据：
+//  1. HTTP 握手中被拒（如 401/403/404 —— 令牌无效或房间不存在）
+//  2. 服务端通过 close reason / error 消息给出的语义化拒绝，
+//     例如"房间已闲置""令牌失效""房间不存在"等。
+func isPermanentReject(err error) bool {
+	if err == nil {
+		return false
+	}
+	if cErr, ok := err.(*permanentRejectError); ok {
+		_ = cErr
+		return true
+	}
+	msg := err.Error()
+	// 语义关键词（覆盖服务端全部拒绝语——中英文都要匹配）
+	for _, kw := range []string{
+		// 中文
+		"房间已闲置", "已闲置", "房间不存在", "房间已过期", "已过期",
+		"令牌失效", "令牌无效", "重新获取一键连接", "请回到对话页", "请创建新房间",
+		// 英文（服务端部分提示为英文，必须一并覆盖）
+		"Room not found", "room not found", "Room expired", "room expired",
+		"Create it from the dashboard", "bad token", "Bad token", "bad_token",
+		"token expired", "token invalid", "Invalid token", "no such room",
+		"not authorized", "Unauthorized",
+	} {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	// 握手阶段的 HTTP 拒绝
+	for _, code := range []string{
+		"HTTP 400", "HTTP 401", "HTTP 403", "HTTP 404", "HTTP 410",
+	} {
+		if strings.Contains(msg, code) {
+			return true
+		}
+	}
+	return false
+}
+
+// permanentRejectError 表示服务端永久拒绝（不重试）
+type permanentRejectError struct{ Reason string }
+
+func (e *permanentRejectError) Error() string { return e.Reason }
 
 // Shutdown 优雅关闭
 func (c *Client) Shutdown() {
@@ -131,6 +196,12 @@ func (c *Client) connectAndServe() error {
 			continue
 		}
 		if err := c.dispatch(msg); err != nil {
+			// 2026-09-25：永久性拒绝（房间已闲置/令牌失效）必须向上传播到 Run()，
+			// 否则会被当成普通"处理消息出错"吞掉，继续无脑重连。
+			if _, ok := err.(*permanentRejectError); ok {
+				c.cfg.Logger.Warn("服务端永久拒绝连接，停止重连")
+				return err
+			}
 			c.cfg.Logger.Warn("处理消息出错: %v", err)
 		}
 	}
@@ -186,7 +257,15 @@ func (c *Client) dispatch(msg map[string]interface{}) error {
 		// 服务器状态/心跳消息（连接状态、房间状态等）——静默忽略，不影响功能
 
 	case "error":
+		content, _ := msg["content"].(string)
 		c.cfg.Logger.Info("server error: %v", msg["content"])
+		// 2026-09-25：服务端用 error 消息告知"房间已闲置/令牌失效"等永久性拒绝。
+		// 这类情况重连永远不会成功——不能只打印日志后继续无脑重连，
+		// 否则客户端会空转上千次（实测 1392 次 / 约 18.5 小时）。
+		// 这里转换为 permanentRejectError 返回给 Run()，由它停止重连并给出指引。
+		if content != "" && isPermanentReject(fmt.Errorf("%s", content)) {
+			return &permanentRejectError{Reason: content}
+		}
 
 	case "command":
 		// 异步执行命令：命令可能耗时 60~90s，同步执行会阻塞读循环，
