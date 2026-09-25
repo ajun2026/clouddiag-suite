@@ -151,8 +151,8 @@ DEEPSEEK_MODEL_2=
 |------|------|------|----------|
 | Python | 3.10+ | 需 pip 安装依赖 | — |
 | Nginx | ≥1.18 | 反向代理 | — |
-| 7-Zip | 任意 | `.7z` 解压；**同时作为 `.rar` 的首选解压器** | `.7z` / `.rar` 上传即失败 |
-| unrar | 任意 | `.rar` 解压（7z 失败时的兜底） | `.rar` 解压兜底不可用 |
+| 7-Zip | 任意 | `.7z` 解压（必需）；`.rar` 兜底解压器 | `.7z` 上传即失败 |
+| unrar | 任意 | `.rar` **首选**解压器（必需） | 缺 unrar 时 `.rar` 基本解不出（7z 对多数 RAR5 压缩方法报 Unsupported Method） |
 | lzop | 任意 | `.tzz` 解压 (IBM XCC FFDC) | `.tzz` 上传即失败 |
 
 ```bash
@@ -182,16 +182,27 @@ which 7z unrar lzop
 7z a -tzip /tmp/t.zip /etc/hostname && 7z x -y /tmp/t.zip -o/tmp/t_out && ls /tmp/t_out
 ```
 
-**关于 `.rar` 的处理策略（v3.10 起）**
+**关于 `.rar` 的处理策略（v1.0.5 起）**
 
-`.rar` 解压采用「7z 优先 + unrar 兜底」双保险（`detectors.py` → `extract_archive`）：
+`.rar` 解压采用「**unrar 优先（判定"有内容即成功"） + 7z 兜底（解到独立目录）**」（`detectors.py` → `extract_archive`）：
 
 ```python
 elif ext == '.rar':
-    r = subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'], ...)
-    if r.returncode != 0:
-        subprocess.run(['unrar', 'x', '-y', str(filepath), str(extract_dir)], ...)
+    # 1) unrar 优先：只要解出了非空文件就采用（rc≠0 只记警告，不丢弃已拿到的数据）
+    r = subprocess.run(['unrar', 'x', '-y', str(filepath), str(extract_dir)], ...)
+    if _extract_has_content(extract_dir):
+        ok = True
+    # 2) unrar 完全解不出时，7z 兜底解到【独立临时目录】，
+    #    校验有内容后再合并 —— 绝不直接写进 unrar 的产物目录
+    if not ok:
+        ... 7z → tmp_dir → 合并 ...
 ```
+
+**为什么是 unrar 优先（重要）**：
+
+- 7z（实测 23.01）对现网多数 `.rar`（RAR5）会报 `ERROR: Unsupported Method`，
+  **产出 0 字节文件**，而 `unrar` 7.00 可正常解出全部 394 个文件；
+- 即 **没有 unrar 时 `.rar` 基本解不出** → 部署时必须安装 `unrar`，不能只装 `p7zip-full`；
 
 - 原因：部分服务器镜像未收录 `unrar`（版权原因，`unrar` 与 `unrar-free` 在不同发行版/源中可用性不一），而 `p7zip-full` 几乎处处可用且支持 `rar/rar5`
 - 因此**只要 `p7zip-full` 到位，`.rar` 通常即可正常解压**；安装 `unrar` 可进一步提升兼容性（分卷、旧版加密等场景）

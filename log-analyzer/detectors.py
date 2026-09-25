@@ -1,8 +1,12 @@
 """OS detection, archive extraction, encoding, history."""
-import json, os, subprocess, uuid
+import json, logging, os, shutil, subprocess, uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
+
+# 模块级 logger（2026-09-25 新增：detectors 需要在解压失败/降级时留痕，
+# 便于排查"日志包被判空"这类问题）
+run_logger = logging.getLogger("detectors")
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -74,6 +78,24 @@ def detect_encoding(filepath: Path) -> str:
         except (UnicodeDecodeError, UnicodeError):
             continue
     return 'latin-1'
+def _count_nonempty(extract_dir) -> int:
+    """统计解压目录里非空文件的数量（2026-09-25 新增，用于"部分损坏但有可用数据"的提示）。"""
+    try:
+        root = Path(extract_dir)
+        if not root.exists():
+            return 0
+        n = 0
+        for p in root.rglob("*"):
+            try:
+                if p.is_file() and p.stat().st_size > 0:
+                    n += 1
+            except OSError:
+                continue
+        return n
+    except Exception:
+        return 0
+
+
 def _extract_has_content(extract_dir) -> bool:
     """校验解压结果是否真的有内容（2026-09-23 新增）。
 
@@ -100,9 +122,16 @@ def _extract_has_content(extract_dir) -> bool:
 
 def extract_archive(filepath: Path) -> Path:
     extract_dir = filepath.parent / f"extract_{filepath.stem}"
+    # 2026-09-25 v1.0.5 修复：原来"目录存在即早退"会把【中毒目录】永久判定为空包。
+    # 场景：A4 事故中 7z 失败留下"全 0 字节的 extract_ 目录"，
+    #       客户重传同一个包时直接返回该目录 → 依旧判"日志包为空"，修复形同虚设。
+    # 现在：只有在【目录里确实有非空文件】时才复用；否则清掉重解。
+    if extract_dir.exists() and _extract_has_content(extract_dir):
+        return extract_dir  # already extracted（有内容，可复用）
     if extract_dir.exists():
-        return extract_dir  # already extracted
-    extract_dir.mkdir(exist_ok=True)
+        run_logger.warning(f"解压目录存在但无有效内容，清理后重新解压: {extract_dir.name}")
+        shutil.rmtree(extract_dir, ignore_errors=True)
+    extract_dir.mkdir(parents=True, exist_ok=True)
     filename = filepath.name.lower()
     # .tzz: lzop-compressed tar (IBM/Lenovo XCC FFDC format)
     if filename.endswith('.tzz'):
@@ -119,31 +148,69 @@ def extract_archive(filepath: Path) -> Path:
         subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
                        capture_output=True, timeout=120)
     elif ext == '.rar':
-        # 2026-09-23 修复：改为【unrar 优先，7z 兜底】（原来反过来，导致解压出 0 字节空文件）
+        # 2026-09-25 v1.0.5 重构：unrar 优先（判定"有内容即成功"）+ 7z 兜底解到独立目录
         #
-        # 事故：RAR5 的部分压缩方法（本机遇到 "Unsupported Method"）7z 无法解压——
-        #       7z 只报错并生成 0 字节文件，不返回非零退出码 → 上层误判"日志包为空"。
-        #       客户端上传的 22.6MB 包（含 268MB evtx + 3.9MB dmp）因此全部变成 0 字节。
-        # 证据：同一 .rar 用 unrar 解压正常（268MB/3.9MB），用 7z 解压全为 0 字节。
+        # 历史：
+        #   v1.0.3 前：7z 优先 → 遇 7z 不支持的 RAR5 方法会写出 0 字节文件 → 日志包被判"空"
+        #   v1.0.4   ：改为 unrar 优先，但①判定只看 returncode；②7z 兜底写同一目录
+        #              → 包轻微损坏时（unrar 已解出大部分文件、rc≠0）会继续跑 7z，
+        #                7z 把这些已解好的文件【覆盖成 0 字节】→ 整包被误拒。
+        #                实测：截断的 rar，unrar rc=3 但已解出 198 个非空文件；
+        #                      接着 7z 写入同目录 → 198 个全部变 0 字节 → 误报解压失败。
         #
-        # 策略：unrar（含 unrar-free）优先；失败再用 7z；最后校验解压结果是否非空。
+        # 本版策略（三条）：
+        #   1) 判定"有内容即成功"——unrar 即使 rc≠0（部分损坏/校验和错误），
+        #      只要解出了非空文件就采用，绝不因为返回码而丢弃已拿到的可用数据；
+        #   2) 7z 兜底解到【独立临时目录】，校验有内容后再合并回 extract_dir，
+        #      绝不直接写进 unrar 的产物目录（避免覆盖式数据破坏）；
+        #   3) 错误文案区分"完全解不出"与"部分损坏（已解出 N 个）"。
         ok = False
-        for cmd in (['unrar', 'x', '-y', str(filepath), str(extract_dir)],
-                    ['7z', 'x', '-y', str(filepath), f'-o{extract_dir}']):
-            try:
-                r = subprocess.run(cmd, capture_output=True, timeout=300)
-            except FileNotFoundError:
-                continue
-            except subprocess.TimeoutExpired:
-                continue
-            if r.returncode == 0 and _extract_has_content(extract_dir):
+        partial = 0
+        # ── 第 1 步：unrar（官方 RAR 算法覆盖最全）──
+        try:
+            r = subprocess.run(['unrar', 'x', '-y', str(filepath), str(extract_dir)],
+                               capture_output=True, timeout=300)
+            if _extract_has_content(extract_dir):
                 ok = True
-                break
+                if r.returncode != 0:
+                    partial = _count_nonempty(extract_dir)
+                    run_logger.warning(
+                        f"unrar 返回码 {r.returncode}，但已解出 {partial} 个非空文件——按可用数据处理"
+                    )
+        except FileNotFoundError:
+            run_logger.warning("unrar 未安装，尝试 7z 兜底")
+        except subprocess.TimeoutExpired:
+            run_logger.warning("unrar 解压超时，尝试 7z 兜底")
+
+        # ── 第 2 步：7z 兜底（解到独立目录，确认有内容后再合并，避免覆盖）──
         if not ok:
-            # 两种解压器都失败——抛出（由上层返回结构化错误，而不是静默产出空文件）
+            tmp_dir = extract_dir.parent / (extract_dir.name + ".7z_tmp")
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            try:
+                subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{tmp_dir}'],
+                               capture_output=True, timeout=300)
+                if _extract_has_content(tmp_dir):
+                    # 7z 解出了可用内容 → 合并进正式目录
+                    extract_dir.mkdir(parents=True, exist_ok=True)
+                    for item in tmp_dir.iterdir():
+                        target = extract_dir / item.name
+                        if target.exists():
+                            shutil.rmtree(target, ignore_errors=True) if target.is_dir() else target.unlink()
+                        shutil.move(str(item), str(target))
+                    ok = True
+            except FileNotFoundError:
+                run_logger.warning("7z 也未安装——无法解压 .rar")
+            except subprocess.TimeoutExpired:
+                run_logger.warning("7z 解压超时")
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        # ── 第 3 步：仍无内容 → 报错（区分两种情形，给出可操作的提示）──
+        if not ok:
             raise RuntimeError(
-                "RAR 解压失败（unrar 与 7z 均无法解出内容）——"
-                "该压缩包可能使用了新版 RAR 压缩算法，请重新打包为 zip 或 7z 后上传"
+                "RAR 解压失败：未能从压缩包中解出任何内容。"
+                "可能原因：①压缩包使用了 unrar/7z 均不支持的算法；②文件上传不完整或已损坏。"
+                "建议：确认文件完整后重新上传；若仍失败，请改用 zip 或 7z 格式重新打包。"
             )
     elif ext == '.zip':
         try:
