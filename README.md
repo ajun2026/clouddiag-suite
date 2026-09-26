@@ -32,7 +32,7 @@
 | **服务器在内网/无公网 IP** | 内网服务器 + 一台公网机器 | FRP 内网穿透（数据不出内网） | [FRP 内网穿透](deploy/frp-internal/README.md) |
 
 > ⚠️ **HTTPS 相关配置（Caddy、证书、443 端口）属于「部署形态」，不是项目代码的必需依赖**。
-> 项目本身只监听 HTTP 端口；要不要套 TLS 由你决定。两种形态的环境变量差异见下。
+> 项目本身只监听 HTTP 端口；要不要套 TLS 由你决定。三种形态的环境变量差异见下。
 
 ### 第二步：一键部署（交互式脚本）
 
@@ -51,19 +51,24 @@ bash deploy/doctor.sh    # 全绿即部署成功
 
 ---
 
-## 两种部署形态的差异（重要）
+## 三种部署形态的差异（重要）
 
 项目代码**不依赖任何特定域名或证书**，差异只在环境变量与是否套反向代理：
 
-| 配置项 | 纯 HTTP（IP 部署） | HTTPS（域名部署） |
-|---|---|---|
-| `PUBLIC_URL` | `http://1.2.3.4:8000` | `https://your-domain.com` |
-| `COOKIE_SECURE` | **`false`** ← 必须 | `true` |
-| 桥接器协议 | `ws://` | `wss://` |
-| 反向代理 | 不需要（FastAPI 直连） | Caddy / Nginx（自动申请证书） |
-| 额外要求 | 无 | 域名解析 + 80/443 端口开放 |
+| 配置项 | A · 纯 HTTP（IP 部署） | B · HTTPS（域名部署） | C · FRP 内网穿透 |
+|---|---|---|---|
+| `PUBLIC_URL` | `http://1.2.3.4:8000` | `https://your-domain.com` | `https://穿透域名`（frps 侧） |
+| `COOKIE_SECURE` | **`false`** ← 必须 | `true` | 视 frps 是否 TLS 而定 |
+| 桥接器协议 | `ws://` | `wss://` | `wss://`（TLS 终结在 frps） |
+| 反向代理 | 不需要（FastAPI 直连） | Caddy / Nginx（自动申请证书） | 不需要（FRP 自带隧道） |
+| 额外要求 | 无（**最简单**） | 域名解析 + 80/443 端口开放 | 一台有公网 IP 的机器做 frps |
+| 适用场景 | 内网、临时验证、只有 IP | 对外服务、需 HTTPS 加密 | 服务在内网 / 数据不出内网 |
 
 > 🔴 **最常见的部署失败原因**：HTTP 环境下忘记设 `COOKIE_SECURE=false`，导致登录后立刻掉线。
+>
+> 🔑 **备用访问地址（可选）**：若你的 HTTPS 部署存在「443 被中间设备拦截」的情况，
+> 可在 `.env` 配置 `PUBLIC_URL_FALLBACK=https://域名:8443` 作为降级通道；
+> **纯 HTTP / 内网 IP / FRP 单端口部署无需配置此项**（不配置即不做降级）。
 
 ---
 
@@ -137,7 +142,7 @@ sudo apt install -y caddy
 
 ---
 
-## 常见问题（Top 5）
+## 常见问题（Top 6）
 
 | 问题 | 原因 | 解决 |
 |---|---|---|
@@ -146,6 +151,7 @@ sudo apt install -y caddy
 | AI 分析报「空回复」 | 网关抖动 / 推理模型 content 为空 | 已内置 3 次重试 + reasoning 兜底；持续失败需查网关 |
 | 桥接器连不上 | 地址协议不对 / 端口不通 | HTTP 部署用 `ws://`，HTTPS 用 `wss://`；检查端口 |
 | Linux 上敲 `bridge` 弹出诊断程序 | 历史版本命名冲突（现已改名） | 升级到 `clouddiag-bridge`（见[事故记录 A1](docs/风险与事故记录/)） |
+| **能不能用别的 AI 模型？** | — | **可以**。任何 OpenAI 兼容接口都支持：改 `.env` 的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` 即可（OpenAI / 通义 / 智谱 / 中转站 / 本地 Ollama 均可）。🔴 前提：模型**必须支持 Function Calling**，否则诊断无法下发命令。详见 [.env.example](clouddiag-server/.env.example) |
 
 更多见 [docs/04-常见问题.md](docs/04-常见问题.md)。
 
@@ -164,6 +170,7 @@ sudo apt install -y caddy
 | B2 | 提示词多处消费路径未同步 | 开发 |
 | C1 | `.env` 误提交公开仓库（凭据泄露） | 安全 |
 | D1 | 包内混入旧文件，覆盖现网修复 | 运维 |
+| A7 | `install.sh` 覆盖已有 `.env`（已加固） | 部署 |
 
 完整索引：[docs/风险与事故记录/README.md](docs/风险与事故记录/README.md)
 
@@ -173,6 +180,7 @@ sudo apt install -y caddy
 
 | 版本 | 说明 |
 |---|---|
+| **v1.0.7** | 部署引导完善（三种形态对齐 / install.sh 支持 FRP + 任意 OpenAI 兼容模型引导）+ 脚本覆盖 .env 加固 |
 | **v1.0.6** | 界面体验与部署普适性优化（IDG 独立全屏 + 布局固定 + 页签精简 / 导航闭环 / 一键连接自动提权 / 工具下载降级 / 8443 可配置 / 英文系统兼容） |
 | **v1.0.5** | 修 v1.0.4 自身缺陷（RAR 兜底覆盖已解文件 / 中毒目录早退）+ 文档口径修正 |
 | **v1.0.4** | 现网问题集中修复（RAR 解压 / 无限重连 / 诊断中断 / 诊断项按系统过滤）+ 10 个 Linux 专项 + AI 切回官方 |

@@ -33,19 +33,58 @@ fi
 # ── 1. 部署形态 ──────────────────────────────────
 echo -e "${C_BLUE}[1/6] 部署形态${C_NC}"
 echo ""
-echo "  1) 纯 HTTP（只有服务器 IP，没有域名）—— 最简单"
+echo "  1) 纯 HTTP（只有服务器 IP，没有域名）—— 最简单，无需证书/反代"
 echo "  2) 域名 + HTTPS（有域名，自动申请证书）"
+echo "  3) FRP 内网穿透（服务器在内网/无公网 IP，数据不出内网）"
 echo ""
-read -p " 请选择 [1/2] (默认 1): " FORM_CHOICE
+echo -e "  ${C_YELLOW}提示：三种形态的项目代码完全一致，只是部署方式与 .env 配置不同。${C_NC}"
+echo -e "  ${C_YELLOW}      选 3 时本脚本只负责把服务跑起来，FRP 隧道需另按文档配置。${C_NC}"
+echo ""
+read -p " 请选择 [1/2/3] (默认 1): " FORM_CHOICE
 FORM_CHOICE=${FORM_CHOICE:-1}
 
-if [ "$FORM_CHOICE" = "2" ]; then
+FALLBACK_URL=""   # 备用访问地址（仅 HTTPS 形态可选填）
+AI_URL_2=""; AI_KEY_2=""; AI_MODEL_2=""   # 备用 AI 通道（可选）
+
+if [ "$FORM_CHOICE" = "3" ]; then
+    # ── 形态 C：FRP 内网穿透 ──
+    FORM="frp"
+    echo ""
+    echo -e "  ${C_BLUE}FRP 形态说明：${C_NC}"
+    echo "    · 本机（内网服务器）跑 clouddiag 服务，监听 HTTP 端口"
+    echo "    · 另需一台【有公网 IP 的机器】跑 frps（服务端）"
+    echo "    · 工程师通过穿透域名访问，流量经 frps 转发到内网"
+    echo ""
+    echo "    完整配置步骤（含 frps/frpc 配置模板、7 条实测踩坑）："
+    echo "      deploy/frp-internal/README.md"
+    echo ""
+    read -p " 穿透后对外访问的地址（如 https://diag.example.com，可留空稍后填）: " FRP_URL
+    if [ -n "$FRP_URL" ]; then
+        PUBLIC_URL="$FRP_URL"
+        case "$FRP_URL" in
+            https://*) COOKIE_SECURE="true" ;;
+            *)         COOKIE_SECURE="false" ;;
+        esac
+    else
+        PUBLIC_URL="http://127.0.0.1:8000"
+        COOKIE_SECURE="false"
+        echo -e " ${C_YELLOW}⚠️  PUBLIC_URL 已留空，部署后请修改 .env 填入穿透地址（否则一键连接命令会指向本机）${C_NC}"
+    fi
+    echo -e " ${C_GREEN}✓ 形态: FRP 内网穿透${C_NC}"
+elif [ "$FORM_CHOICE" = "2" ]; then
     FORM="https"
     read -p " 请输入你的域名 (例如 diag.example.com): " DOMAIN
     [ -z "$DOMAIN" ] && { echo -e "${C_RED}域名不能为空${C_NC}"; exit 1; }
     PUBLIC_URL="https://$DOMAIN"
     COOKIE_SECURE="true"
     echo -e " ${C_GREEN}✓ 形态: 域名 + HTTPS ($DOMAIN)${C_NC}"
+    # 备用访问地址（可选）：443 被中间设备拦截时降级用；不需要可直接回车跳过
+    echo ""
+    echo -e "  ${C_BLUE}备用访问地址（可选，按回车跳过）：${C_NC}"
+    echo "    如果你的网络环境存在「443 被防火墙/中间设备拦截」的情况，"
+    echo "    可提供一个备用地址（如 https://$DOMAIN:8443）用于自动降级。"
+    echo "    纯 HTTP / 内网 IP / FRP 单端口部署【无需】配置此项。"
+    read -p "    备用地址 (默认留空=不降级): " FALLBACK_URL
 else
     FORM="http"
     read -p " 请输入服务器公网 IP: " PUB_IP
@@ -73,13 +112,40 @@ echo ""
 # ── 3. AI 配置 ───────────────────────────────────
 echo -e "${C_BLUE}[3/6] AI 配置（两个服务共用同一 AI 通道）${C_NC}"
 echo ""
+echo -e "  ${C_BLUE}说明：本项目使用【任意 OpenAI 兼容接口】作为 AI 大脑。${C_NC}"
+echo "    常见的 API 地址示例："
+echo "      · DeepSeek 官方   https://api.deepseek.com/v1"
+echo "      · OpenAI 官方     https://api.openai.com/v1"
+echo "      · 阿里通义千问    https://dashscope.aliyuncs.com/compatible-mode/v1"
+echo "      · 智谱 GLM        https://open.bigmodel.cn/api/paas/v4"
+echo "      · 第三方中转站    https://你的中转地址/v1"
+echo "      · 本地部署(Ollama) http://127.0.0.1:11434/v1"
+echo ""
+echo -e "  ${C_YELLOW}🔴 关键要求：所选模型【必须支持 Function Calling（工具调用）】，${C_NC}"
+echo -e "  ${C_YELLOW}   否则诊断功能无法下发命令、无法工作。${C_NC}"
+echo ""
 read -p " AI API 地址 (默认 https://api.deepseek.com/v1): " AI_URL
 AI_URL=${AI_URL:-https://api.deepseek.com/v1}
 read -p " AI API Key: " AI_KEY
 [ -z "$AI_KEY" ] && { echo -e "${C_RED}API Key 不能为空${C_NC}"; exit 1; }
+echo ""
+echo "  模型名（须支持 Function Calling）示例："
+echo "      · DeepSeek: deepseek-chat / deepseek-reasoner"
+echo "      · OpenAI:   gpt-4o / gpt-4o-mini"
+echo "      · 通义:     qwen-plus / qwen-max"
+echo "      · 智谱:     glm-4-plus"
 read -p " 模型名 (默认 deepseek-chat): " AI_MODEL
 AI_MODEL=${AI_MODEL:-deepseek-chat}
 echo -e " ${C_GREEN}✓ AI 通道: $AI_URL ($AI_MODEL)${C_NC}"
+echo ""
+echo -e "  ${C_BLUE}备用 AI 通道（可选，按回车跳过）${C_NC}"
+echo "    主通道调用失败（如额度不足、限流）时自动切换，提升可用性。"
+read -p "    备用 API 地址: " AI_URL_2
+if [ -n "$AI_URL_2" ]; then
+    read -p "    备用 API Key: " AI_KEY_2
+    read -p "    备用模型名: " AI_MODEL_2
+    echo -e " ${C_GREEN}✓ 备用通道: $AI_URL_2 ($AI_MODEL_2)${C_NC}"
+fi
 echo ""
 
 # ── 4. 管理员账号 ────────────────────────────────
@@ -97,6 +163,17 @@ echo ""
 echo -e "${C_BLUE}[5/6] 生成配置文件${C_NC}"
 echo ""
 
+# ── 2026-09-26 安全加固：避免覆盖已有配置 ──
+# 若目标机已有 .env（例如重装、或误在已有环境运行），先备份再覆盖，防止配置丢失。
+for _f in "$SERVER_DIR/.env" "$ANALYZER_DIR/.env"; do
+    if [ -f "$_f" ]; then
+        _bk="${_f}.bak.$(date '+%Y%m%d-%H%M%S')"
+        cp "$_f" "$_bk"
+        echo -e " ${C_YELLOW}⚠️  已存在 $(basename $_f)，原文件已备份为：$_bk${C_NC}"
+    fi
+done
+echo ""
+
 cat > "$SERVER_DIR/.env" << EOF
 # CloudDiag Server 配置（由 install.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')）
 
@@ -107,14 +184,25 @@ SERVER_PORT=$SERVER_PORT
 # ── 对外地址 ──
 PUBLIC_URL=$PUBLIC_URL
 
+# ── 备用访问地址（可选）──
+# 主地址不可达时自动降级（如生产环境 443 被中间设备拦截）
+# 纯 HTTP / 内网 IP / FRP 单端口部署【无需配置】——留空即不做降级
+PUBLIC_URL_FALLBACK=$FALLBACK_URL
+
 # ── 会话安全（HTTP 环境必须 false）──
 COOKIE_SECURE=$COOKIE_SECURE
 
 # ── AI 大脑 ──
+# 任何 OpenAI 兼容接口均可；模型必须支持 Function Calling（否则诊断无法下发命令）
 AGENT_BRAIN=deepseek
 OPENAI_BASE_URL=$AI_URL
 OPENAI_API_KEY=$AI_KEY
 OPENAI_MODEL=$AI_MODEL
+
+# ── 可选：备用 AI 通道（主通道失败时自动切换）──
+# OPENAI_BASE_URL_2=$AI_URL_2
+# OPENAI_API_KEY_2=$AI_KEY_2
+# OPENAI_MODEL_2=$AI_MODEL_2
 
 # ── 桥接器上传校验密钥（随机生成，请妥善保存）──
 BRIDGE_HTTP_SECRET=$RANDOM_SECRET
@@ -137,13 +225,15 @@ PORT=$ANALYZER_PORT
 HOST=127.0.0.1
 
 # ── AI 通道（与诊断服务共用）──
+# 任何 OpenAI 兼容接口均可；模型必须支持 Function Calling
 DEEPSEEK_BASE_URL=$AI_URL
 DEEPSEEK_API_KEY=$AI_KEY
 DEEPSEEK_MODEL=$AI_MODEL
 
 # ── 可选：备用通道（主通道失败时自动切换）──
-# DEEPSEEK_BASE_URL_2=
-# DEEPSEEK_API_KEY_2=
+DEEPSEEK_BASE_URL_2=$AI_URL_2
+DEEPSEEK_API_KEY_2=$AI_KEY_2
+DEEPSEEK_MODEL_2=$AI_MODEL_2
 # DEEPSEEK_MODEL_2=
 EOF
 echo -e " ${C_GREEN}✓ $ANALYZER_DIR/.env${C_NC}"
