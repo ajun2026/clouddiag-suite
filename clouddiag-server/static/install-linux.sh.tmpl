@@ -15,12 +15,13 @@
 # ============================================================
 
 SERVER="{{PUBLIC_URL}}"
-# 443 被拦时自动切换到 8443 备选端口（探测 /api/health）
-# 2026-09-22 修复：仅 https 部署才降级——http/IP 部署不得拼接 :8443
-#（否则会拼出 IP:8000:8443 这类坏地址）
-if [ "${SERVER#https://}" != "$SERVER" ] && ! curl -sf --max-time 5 "$SERVER/api/health" >/dev/null 2>&1; then
-    echo "  443 端口不可达，自动使用 8443 备选端口..."
-    SERVER="${SERVER}:8443"
+# 备用地址（2026-09-26 改为可配置）：由服务端注入 {{PUBLIC_URL_FALLBACK}}
+#   · 配置了 → 主地址不可达时自动切换（如生产 443 被中间设备拦截 → 切 :8443）
+#   · 未配置 → 与主地址相同（不做降级，适用于纯 HTTP / 内网 IP / FRP 单端口部署）
+FALLBACK="{{PUBLIC_URL_FALLBACK}}"
+if [ -n "$FALLBACK" ] && [ "$FALLBACK" != "$SERVER" ] && ! curl -sf --max-time 5 "$SERVER/api/health" >/dev/null 2>&1; then
+    echo "  主地址不可达，自动切换到备用地址: $FALLBACK"
+    SERVER="$FALLBACK"
 fi
 # WS 地址由 SERVER 推导（https→wss，http→ws）
 WS_URL="${SERVER/http:\/\//ws:\/\/}"

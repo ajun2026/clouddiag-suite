@@ -1,0 +1,234 @@
+{
+ "source": "Microsoft Learn bug-check-code-reference",
+ "fetched": "2026-08-17",
+ "codes": {
+  "0xA": {
+   "name": "IRQL_NOT_LESS_OR_EQUAL",
+   "desc": "IRQL_NOT_LESS_OR_EQUAL 错误检查的值为 0x0000000A。 此错误检查表明在提高中断请求级别 (IRQL) 时，Microsoft Windows 或内核模式驱动程序访问了无效地址的分页内存。 原因通常是指针错误或分页性问题。",
+   "cause": "此错误检查是由于使用不当地址的内核模式设备驱动程序引起的。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x1E": {
+   "name": "KMODE_EXCEPTION_NOT_HANDLED",
+   "desc": "若要对此错误检查进行解释，必须确定生成的具体异常。",
+   "cause": "0x80000002: STATUS_DATATYPE_MISALIGNMENT",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x3B": {
+   "name": "SYSTEM_SERVICE_EXCEPTION",
+   "desc": "SYSTEM_SERVICE_EXCEPTION 错误检查具有 0x0000003B 值。 这表示在执行从非特权代码转换为特权代码的例程时发生了异常。",
+   "cause": "此停止代码指示执行代码存在异常，其下方的线程是系统线程。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x50": {
+   "name": "PAGE_FAULT_IN_NONPAGED_AREA",
+   "desc": "0x03-NONPAGED_BUGCHECK_WRONG_SESSION - 尝试在没有会话的进程的上下文中引用会话空间地址。  通常，这意味着调用方在未首先正确获取对正确进程的对象引用并附加到该进程的情况下，不正确地尝试访问会话地址。 此错误检查和子类型最后用于 Windows 10 RS3 中。  在 Windows 10 RS4 及更高版本中，此错误改为 0x02 (NONPAGED_BUGCHECK_NOT_PRESENT_PAGE_TABLE)。",
+   "cause": "安装了错误的系统服务或错误的驱动程序代码都可能造成错误检查 0x50。 防病毒软件和损坏的 NTFS 卷也可能触发此错误。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x7E": {
+   "name": "SYSTEM_THREAD_EXCEPTION_NOT_HANDLED",
+   "desc": "SYSTEM_THREAD_EXCEPTION_NOT_HANDLED 错误检查的值为 0x0000007E。 此错误检查表明系统线程产生了错误处理程序未捕获的异常。",
+   "cause": "此错误检查表明系统线程产生了错误处理程序未捕获的异常。 若要对其进行解释，必须确定生成的具体异常。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x7F": {
+   "name": "",
+   "desc": "表示执行 DIV 指令并且除数为零。 内存损坏、其他硬件问题或软件故障都可能会导致此错误。",
+   "cause": "Bug 检查 0x7F 通常在安装了故障或不匹配的硬件（尤其是内存）或安装的硬件出现故障后发生。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x9F": {
+   "name": "DRIVER_POWER_STATE_FAILURE",
+   "desc": "DRIVER_POWER_STATE_FAILURE bug 检查的值为 0x0000009F。 此 bug 检查指示驱动程序处于不一致或无效的电源状态。",
+   "cause": "正在释放的设备对象仍具有尚未完成的电源请求。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0xD1": {
+   "name": "DRIVER_IRQL_NOT_LESS_OR_EQUAL",
+   "desc": "DRIVER_IRQL_NOT_LESS_OR_EQUAL 错误检查的值为 0x000000D1。 这表示内核模式驱动程序在进程 IRQL 过高时试图访问可分页内存。",
+   "cause": "若要确定原因，需要 Windows 调试器、编程体验以及访问故障模块的源代码。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x139": {
+   "name": "KERNEL_SECURITY_CHECK_FAILURE",
+   "desc": "KERNEL_SECURITY_CHECK_FAILURE bug 检查的值为 0x00000139，并指示内核检测到关键数据结构的损坏。",
+   "cause": "使用参数 1 表和转储文件，可以缩小此类型的许多 bug 检查的原因。",
+   "advice": "错误检查 0x139 KERNEL_SECURITY_CHECK_FAILURE 参数"
+  },
+  "0xC2": {
+   "name": "BAD_POOL_CALLER",
+   "desc": "BAD_POOL_CALLER 错误检查的值为 0x000000C2。 这表示当前线程正在发出错误的池请求。",
+   "cause": "当前线程发出了无效的池请求。 通常，这处于错误的 IRQL 级别，或者两次释放相同的内存分配等。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0xCA": {
+   "name": "PNP_DETECTED_FATAL_ERROR",
+   "desc": "PNP_DETECTED_FATAL_ERROR 错误检查的值为 0x000000CA。 这表示即插即用管理器遇到严重错误，可能是由于有问题的即插即用驱动程序造成的。",
+   "cause": "",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0xCE": {
+   "name": "DRIVER_UNLOADED_WITHOUT_CANCELLING_PENDING_OPERATIONS",
+   "desc": "DRIVER_UNLOADED_WITHOUT_CANCELLING_PENDING_OPERATIONS 错误检查的值为 0x000000CE。 这表示驱动程序未能在卸载前取消挂起的操作。",
+   "cause": "此驱动程序无法在卸载前取消后备列表、DPC、工作线程或其他类似项目。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0xEF": {
+   "name": "",
+   "desc": "bug CRITICAL_PROCESS_DIED 检查的值为 0x000000EF。 此检查表示关键系统进程已终止。 关键进程会强制系统在系统终止时进行 bug 检查。 当进程的状态损坏或损坏时，将进行此检查。 当损坏或损坏发生时，由于这些进程对 Windows 的运行至关重要，因此会进行系统错误检查，因为作系统的完整性存在问题。",
+   "cause": "",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x24": {
+   "name": "NTFS_FILE_SYSTEM",
+   "desc": "造成此错误检查的一个可能原因是磁盘损坏。 硬盘上的 NTFS 文件系统损坏或坏块（扇区）可能会引发此错误。 损坏的硬盘 (SATA/IDE) 驱动程序也会对系统读写磁盘的能力产生不利影响，从而导致错误。",
+   "cause": "若要调试此问题：请使用参数 3 的 .cxr（显示上下文记录）命令，然后使用 kb（显示堆栈回溯跟踪）。。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x25": {
+   "name": "NPFS_FILE_SYSTEM",
+   "desc": "造成此错误检查的一个可能原因是非分页池内存耗尽。 如果非分页池内存完全耗尽，此错误可能会导致系统停止运行。 但是，在索引过程中，如果可用非分页池内存量非常低，则另一个需要非分页池内存的内核模式驱动程序也可能会触发此错误。",
+   "cause": "若要解决非分页池内存耗尽问题： 向计算机添加新的物理内存。 这将增加内核可用的非分页池内存的数量。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x51": {
+   "name": "",
+   "desc": "REGISTRY_ERROR Bug 检查的值为 0x00000051。 这表示发生了严重的注册表错误。",
+   "cause": "注册表出错了。 如果内核调试器可用，则获取堆栈跟踪：!analyze 调试扩展显示有关 Bug 检查的信息，并且非常有助于确定根本原因，然后输入其中一个 k（显示堆栈回溯）命令以查看调用堆栈。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x77": {
+   "name": "",
+   "desc": "如果第一个参数为 0 或 1，则表示未找到内核堆栈中的堆栈签名。 此错误可能是由有缺陷的硬件引起的，例如 RAM 错误。",
+   "cause": "如果第一个参数为 2，驱动程序堆栈返回页面读取的不一致状态。 例如，即使驱动程序堆栈未读取整个页面，也返回了成功状态。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x8E": {
+   "name": "",
+   "desc": "0x80000002：STATUS_DATATYPE_MISALIGNMENT 表示遇到未对齐的数据引用。",
+   "cause": "KERNEL_MODE_EXCEPTION_NOT_HANDLED Bug 检查是一种非常常见的 Bug 检查。 若要对其进行解释，必须确定生成的具体异常。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x1A": {
+   "name": "MEMORY_MANAGEMENT",
+   "desc": "由于未完成的引用，无法删除已退出进程的所有页表页。 此错误通常表示进程页表结构已损坏。",
+   "cause": "",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x4E": {
+   "name": "",
+   "desc": "PFN_LIST_CORRUPT Bug 检查的值为 0x0000004E。 这表示页框号 (PFN) 列表已损坏。",
+   "cause": "此错误通常是由于驱动程序传递了错误的内存描述符列表造成的。 例如，驱动程序可能已使用同一列表调用 MmUnlockPages 两次。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x3D": {
+   "name": "INTERRUPT_EXCEPTION_NOT_HANDLED",
+   "desc": "",
+   "cause": "",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0xC4": {
+   "name": "DRIVER_VERIFIER_DETECTED_VIOLATION",
+   "desc": "驱动程序调用 MmMapIoSpace ，但没有锁定 MDL 页面。 在进行此调用之前，由要映射的物理地址范围表示的物理页必须已锁定。",
+   "cause": "有关原因的说明，请参阅“参数”章节中每个代码的说明。 可以使用 !analyze -v 扩展获取更多信息。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x27": {
+   "name": "RDR_FILE_SYSTEM",
+   "desc": "RDR_FILE_SYSTEM 错误检查的值为 0x00000027。 此错误检查表明 SMB 重定向文件系统中出现了问题。",
+   "cause": "造成此错误检查的一个可能原因是非分页池内存耗尽。 如果非分页池内存完全耗尽，此错误可能会导致系统停止运行。 但是，在索引过程中，如果可用非分页池内存量非常低，则另一个需要非分页池内存的内核模式驱动程序也可能会触发此错误。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x3E": {
+   "name": "MULTIPROCESSOR_CONFIGURATION_NOT_SUPPORTED",
+   "desc": "",
+   "cause": "要保持对称，所有处理器必须具有相同的类型和级别。 该系统包含不同类型的处理器（例如一个 Pentium 处理器和一个 80486 处理器）。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x44": {
+   "name": "",
+   "desc": "MULTIPLE_IRP_COMPLETE_REQUESTS Bug 检查的值为 0x00000044。 这表示驱动程序已试图请求完成一个已完成的 IRP。",
+   "cause": "驱动程序已调用 IoCompleteRequest 来要求完成 IRP，但数据包已完成。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0xFC": {
+   "name": "ATTEMPTED_EXECUTE_OF_NOEXECUTE_MEMORY",
+   "desc": "ATTEMPTED_EXECUTE_OF_NOEXECUTE_MEMORY 错误检查的值为 0x000000FC。 这表示试图执行不可执行的内存。",
+   "cause": "",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x12B": {
+   "name": "",
+   "desc": "FAULTY_HARDWARE_CORRUPTED_PAGE Bug 检查的值为 0x0000012B。 此 Bug 检查表示 Windows 内存管理器检测到损坏。 该损坏只能由使用物理寻址访问内存的组件导致。",
+   "cause": "只有在物理内存访问导致内存损坏时，可能会出现此错误检查。 物理内存损坏的原因包括：",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x1000007E": {
+   "name": "",
+   "desc": "",
+   "cause": "",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x1": {
+   "name": "APC_INDEX_MISMATCH",
+   "desc": "此错误检查的最常见原因是文件系统或驱动程序禁用和重新启用 APC 的调用顺序不匹配。 关键数据项是 Thread&gt;CombinedApcDisable 字段。 CombinedApcDisable 字段由两个单独的 16 位字段组成：SpecialApcDisable 和 KernelApcDisable。 任一字段的负值表示驱动程序已分别禁用特殊或普通 APC，而没有重新启用它们。 正值表示驱动程序启用特殊或普通 APC 的次数过多。",
+   "cause": "可以使用 WinDbg 或基本故障排除技术解决此问题。",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0x1D": {
+   "name": "NO_SPIN_LOCK_AVAILABLE",
+   "desc": "",
+   "cause": "",
+   "advice": "想要尝试使用 Ask Learn 阐明或指导你完成本主题？"
+  },
+  "0xE2": {
+   "name": "",
+   "desc": "MANUALLY_INITIATED_CRASH 错误检查的值为 0x000000E2。 这表示用户有意从内核调试器或键盘启动崩溃转储。",
+   "cause": "",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x116": {
+   "name": "VIDEO_TDR_FAILURE",
+   "desc": "VIDEO_TDR_FAILURE 错误检查的值为 0x00000116。 此错误检查表明重置显示驱动程序并从超时恢复的尝试失败。",
+   "cause": "如果在处理最终用户命令或操作时系统出现完全冻结或挂起，图形中会出现常见的稳定性问题。 通常，GPU 忙于处理密集型图形操作，通常是在游戏过程中。 没有屏幕更新发生，用户假定其系统已冻结。 用户通常等待几秒钟，然后按电源按钮重新启动系统。 Windows 会尝试检测这些有问题的挂起情况，并动态恢复响应式桌面。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x124": {
+   "name": "WHEA_UNCORRECTABLE_ERROR",
+   "desc": "WHEA_UNCORRECTABLE_ERROR 错误检查的值为 0x00000124，表明发生了致命的硬件错误。 此错误检查使用 Windows 硬件错误体系结构 (WHEA) 提供的错误数据。",
+   "cause": "若要识别错误的特定原因，通常需要了解 WHEA_ERROR_RECORD 结构。 有关详细信息，请参阅本文的备注部分。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x101": {
+   "name": "",
+   "desc": "CLOCK_WATCHDOG_TIMEOUT Bug 检查的值为 0x00000101。 此 Bug 检查指示在多处理器系统中，辅助处理器上的预期时钟中断未在分配的时间间隔内收到。",
+   "cause": "指定的处理器未处理中断。 通常，当处理器无响应或死锁时，会发生此 Bug 检查。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x10E": {
+   "name": "VIDEO_MEMORY_MANAGEMENT_INTERNAL",
+   "desc": "VIDEO_MEMORY_MANAGEMENT_INTERNAL 错误检查的值为 0x0000010E。 这表示视频内存管理器遇到了无法从中恢复的条件。",
+   "cause": "此错误检查通常是由视频驱动程序行为不当引起的。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x117": {
+   "name": "VIDEO_TDR_TIMEOUT_DETECTED",
+   "desc": "VIDEO_TDR_TIMEOUT_DETECTED 实时转储的值为 0x00000117。 这表示显示驱动程序未能及时响应。",
+   "cause": "如果在处理最终用户命令或操作时系统出现完全冻结或挂起，图形中会出现常见的稳定性问题。 通常，GPU 忙于处理密集型图形操作，通常是在游戏过程中。 没有屏幕更新发生，用户假定其系统已冻结。 用户通常等待几秒钟，然后按电源按钮重新启动系统。 Windows 会尝试检测这些有问题的挂起情况，并动态恢复响应式桌面。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0x119": {
+   "name": "VIDEO_SCHEDULER_INTERNAL_ERROR",
+   "desc": "VIDEO_SCHEDULER_INTERNAL_ERROR bug 检查的值为 0x00000119。 此 bug 检查指示视频计划程序检测到严重冲突。",
+   "cause": "这是内部 OS 状态错误，通常是由内存损坏或硬件损坏引起的。",
+   "advice": "请升级到 Microsoft Edge 以使用最新的功能、安全更新和技术支持。"
+  },
+  "0xA0": {
+   "name": "INTERNAL_POWER_ERROR",
+   "desc": "Windows 内部电源错误——电源管理状态机或 ACPI 电源接口异常。常见诱因：显卡驱动缺失/异常（设备管理器显示 Microsoft 基本显示适配器）、BIOS/ACPI 固件电源管理缺陷、快速启动/睡眠唤醒路径问题。",
+   "cause": "软件/固件层面问题（电源管理驱动、ACPI、BIOS 固件、显卡驱动）——非 CPU/内存物理故障（除非伴随 WHEA 或内存错误事件）。",
+   "advice": "排查顺序：1) 安装/更新显卡驱动（本机 GPU 若显示 Microsoft 基本显示适配器=驱动未装，高度嫌疑） 2) 更新 BIOS 到最新（联想官网） 3) 关闭快速启动（powercfg /h off） 4) 检查电源计划与睡眠设置 5) 更新 ACPI/芯片组驱动。"
+  }
+ }
+}

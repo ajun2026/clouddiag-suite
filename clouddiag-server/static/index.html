@@ -363,6 +363,10 @@
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
       <button id="connect-toggle" onclick="toggleConnectPanel()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;" title="展开/收起一键连接命令">📶 连接你的电脑 ▾</button>
+      <!-- 2026-09-26 新增：回诊断台入口。原来只能点浏览器返回箭头，属单向导航死角 -->
+      <button id="back-diag-btn" onclick="backToDiag()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;" title="返回诊断台（快捷诊断工具）">📊 回诊断台</button>
+      <!-- 2026-09-26 新增：回工作台。主界面有 IDG 日志分析 / Win·Lin 工具 / 诊断记录等入口 -->
+      <button id="back-dash-btn" onclick="backToDashboard()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;" title="返回工作台（日志分析 / 工具 / 诊断记录）">🏠 工作台</button>
       <button id="room-close-btn" onclick="closeRoom()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--error);border:1px solid var(--error);border-radius:4px;cursor:pointer;">⛔ 结束诊断</button>
       <div style="position:relative;display:inline-block;">
         <button id="export-btn" onclick="toggleExportMenu(event)" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" title="导出对话 / 生成报告">📄 导出 ▾</button>
@@ -653,6 +657,8 @@ let approvalTimerInterval = null;
 let approvalDeadline = 0;
 let autoApproveT2 = localStorage.getItem('auto_approve_t2') === 'true';
 let reconnectAttempts = 0;
+// 2026-09-26：是否曾经连接成功过——用于区分"首连失败"与"断线重连"
+let wsHasConnectedOnce = false;
 let reconnectTimer = null;
 let heartbeatTimer = null;  // ws 心跳保活定时器（25s 一个 ping）
 
@@ -724,6 +730,7 @@ function connect(room) {
   ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
+    wsHasConnectedOnce = true;   // 2026-09-26：标记连上过，之后断开才提示重连
     reconnectAttempts = 0;
     document.getElementById('reconnect-btn').style.display = 'none';
     exportBtn.style.display = 'inline-block';
@@ -954,6 +961,18 @@ async function downloadReport() {
   } catch (e) { alert('网络错误: ' + e.message); }
 }
 
+// 2026-09-26 新增：回诊断台。与诊断台的「💬 转对话界面」互为对等入口，
+// 让用户在【诊断台 ⇄ 对话页】之间自由切换，不再依赖浏览器返回箭头。
+function backToDiag() {
+  if (!roomCode) { location.href = '/dashboard'; return; }
+  location.href = '/diag?room=' + encodeURIComponent(roomCode);
+}
+
+// 2026-09-26 新增：回工作台（主界面）
+function backToDashboard() {
+  location.href = '/dashboard';
+}
+
 async function closeRoom() {
   if (!roomCode) return;
   if (!confirm('结束诊断后：桥接器将断开、房间关闭、历史封存（仅管理员可查看）。\n确定结束诊断吗？')) return;
@@ -1021,12 +1040,16 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) rese
 resetIdleTimer();
 
 // 自动重连：无限重试（指数退避，封顶 30s——网络抖动自动恢复，无需手动刷新）
+// 2026-09-26：区分【首次连接】与【断线重连】——首连阶段不向用户播报"重连第 N 次"，
+// 避免刚打开页面/刚建房间就出现"自动重连中"的误导性提示（像是系统故障）。
 function scheduleReconnect() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (!roomCode || !ws || ws.readyState !== WebSocket.CLOSED) return;
   const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
   reconnectAttempts++;
-  addSystemMsg('[' + reconnectAttempts + '] 自动重连中，' + (delay / 1000) + 's');
+  if (wsHasConnectedOnce) {
+    addSystemMsg('[' + reconnectAttempts + '] 自动重连中，' + (delay / 1000) + 's');
+  }
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     if (!roomCode) return;

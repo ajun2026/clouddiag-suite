@@ -23,7 +23,7 @@ import (
 )
 
 // Version 桥接器版本号（构建时可用 -ldflags 覆盖）
-var Version = "1.0.5"
+var Version = "1.0.6"
 
 // ClientInfo 上报给服务器的本机身份信息
 type ClientInfo struct {

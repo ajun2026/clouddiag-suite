@@ -43,24 +43,27 @@ def analyze_overview(tslog: Path) -> dict:
     # ── Parse Systeminfo.txt ──
     sysinfo = read_text("Systeminfo.txt")
     sys_fields = {}
+    # 2026-09-26 修复【英文系统兼容】：原正则只匹配中文标签（"主机名:" 等），
+    # 客户机若装英文版 Windows，Systeminfo.txt 输出英文标签 → 全部字段提取失败、概览空白。
+    # 现改为中英双语匹配（`(?:中文|English)`），与系统语言无关。
     field_map = {
-        "hostname": r'主机名:\s+(.+)',
-        "os_name": r'OS 名称:\s+(.+)',
-        "os_version": r'OS 版本:\s+(.+)',
-        "os_manufacturer": r'OS 制造商:\s+(.+)',
-        "os_config": r'OS 配置:\s+(.+)',
-        "registered_owner": r'注册的所有人:\s+(.+)',
-        "registered_org": r'注册的组织:\s+(.+)',
-        "install_date": r'初始安装日期:\s+(.+)',
-        "boot_time": r'系统启动时间:\s+(.+)',
-        "manufacturer": r'系统制造商:\s+(.+)',
-        "model": r'系统型号:\s+(.+)',
-        "system_type": r'系统类型:\s+(.+)',
-        "bios_version": r'BIOS 版本:\s+(.+)',
-        "total_memory": r'物理内存总量:\s+([\d,]+)',
-        "available_memory": r'可用的物理内存:\s+([\d,]+)',
-        "domain": r'域:\s+(.+)',
-        "timezone": r'时区:\s+(.+)',
+        "hostname": r'(?:主机名|Host Name):\s+(.+)',
+        "os_name": r'(?:OS 名称|OS Name):\s+(.+)',
+        "os_version": r'(?:OS 版本|OS Version):\s+(.+)',
+        "os_manufacturer": r'(?:OS 制造商|OS Manufacturer):\s+(.+)',
+        "os_config": r'(?:OS 配置|OS Configuration):\s+(.+)',
+        "registered_owner": r'(?:注册的所有人|Registered Owner):\s+(.+)',
+        "registered_org": r'(?:注册的组织|Registered Organization):\s+(.+)',
+        "install_date": r'(?:初始安装日期|Original Install Date):\s+(.+)',
+        "boot_time": r'(?:系统启动时间|System Boot Time):\s+(.+)',
+        "manufacturer": r'(?:系统制造商|System Manufacturer):\s+(.+)',
+        "model": r'(?:系统型号|System Model):\s+(.+)',
+        "system_type": r'(?:系统类型|System Type):\s+(.+)',
+        "bios_version": r'(?:BIOS 版本|BIOS Version):\s+(.+)',
+        "total_memory": r'(?:物理内存总量|Total Physical Memory):\s+([\d,]+)',
+        "available_memory": r'(?:可用的物理内存|Available Physical Memory):\s+([\d,]+)',
+        "domain": r'(?:域|Domain):\s+(.+)',
+        "timezone": r'(?:时区|Time Zone):\s+(.+)',
     }
     for key, pattern in field_map.items():
         m = re.search(pattern, sysinfo)
@@ -80,7 +83,13 @@ def analyze_overview(tslog: Path) -> dict:
 
     # Extract NICs (only after "网卡:" header, line-by-line)
     nics = []
-    nic_section_idx = sysinfo.find("网卡:")
+    # 2026-09-26：中英双语（英文系统输出 "Network Card(s):" 或 "NIC(s):"）
+    nic_section_idx = -1
+    for _nic_mark in ("网卡:", "Network Card(s):", "NIC(s):", "Network Card:"):
+        _i = sysinfo.find(_nic_mark)
+        if _i >= 0:
+            nic_section_idx = _i
+            break
     if nic_section_idx >= 0:
         nic_section = sysinfo[nic_section_idx:]
         current_nic = None
@@ -100,10 +109,10 @@ def analyze_overview(tslog: Path) -> dict:
             if not current_nic:
                 continue
             # Match status
-            sm = re.search(r'状态:\s*(.+)', line)
+            sm = re.search(r'(?:状态|Status):\s*(.+)', line)
             if sm: current_nic["status"] = sm.group(1).strip()
             # Match DHCP
-            dm = re.search(r'启用 DHCP:\s*(.+)', line)
+            dm = re.search(r'(?:启用 DHCP|DHCP Enabled):\s*(.+)', line)
             if dm: current_nic["dhcp"] = dm.group(1).strip()
             # IP section
             if 'IP 地址' in line:

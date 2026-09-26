@@ -178,11 +178,6 @@ async def index(request: Request):
     return jinja_env.get_template("upload.html").render(history_json=json.dumps(history, ensure_ascii=False), current_user=user["username"] if user else "", is_admin=(user and user["role"] == "admin"), is_guest=(user and user["role"] == "guest"))
 
 
-@app.get("/report/{job_id}", response_class=HTMLResponse)
-async def view_report(job_id: str):
-    return jinja_env.get_template("report.html").render(job_id=job_id)
-
-
 @app.get("/analyze/{job_id}", response_class=HTMLResponse)
 async def analyze_page(request: Request, job_id: str):
     """New unified analysis page with file tree + tabs"""

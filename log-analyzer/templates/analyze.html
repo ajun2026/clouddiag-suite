@@ -12,11 +12,19 @@
             display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
         .header a { color: var(--info); text-decoration: none; font-size: 14px; }
         .header h1 { font-size: 18px; color: var(--heading); flex: 1; }
-        .layout { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: calc(100vh - 46px); }
+        /* 2026-09-26：整页固定高度——左侧文件树与右侧内容区【各自独立滚动】，
+           不再整页滚动（原来 .layout 用 min-height，页面高度随内容增长 → 滚轮滚动时
+           左侧文件树与右侧内容一起被卷走，用户看不到左侧列表定位） */
+        .layout { display: grid; grid-template-columns: 300px 1fr; gap: 0;
+                  height: calc(100vh - 46px); min-height: 0; overflow: hidden; }
         @media (max-width: 768px) { .layout { grid-template-columns: 1fr; } }
-        .sidebar { background: var(--surface); padding: 16px; overflow-y: auto; }
+        .sidebar { background: var(--surface); padding: 16px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        /* 2026-09-26：侧边栏顶部导航固定（flex-shrink:0），文件树独立滚动 */
+        .sidebar-head { flex-shrink: 0; padding-bottom: 10px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+        .file-tree { flex: 1; min-height: 0; overflow-y: auto; }
         .sidebar h3 { font-size: 14px; color: var(--text2); margin-bottom: 12px; }
         .file-tree { font-size: 13px; }
+        /* 注意：.file-tree 的 flex/overflow 规则见上方（侧边栏固定顶部导航段），此处仅保留字号 */
         .tree-dir { color: var(--info); font-weight: 600; cursor: pointer; padding: 3px 0; display: flex; align-items: center; gap: 4px; }
         .tree-dir:hover { color: #79c0ff; }
         .tree-dir .arrow { font-size: 10px; width: 12px; display: inline-block; transition: transform 0.15s; }
@@ -32,18 +40,22 @@
         .tree-children { display: none; padding-left: 12px; }
         .tree-children.open { display: block; }
         .file-count { font-size: 11px; color: var(--text2); }
-        .main { padding: 24px; }
-        .tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; border-bottom: 1px solid var(--surface2); padding-bottom: 12px; }
+        .main { padding: 24px; display: flex; flex-direction: column; min-height: 0; height: calc(100vh - 46px); overflow: hidden; }
+        /* 2026-09-26：标签栏固定不随内容滚动（与诊断台/对话页一致）
+           改前：.tabs 在滚动容器内 → 上下翻滚时标签栏被滚走，用户看不到当前页签 */
+        .tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: nowrap; overflow-x: auto; border-bottom: 1px solid var(--surface2);
+                padding-bottom: 12px; flex-shrink: 0; }
         .tab { padding: 8px 20px; border-radius: 6px 6px 0 0; font-size: 14px; cursor: pointer; background: var(--surface2); color: var(--text2);
-            border: 1px solid transparent; transition: all 0.15s; white-space: nowrap; }
+            border: 1px solid transparent; transition: all 0.15s; white-space: nowrap; flex-shrink: 0; }
         .tab:hover { color: #c9d1d9; border-color: var(--border); }
         .tab.active { background: var(--bg); color: var(--info); border-color: var(--info); border-bottom-color: var(--bg); font-weight: 600; }
-        .tab-content { min-height: 300px; }
+        /* 内容区独立滚动（标签栏固定在上面） */
+        .tab-content { min-height: 300px; flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
         .loading { text-align: center; padding: 60px; color: var(--text2); }
         .loading .spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--surface2); border-top-color: var(--info);
             border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        /* Report styles (inherited from report.html) */
+        /* 报告样式（原 report.html 已废弃删除，样式保留在 analyze.html 内） */
         .card { background: var(--surface); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
         .card h3 { font-size: 16px; color: var(--text); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--surface2); }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -173,11 +185,14 @@
 <h1 id="page-title" style="display:none;">🔬 日志分析中心</h1>
     <div class="layout">
         <div class="sidebar" id="sidebar">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-                <a href="/log-analyzer/" style="color:var(--info);text-decoration:none;font-size:13px;">← 返回主界面</a>
-                <span style="font-size:11px;color:var(--text2);" id="job-id-display"></span>
+            <!-- 2026-09-26：只保留「← 返回主界面」（去掉"日志分析首页"——两者都是"离开本页"，
+                 功能重复；需要上传新包时回工作台再点 IDG 即可） -->
+            <div class="sidebar-head">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+                    <a href="/dashboard" style="color:var(--info);text-decoration:none;font-size:13px;" title="返回工作台">← 返回主界面</a>
+                </div>
+                <h3 style="margin-bottom:0;">📁 诊断文件 <span style="font-size:11px;color:var(--text2);" id="job-id-display"></span></h3>
             </div>
-            <h3>📁 诊断文件</h3>
             <div class="file-tree" id="file-tree">
                 <div class="loading" style="padding:20px;"><div class="spinner"></div><p>加载中...</p></div>
             </div>
@@ -185,25 +200,25 @@
         <div class="main">
     <div class="tabs" id="tabs">
         {% if os_type in ('other', 'bmc') %}
-        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>
-        <div class="tab deep-tab" data-type="chat-hermes">🔬 深度分析</div>{% endif %}
+        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>{% endif %}
         <span id="file-tabs"></span>
         {% else %}
         {% if os_type == 'linux' %}
+        <!-- 2026-09-26 精简：与 Windows 侧口径统一（去掉「深度分析」——与 AI 分析同类） -->
         <div class="tab" data-type="linux_overview">📄 系统概览</div>
-        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>
-        <div class="tab deep-tab" data-type="chat-hermes">🔬 深度分析</div>{% endif %}
+        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>{% endif %}
         <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
         <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
         <span id="file-tabs"></span>
         {% elif os_type == 'windows' %}
+        <!-- 2026-09-26 精简：7 个页签 → 4 个（主人确认）
+             去掉「整体总结」（是前三项的汇总，重复）、「深度分析」（与 AI 分析同类，只是后端通道不同）、
+             「SIOlog」（仅部分机型有，已改为按文件自动出现）
+             保留：系统概览（基础事实）/ 系统诊断（错误事件+Dump摘要）/ Dump 分析 / AI 分析 -->
         <div class="tab" data-type="overview">📄 系统概览</div>
         <div class="tab" data-type="diagnostics">📋 系统诊断</div>
         <div class="tab" data-type="dump">💾 Dump 分析</div>
-        <div class="tab" data-type="siolog">📋 SIOlog</div>
-        <div class="tab" data-type="summary">📊 整体总结</div>
-        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>
-        <div class="tab deep-tab" data-type="chat-hermes">🔬 深度分析</div>{% endif %}
+        {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>{% endif %}
         <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
         <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
         <span id="file-tabs"></span>

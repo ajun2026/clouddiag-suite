@@ -150,7 +150,13 @@
   .tab.active{color:var(--info);border-bottom-color:var(--info);font-weight:600}
   .tab .badge-mini{background:var(--error);color:#fff;font-size:10px;padding:0 5px;border-radius:9px;line-height:15px}
   .tab-panel{display:none}
-  .tab-panel.active{display:block}
+  /* 2026-09-26：右侧面板改为【纵向 flex 布局】——页签固定不滚动，只有内容区滚动。
+     改前：.result-panel{overflow-y:auto} 让页签跟着内容一起滚走，用户看不到当前页签 */
+  .result-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:18px 22px 0;min-width:0}
+  /* 页签固定（flex-shrink:0 防止被压缩） */
+  .tabs{flex:0 0 auto}
+  /* 内容区独立滚动 */
+  .tab-panel.active{display:flex;flex-direction:column;flex:1;min-height:0;overflow-y:auto;padding-bottom:60px}
 
   /* 对话流 */
   .chat-flow{max-width:760px}
@@ -184,6 +190,8 @@
   <span class="spacer"></span>
   <button class="hdr-btn" id="btn-connect" onclick="toggleConnectPanel()">📶 连接你的电脑 ▾</button>
   <button class="hdr-btn" onclick="backToChat()">💬 转对话界面</button>
+  <!-- 2026-09-26 新增：回工作台。诊断台/对话页需能回到主界面（IDG 日志分析、Win/Lin 工具、诊断记录等入口都在那里） -->
+  <button class="hdr-btn" onclick="backToDashboard()" title="返回工作台（日志分析 / 工具 / 诊断记录）">🏠 工作台</button>
   <button class="hdr-btn" onclick="closeRoom()" style="color:#f85149;">⛔ 结束诊断</button>
   <button class="hdr-btn" id="btn-export" onclick="exportReport()">📄 导出报告</button>
 </header>
@@ -194,7 +202,7 @@
   <div id="cp-tabs" style="display:flex;gap:6px;margin-bottom:10px;">
     <!-- Windows：PowerShell 命令（推荐）/ exe 下载 -->
     <button class="cp-tab active" data-tab="ps" data-os="windows" onclick="switchConnectTab('ps')">PowerShell 命令（推荐）</button>
-    <button class="cp-tab" data-tab="exe" data-os="windows" onclick="switchConnectTab('exe')">exe 下载</button>
+    <button class="cp-tab" data-tab="exe" data-os="windows" onclick="switchConnectTab('exe')">一键连接（推荐）</button>
     <!-- Linux：一键安装命令 -->
     <button class="cp-tab" data-tab="linux" data-os="linux" onclick="switchConnectTab('linux')">Linux</button>
   </div>
@@ -202,7 +210,8 @@
     <div id="cp-cmd" style="background:#010409;border:1px solid var(--border);border-radius:7px;padding:11px 13px;
       font-family:Consolas,Monaco,monospace;font-size:11.5px;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;max-height:190px;overflow:auto;"></div>
     <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-      <button class="hdr-btn" onclick="copyConnectCmd()">📋 复制命令</button>
+      <button class="hdr-btn" id="cp-dl-bat" onclick="downloadBat()" style="display:none;background:#238636;border-color:#2ea043;color:#fff;font-weight:600;">⬇ 下载一键连接脚本（.bat）</button>
+      <button class="hdr-btn" id="cp-copy-btn" onclick="copyConnectCmd()">📋 复制命令</button>
       <span id="cp-hint" style="font-size:11.5px;color:var(--text3);"></span>
     </div>
   </div>
@@ -696,6 +705,7 @@ function connect() {
 
   ws.onopen = () => {
     reconnectAttempts = 0;
+    wsHasConnectedOnce = true;   // 2026-09-26：标记"曾经连上过"，之后断开才显示重连次数
     setConnState(true);
     ws.send(JSON.stringify({ type: 'auto_approve_toggle', enabled: true }));
     loadHistory();
@@ -774,18 +784,43 @@ function connect() {
   };
 
   ws.onclose = () => {
+    // 2026-09-26 修复：区分【首次连接】与【断线重连】。
+    // 原实现把首次连接失败也计入 reconnectAttempts，导致用户刚打开页面就看到
+    // "服务断开 · 4s 后重连（第 3 次）"，像是系统出了故障，体验很差。
+    // 现在：首连阶段只显示"正在连接服务…"，不暴露重试次数；
+    //       只有【曾经连接成功过】再断开，才显示"服务断开 · Ns 后重连（第 N 次）"。
+    const hadConnected = wsHasConnectedOnce;
     setConnState(false);
-    if (reconnectAttempts < 8) {
-      reconnectAttempts++;
-      const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts - 1));
-      setConnState(false, Math.round(delay/1000) + 's 后重连（第 ' + reconnectAttempts + ' 次）…');
-      setTimeout(connect, delay);
+    if (reconnectAttempts >= 8) {
+      // 达到上限：明确提示，不再伪装成"重连中"
+      setConnState(false, null, hadConnected ? '已断开（重试次数已达上限，请刷新页面）'
+                                             : '无法连接服务（请检查网络后刷新页面）');
+      return;
     }
+    reconnectAttempts++;
+    const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts - 1));
+    if (hadConnected) {
+      setConnState(false, Math.round(delay/1000) + 's 后重连（第 ' + reconnectAttempts + ' 次）…');
+    } else {
+      // 首次连接尚未成功 —— 不显示"服务断开"，只提示正在连接
+      // （刚打开页面/刚建房间时属正常握手过程，不应让用户以为系统故障）
+      setConnStateConnecting();
+    }
+    setTimeout(connect, delay);
   };
   ws.onerror = () => { setConnState(false); };
 }
 
-function setConnState(ok, reconnecting) {
+// 2026-09-26 新增：首次连接阶段的状态显示
+// 不显示"服务断开"（那会让用户误以为系统故障），而是中性的"正在连接服务…"
+function setConnStateConnecting() {
+  const dot = document.querySelector('.status-dot');
+  if (dot) { dot.style.background = '#d29922'; dot.style.boxShadow = 'none'; }
+  const el = document.getElementById('hdr-svc');
+  if (el) { el.textContent = '正在连接服务…'; el.style.color = '#d29922'; }
+}
+
+function setConnState(ok, reconnecting, explicitText) {
   const dot = document.querySelector('.status-dot');
   if (dot) { dot.style.background = ok ? '#3fb950' : '#f85149'; dot.style.boxShadow = ok ? '0 0 6px #3fb950' : 'none'; }
   const el = document.getElementById('hdr-svc');
@@ -793,6 +828,9 @@ function setConnState(ok, reconnecting) {
   if (ok) {
     el.textContent = '服务已连接';
     el.style.color = '';
+  } else if (explicitText) {
+    el.textContent = explicitText;
+    el.style.color = '#f85149';
   } else if (reconnecting) {
     // 顶栏直接显示重连进度（原左下角浮标签的功能并入此处）
     el.textContent = '服务断开 · ' + reconnecting;
@@ -998,6 +1036,9 @@ function renderMd(md) {
 }
 
 // ── 历史记录（最近一次诊断结果回填）──
+// 2026-09-26：去掉"📜 已加载该房间最近一次诊断输出"提示行。
+// 原提示目的是说明"这不是刚跑的结果"，但每次刷新都出现显得啰嗦；
+// 历史回填功能保留（诊断结果直接展示），不再额外弹提示。
 async function loadHistory() {
   try {
     const r = await fetch('/api/history/' + encodeURIComponent(ROOM));
@@ -1007,8 +1048,6 @@ async function loadHistory() {
     if (msgs.length) {
       const last = msgs[msgs.length - 1];
       renderResult(ROOM, last.content || '');
-      const p = document.getElementById('result-panel');
-      if (p) p.insertAdjacentHTML('afterbegin', '<div style="font-size:12px;color:#6e7681;margin-bottom:8px;">📜 已加载该房间最近一次诊断输出</div>');
     } else {
       const p = document.getElementById('result-panel');
       if (p) p.innerHTML = '<div style="padding:30px 0;color:#8b949e;font-size:13.5px;">👈 从左侧选择一个诊断项目开始调查</div>';
@@ -1371,9 +1410,11 @@ function applyConnectTabsByOS() {
   if (t) t.textContent = isLinux
     ? '📶 在客户机（Linux）上执行以下命令'
     : '📶 在客户机（Windows）上执行以下命令';
+  // 同步"下载一键连接脚本"按钮显隐
+  if (typeof syncBatButtonVisible === 'function') syncBatButtonVisible();
 }
 
-function switchConnectTab(t) { curConnTab = t; document.querySelectorAll('.cp-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === t)); renderConnectCmd(); }
+function switchConnectTab(t) { curConnTab = t; document.querySelectorAll('.cp-tab').forEach(x => x.classList.toggle('active', x.dataset.tab === t)); renderConnectCmd(); syncBatButtonVisible(); }
 
 // ══ 诊断项按房间系统过滤（2026-09-24）══
 // 房间系统 = linux  → 只显示 data-platform="all" 与 "linux" 的诊断项
@@ -1422,8 +1463,13 @@ function renderConnectCmd() {
     text = conn.powershell || '（未获取到 PowerShell 命令）';
     h = '在客户机 PowerShell（管理员）中整段粘贴执行';
   } else if (curConnTab === 'exe') {
-    text = dl.exe ? ('下载并运行：' + dl.exe + '\n\n然后在客户机上运行桥接器并填入房间码 ' + ROOM) : '（未获取到下载地址）';
-    h = '适合无法使用命令行的场景';
+    // 2026-09-25：一键连接页签——只显示绿色下载按钮（文字说明放到按钮下方的提示行）。
+    // 客户体验：点按钮 → 下载 .bat → 双击（UAC 点"是"）→ 自动下载 exe 并带房间信息连接。
+    // 说明：不再在上方文本框里罗列脚本地址（冗余、无意义）。
+    text = '';
+    h = '点击左侧绿色按钮下载脚本 → 双击运行 → UAC 点"是"，即可自动连接（无需输入房间码）';
+    const el = document.getElementById('cp-cmd');
+    if (el) el.style.display = 'none';   // 隐藏命令框（本页签无命令文本）
   } else {
     // 2026-09-23 修复：键名应为 conn.linux（服务端返回 powershell / windows_bat / linux）。
     // 原写 conn.linux_sh 取不到值 → 回退成 PowerShell 命令 → Linux 客户复制后必然语法错误。
@@ -1433,7 +1479,64 @@ function renderConnectCmd() {
     h = '在客户机终端（bash）执行';
   }
   el.textContent = text;
+  // 2026-09-25：命令框显隐——仅 PowerShell / Linux 页签显示；
+  // 「一键连接」页签只留绿色下载按钮 + 「复制命令」按钮也随之隐藏。
+  const isBatTab = (curConnTab === 'exe');
+  el.style.display = isBatTab ? 'none' : '';
+  const copyBtn = document.getElementById('cp-copy-btn');
+  if (copyBtn) copyBtn.style.display = isBatTab ? 'none' : '';
   if (hint) hint.textContent = h + (os ? '（本房间系统：' + os + '）' : '');
+  if (typeof syncBatButtonVisible === 'function') syncBatButtonVisible();
+}
+
+// ══ 下载一键连接脚本（.bat）══
+// 2026-09-25：Windows 客户只需点这个按钮 → 下载 .bat → 双击（UAC 点"是"）
+// → 脚本自动提权、自动下载桥接器、自动带上房间信息连接。无需手输房间码。
+//
+// 2026-09-25 二次修正：原先用 <a href=接口地址 download> 直接点击，
+// 浏览器会【一边下载一边把页面导航到该接口】（服务端带 attachment 头与之打架），
+// 导致下载成功但页面跳到 /api/room_bat/xxx 并报 ERR_CONNECTION_RESET。
+// 现改为：fetch 取内容 → 造 Blob URL → 下载，全程不发生页面导航。
+async function downloadBat() {
+  const d = roomConnData || {};
+  const dl = d.downloads || {};
+    // 2026-09-25 二次修正：优先用【同源相对路径】下载 .bat。
+    // 原因：服务端 downloads.bat 返回的是公网绝对地址（如 https://clouddiag.online/...），
+    // 当页面通过其他来源访问（如内网 IP / 反向代理 / 本地调试）时会变成跨域 fetch → Failed to fetch。
+    // 用相对路径（/api/room_bat/XXX）始终同源，且保留 dl.bat 作为兜底。
+    const url = ROOM ? ('/api/room_bat/' + encodeURIComponent(ROOM)) : (dl.bat || '');
+  const hint = document.getElementById('cp-hint');
+  const btn = document.getElementById('cp-dl-bat');
+  if (!url) { alert('未获取到一键连接脚本地址，请刷新页面重试'); return; }
+
+  const oldText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 下载中…'; }
+  try {
+    const resp = await fetch(url, { credentials: 'include' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob = await resp.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl;
+    a.download = 'clouddiag-connect-' + (ROOM || 'room') + '.bat';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objUrl), 2000);
+    if (hint) hint.textContent = '✅ 已下载 → 双击该 .bat 运行（UAC 弹窗点"是"）即可自动连接';
+  } catch (e) {
+    if (hint) hint.textContent = '下载失败：' + e.message + '（可复制上方地址到浏览器地址栏打开）';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldText; }
+  }
+}
+
+// 根据当前页签控制"下载一键连接脚本"按钮显隐（仅 Windows 一键连接页签显示）
+function syncBatButtonVisible() {
+  const b = document.getElementById('cp-dl-bat');
+  if (!b) return;
+  const os = ((roomConnData || {}).os || '').toLowerCase();
+  b.style.display = (curConnTab === 'exe' && os !== 'linux') ? '' : 'none';
 }
 
 function copyConnectCmd() {
@@ -1508,6 +1611,13 @@ async function exportReport(silent) {
 
 // ── 返回对话界面 ──
 function backToChat() { location.href = '/chat?room=' + encodeURIComponent(ROOM); }
+// 2026-09-26 新增：回工作台（主界面）
+// 主界面里有 IDG 日志分析、Win/Lin 工具、诊断记录、下载桥接器等入口；
+// 原来诊断台/对话页没有出口，用户只能靠浏览器返回或改地址栏。
+function backToDashboard() {
+  // 房间未结束时直接跳工作台（房间在后台保持）；如需结束诊断由用户点「⛔ 结束诊断」
+  location.href = '/dashboard';
+}
 
 // ── 启动 ──
 (async function () {

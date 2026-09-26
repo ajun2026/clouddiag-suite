@@ -424,7 +424,7 @@
         <div class="nav-divider"></div>
         <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('workorders')" id="nav-workorders"><span data-i18n="nav_workorders">📋 诊断记录</span></div><!-- FIELD_HIDE_END -->
         <div class="nav-item" onclick="switchTab('tools-win')" id="nav-tools-win"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
-        <div class="nav-item" onclick="switchTab('idg')" id="nav-idg"><span>📊 IDG 日志分析</span></div>
+        <div class="nav-item" onclick="openIdgPage()" id="nav-idg"><span>📊 IDG 日志分析</span></div>
         <div class="nav-item" onclick="switchTab('tools-linux')" id="nav-tools-linux"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
         <div class="nav-divider"></div>
         <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('password')" id="nav-password"><span data-i18n="nav_password">🔒 修改密码</span></div>
@@ -464,9 +464,9 @@
         // 游客（guest）：仅 URL 明确 ?role=guest 时首帧置灰；localStorage 残留交给 loadMe 校准（防工程师误置灰）
         if (r === 'guest') {
           if (urlRole === 'guest') document.documentElement.classList.add('guest-mode');
-          // 游客自动进入 IDG 日志分析（默认页是首页，但 guest-mode 下被隐藏 → 空白）
+          // 游客自动进入 IDG 日志分析（2026-09-26：IDG 已改为独立页面 → 直接跳转）
           document.addEventListener('DOMContentLoaded', function () {
-            switchTab('idg');
+            openIdgPage();
           });
           return;
         }
@@ -496,7 +496,7 @@
         });
       })();
       </script>
-      <div class="sidebar-footer" id="ver-display">v0.13.7</div>
+      <div class="sidebar-footer" id="ver-display">v—</div>
     </aside>
 
     <main class="content">
@@ -1548,10 +1548,17 @@ function switchTab(name) {
 }
 
 // 方案 A：工具上传 IDG 后——dashboard 内嵌打开分析页（不跳独立页——2026-09-08 主人要求）
+// 2026-09-26：IDG 日志分析改为【独立全屏页面】——不再 iframe 内嵌。
+// 原因：内嵌时左侧工作台侧边栏一直占位，日志分析（内容宽、表格多）显得拥挤；
+//       改为与诊断台/对话页一致的"全屏专注"体验。
+// 返回入口：IDG 页面顶部自带「← 返回主界面」（由 log-analyzer 侧提供）。
+function openIdgPage() {
+  location.href = '/log-analyzer/';
+}
+
 function openIdgJob(jobId) {
-  switchTab('idg');
-  const f = document.getElementById('idg-frame');
-  if (f) f.src = '/log-analyzer/analyze/' + jobId + '?v=' + Date.now();
+  // 直接跳独立页面并定位到指定 job（不再走 iframe）
+  location.href = '/log-analyzer/analyze/' + encodeURIComponent(jobId);
 }
 
 // 打开对话（iframe 加载 /chat?room=XXX，不跳页）
@@ -1772,7 +1779,9 @@ function fieldGuideBat() {
 
 // ===== 用户信息 =====
 
-// 左下角版本号动态获取（2026-08-30——替换同步时硬编码 v0.13.7 遗留，改动态免每次打版手改）
+// 左下角版本号动态获取（2026-08-30 引入）
+// 2026-09-25：HTML 占位值原为硬编码 "v0.13.7"，刷新时会先闪出这个旧版本再变成真实版本
+// （曾是 0.13.x 时期的同步遗留）。占位值改为中性的 "v—"，避免显示错误版本号。
 (function () {
   fetch('/api/health', { headers: { 'Accept': 'application/json' } })
     .then(r => r.json())

@@ -1133,7 +1133,7 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.5", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.6", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1815,6 +1815,104 @@ def get_ws_url(request: Request) -> str:
     return get_public_url(request).replace("https://", "wss://").replace("http://", "ws://")
 
 
+def get_fallback_url(public_url: str) -> str:
+    """读取"备用访问地址"——2026-09-26 新增（普适性修复）。
+
+    背景：此前代码在"HTTPS+443"时硬编码附加 :8443 备选——
+    但 8443 只是【本项目的生产部署选择】，不是普适规则：
+      · 有人用 9443 / 其他端口
+      · 有人（如 FRP 内网穿透）只暴露一个端口，没有备用地址
+      · 有人纯 HTTP/IP 部署，根本不需要降级
+
+    正确做法：把备用地址做成【可配置项】，未配置就不降级。
+    代码不再对任何部署形态做假设。
+
+    配置方式（clouddiag-server/.env）：
+        PUBLIC_URL_FALLBACK=https://clouddiag.online:8443
+
+    读取优先级：
+      1) .env 的 PUBLIC_URL_FALLBACK（推荐，显式配置）
+      2) 未配置 → 返回空字符串（不降级）
+    """
+    fb = os.getenv("PUBLIC_URL_FALLBACK", "").strip().rstrip("/")
+    if fb and fb != (public_url or "").rstrip("/"):
+        return fb
+    return ""
+
+
+def get_download_candidates(request: Request) -> list:
+    """工具/脚本下载的【候选地址列表】（按优先级排序）——2026-09-26 新增。
+
+    设计目标：任何部署形态都能正确下载工具，不假设"一定有域名/443/8443"。
+
+      · 纯 HTTP / 内网 IP / 非标端口部署（未配置备用地址）
+          → 只有当前地址一个候选
+      · 配置了 PUBLIC_URL_FALLBACK（如生产环境 443 可能被中间设备拦截）
+          → [主地址, 备用地址]
+
+    返回示例：
+        ["http://192.168.1.100:8000"]
+        ["https://clouddiag.online", "https://clouddiag.online:8443"]
+    """
+    public_url = get_public_url(request).rstrip("/")
+    candidates = [public_url]
+    fb = get_fallback_url(public_url)
+    if fb:
+        candidates.append(fb)
+    return candidates
+
+
+def build_download_prefix_ps(candidates: list, url_path: str) -> str:
+    """生成 PowerShell 片段：依次尝试候选地址，成功后把基址存入 $SRV。
+
+    用法（拼接在命令开头）：
+        $SRV=''; foreach ($c in @('url1','url2')) { if (下载测试通过) { $SRV=$c; break } }
+        if (!$SRV) { Write-Output 'DOWNLOAD_FAIL'; exit }
+    之后用 "$SRV<url_path>" 下载具体文件。
+
+    2026-09-26 新增：解决"HTTPS+443 被拦截时工具下载失败"及
+    "非标端口部署无法下载"两类问题。
+    """
+    arr = ",".join("'" + u + "'" for u in candidates)
+    return (
+        "$SRV=''; "
+        f"foreach ($c in @({arr})) {{ "
+        'curl.exe -sL --max-time 8 -o NUL "$c/api/health" 2>$null; '
+        "if ($LASTEXITCODE -eq 0) { $SRV=$c; break } "
+        "}; "
+        "if (!$SRV) { Write-Output 'NET_UNREACHABLE'; exit }; "
+    )
+
+
+def get_public_url_by_room(room) -> str:
+    """WebSocket 上下文（无 Request 对象）下推导部署地址——2026-09-26 新增。
+
+    优先 .env 的 PUBLIC_URL；未配置则用房间记录的实际访问来源。
+    """
+    configured = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
+    if configured:
+        return configured
+    # 回退：用房间记录里浏览器连接时用的地址（无则用本机默认）
+    origin = getattr(room, "browser_origin", "") or ""
+    return origin.rstrip("/") or "http://127.0.0.1:8000"
+
+
+def get_download_candidates_by_url(public_url: str) -> list:
+    """由地址字符串推导下载候选列表（get_download_candidates 的 URL 版）。
+
+    规则同 get_download_candidates：备用地址来自 PUBLIC_URL_FALLBACK 配置，
+    未配置则不降级（不对部署形态做假设）。
+    """
+    public_url = (public_url or "").rstrip("/")
+    if not public_url:
+        return []
+    candidates = [public_url]
+    fb = get_fallback_url(public_url)
+    if fb:
+        candidates.append(fb)
+    return candidates
+
+
 # 脚本类文件（bridge.ps1 / install-linux.sh）动态渲染：
 # 模板以 {{PUBLIC_URL}} 占位，下载时由服务器注入实际部署地址，
 # 保证任何服务器部署下载到的脚本自带正确地址，仓库本身零硬编码。
@@ -1829,12 +1927,20 @@ _SCRIPT_TEMPLATES = {
 
 
 async def _render_script(script_name: str, request: Request) -> Response:
-    """渲染脚本模板：{{PUBLIC_URL}} / {{WS_URL}} 由服务器注入实际部署地址。"""
+    """渲染脚本模板：{{PUBLIC_URL}} / {{WS_URL}} / {{PUBLIC_URL_FALLBACK}} 由服务器注入。
+
+    2026-09-26：新增 {{PUBLIC_URL_FALLBACK}} —— 备用访问地址改为可配置项，
+    未配置时注入空串（模板里等价于"不降级"）。
+    """
     tpl_path = static_dir / f"{script_name}.tmpl"
     if not tpl_path.exists():
         return JSONResponse({"error": f"template {script_name}.tmpl missing"}, status_code=500)
     content = tpl_path.read_text(encoding="utf-8")
-    content = content.replace("{{PUBLIC_URL}}", get_public_url(request)).replace("{{WS_URL}}", get_ws_url(request))
+    _public = get_public_url(request)
+    content = (content
+               .replace("{{PUBLIC_URL}}", _public)
+               .replace("{{WS_URL}}", get_ws_url(request))
+               .replace("{{PUBLIC_URL_FALLBACK}}", get_fallback_url(_public) or _public))
     return Response(content=content, media_type=_SCRIPT_TEMPLATES[script_name])
 
 
@@ -1940,7 +2046,7 @@ async def quick_diagnoses(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.5"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.6"}
 
 
 @app.post("/api/debug_log")
@@ -2317,18 +2423,13 @@ async def room_connect(room_code: str, request: Request):
     ws_url = get_ws_url(request)
     _domain = urllib.parse.urlparse(public_url).netloc.split(":")[0]
 
-    # 部署地址动态化（2026-08-27 社区反馈 Bug 5）：
-    # HTTPS+443 部署：保留 8443 降级（线上行为不变）
-    # HTTP / 非标端口部署：直接用部署地址（不再硬编码 https://域:443/8443）
-    _parsed = urllib.parse.urlparse(public_url)
+    # 部署地址动态化（2026-08-27 社区反馈 Bug 5 / 2026-09-26 普适性修复）：
+    # 备用地址改为【可配置项 PUBLIC_URL_FALLBACK】——不再硬编码 :8443。
+    # 未配置备用地址时，_fallback == _primary（脚本里等价于不降级）。
     _primary = public_url.rstrip("/")
-    if _parsed.scheme == "https" and (_parsed.port or 443) == 443:
-        _fallback = f"https://{_domain}:8443"
-        _ws_fallback = f"wss://{_domain}:8443"
-    else:
-        _fallback = _primary
-        _ws_fallback = _primary.replace("http", "ws", 1)
-    _ws_primary = _primary.replace("http", "ws", 1)
+    _fallback = get_fallback_url(_primary) or _primary
+    _ws_primary = _primary.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+    _ws_fallback = _fallback.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
 
     # 连接令牌：有效期内复用（多次获取不互相顶掉）
     token = get_or_create_room_token(room_code)
@@ -2339,11 +2440,21 @@ async def room_connect(room_code: str, request: Request):
         + '$env:BRIDGE_SERVER=($u -replace "^http","ws"); $env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; '
         + 'iex (iwr "$u/static/bridge.ps1" -UseBasicParsing).Content'
     )
+    # 2026-09-25 升级：加入【自动提权】（桥接器读 BIOS/驱动等需要管理员权限）。
+    # 双击后若当前非管理员，脚本会用 UAC 自我提权重启；随后自动下载 exe 并带房间信息连接。
+    # 客户全程只需：双击 → 点"是"（UAC）——无需手输房间码。
     bat = (
         "@echo off\r\n"
         "chcp 65001 >nul\r\n"
         "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
         "cd /d \"%~dp0\"\r\n"
+        # ── 自动提权 ──
+        "net session >nul 2>&1\r\n"
+        "if %errorlevel% neq 0 (\r\n"
+        "    echo Requesting administrator privileges...\r\n"
+        "    powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
+        "    exit /b\r\n"
+        ")\r\n"
         "echo [1/3] Checking network...\r\n"
         "curl -sk --max-time 5 -o NUL \"" + _primary + "/api/health\"\r\n"
         "if errorlevel 1 (\r\n"
@@ -2393,6 +2504,9 @@ async def room_connect(room_code: str, request: Request):
             "exe": public_url + "/static/clouddiag-bridge-win64.exe",
             "ps1": public_url + "/static/bridge.ps1",
             "linux_sh": public_url + "/static/install-linux.sh",
+            # 2026-09-25 新增：Windows 一键连接 .bat（双击自动下载 exe 并带上房间码/令牌，
+            # 客户无需手动输入房间码）。前端「一键连接」页签直接用这个地址。
+            "bat": public_url + "/api/room_bat/" + room_code,
         },
     }
 
@@ -2420,24 +2534,29 @@ async def room_bat(room_code: str, request: Request):
     _domain = urllib.parse.urlparse(public_url).netloc.split(":")[0]
 
     # 部署地址动态化（Bug 4 修复——v0.13.14 漏改 room_bat 导致 _primary 未定义 500）
-    _parsed = urllib.parse.urlparse(public_url)
+    # 2026-09-26 普适性修复：备用地址改为可配置项（PUBLIC_URL_FALLBACK），不再硬编码 :8443
     _primary = public_url.rstrip("/")
-    if _parsed.scheme == "https" and (_parsed.port or 443) == 443:
-        _fallback = f"https://{_domain}:8443"
-        _ws_fallback = f"wss://{_domain}:8443"
-    else:
-        _fallback = _primary
-        _ws_fallback = _primary.replace("http", "ws", 1)
-    _ws_primary = _primary.replace("http", "ws", 1)
+    _fallback = get_fallback_url(_primary) or _primary
+    _ws_primary = _primary.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+    _ws_fallback = _fallback.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
 
     # 连接令牌：有效期内复用（多次获取不互相顶掉）
     token = get_or_create_room_token(room_code)
 
+    # 2026-09-25 升级：加入【自动提权】（桥接器读 BIOS/驱动等需管理员权限）。
+    # 客户体验：下载 → 双击 → UAC 点"是" → 脚本自动提权重跑 → 下载 exe → 带房间信息连接。
     bat = (
         "@echo off\r\n"
         "chcp 65001 >nul\r\n"
         "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
         "cd /d \"%~dp0\"\r\n"
+        # ── 自动提权：非管理员时用 UAC 自我提权重启 ──
+        "net session >nul 2>&1\r\n"
+        "if %errorlevel% neq 0 (\r\n"
+        "    echo Requesting administrator privileges...\r\n"
+        "    powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
+        "    exit /b\r\n"
+        ")\r\n"
         "echo [1/3] Checking network...\r\n"
         "curl -sk --max-time 5 -o NUL \"" + _primary + "/api/health\"\r\n"
         "if errorlevel 1 (\r\n"
@@ -2657,7 +2776,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "1.0.5",
+        "version": "1.0.6",
     }
 
 
@@ -3725,12 +3844,15 @@ async def handle_quick_action(room, content: str, websocket) -> bool:
         if content.startswith("[QUICK_ACTION:dump_analyze]"):
             await websocket.send_json({"type": "status", "content": "正在分析本机蓝屏记录与转储（约 1-2 分钟）..."})
             cmd_id = f"qa_{secrets.token_hex(4)}"
-            # 2026-09-21 配置化：不再硬编码兜底域名，未配置时用请求 Host 兜底
-            public_url = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
+            # 2026-09-26：多候选地址降级 + 内容校验。
+            # 注：此处为 WebSocket 上下文（无 Request 对象），用 room 记录的实际访问地址推导候选。
+            public_url = get_public_url_by_room(room)
+            _cands = get_download_candidates_by_url(public_url)
             cmd = (
-                "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
-                f"curl.exe -sL -o $s '{public_url}/static/tools/dump_analyze.ps1'; "
-                "if (!(Test-Path $s)) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
+                build_download_prefix_ps(_cands, "/static/tools/dump_analyze.ps1")
+                + "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
+                f"curl.exe -sL -o $s \"$SRV/static/tools/dump_analyze.ps1\"; "
+                "if (!(Test-Path $s) -or (Get-Item $s).Length -lt 500) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
                 "powershell -NoProfile -ExecutionPolicy Bypass -File $s"
             )
             try:
@@ -5290,10 +5412,13 @@ async def tools_dump_analyze(request: Request):
     else:
         path_arg = ""
 
+    # 2026-09-26：多候选地址降级 + 内容校验
+    _cands = get_download_candidates(request)
     cmd = (
-        "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
-        f"curl.exe -sL -o $s '{public_url}/static/tools/dump_analyze.ps1'; "
-        "if (!(Test-Path $s)) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
+        build_download_prefix_ps(_cands, "/static/tools/dump_analyze.ps1")
+        + "$s = \"$env:TEMP\\dump_analyze.ps1\"; "
+        f"curl.exe -sL -o $s \"$SRV/static/tools/dump_analyze.ps1\"; "
+        "if (!(Test-Path $s) -or (Get-Item $s).Length -lt 500) { Write-Output '[DOWNLOAD_FAIL]'; exit }; "
         f"powershell -NoProfile -ExecutionPolicy Bypass -File $s{path_arg}"
     )
     run_logger.info(f"[{room_code}] tools_dump_analyze exec start")
@@ -5330,10 +5455,13 @@ async def tools_raid(request: Request):
         return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
     public_url = get_public_url(request)
 
+    # 2026-09-26：多候选地址降级 + 内容校验（同 smartctl 改造）
+    _cands = get_download_candidates(request)
     cmd = (
-        "$d = \"$env:TEMP\\raid_tools\"; $z = \"$env:TEMP\\raid_tools.zip\"; "
-        f"curl.exe -sL -o $z '{public_url}/static/tools/raid-tools.zip'; "
-        "if (!(Test-Path $z)) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+        build_download_prefix_ps(_cands, "/static/tools/raid-tools.zip")
+        + "$d = \"$env:TEMP\\raid_tools\"; $z = \"$env:TEMP\\raid_tools.zip\"; "
+        f"curl.exe -sL -o $z \"$SRV/static/tools/raid-tools.zip\"; "
+        "if (!(Test-Path $z) -or (Get-Item $z).Length -lt 100000) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
         "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
         "if (!(Test-Path \"$d\\storcli64.exe\")) { Write-Output 'EXTRACT_FAIL'; exit }; "
         "Push-Location $d; "
@@ -5484,11 +5612,16 @@ async def tools_smart(request: Request):
             "done"
         )
     else:
+        # 2026-09-26：工具下载改为【多候选地址降级】+【内容校验】。
+        # 改前问题：① 硬用 public_url（HTTPS+443 被中间设备拦截时必然失败）；
+        #           ② 只用 Test-Path 判断（下载到错误页/0 字节也算"存在"）。
+        _cands = get_download_candidates(request)
         cmd = (
-            "$z = \"$env:TEMP\\smartctl.exe\"; $db = \"$env:TEMP\\smartctl-drivedb.h\"; "
-            f"curl.exe -sL -o $z '{public_url}/static/tools/smartctl.exe'; "
-            f"curl.exe -sL -o $db '{public_url}/static/tools/smartctl-drivedb.h' -ErrorAction SilentlyContinue; "
-            "if (!(Test-Path $z)) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+            build_download_prefix_ps(_cands, "/static/tools/smartctl.exe")
+            + "$z = \"$env:TEMP\\smartctl.exe\"; $db = \"$env:TEMP\\smartctl-drivedb.h\"; "
+            f"curl.exe -sL -o $z \"$SRV/static/tools/smartctl.exe\"; "
+            f"curl.exe -sL -o $db \"$SRV/static/tools/smartctl-drivedb.h\" 2>$null; "
+            "if (!(Test-Path $z) -or (Get-Item $z).Length -lt 10000) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
             "$scan = (& $z --scan) | ForEach-Object { if ($_ -match '^([^\\s]+)') { $matches[1] } }; "
             "if (!$scan) { Write-Output 'NO_DISK_FOUND'; exit }; "
             "$out = @(); "
@@ -5540,10 +5673,13 @@ async def tools_tslog(request: Request):
         return JSONResponse({"error": "ThinkStation 日志采集仅支持 Windows 客户机"}, status_code=400)
 
     public_url = get_public_url(request)
+    # 2026-09-26：多候选地址降级 + 内容校验（tslog.zip 约 7MB，阈值 1MB）
+    _cands = get_download_candidates(request)
     cmd = (
-        '$d = "$env:TEMP\\tslog"; $z = "$env:TEMP\\tslog.zip"; '
-        f'curl.exe -sL -o $z "{public_url}/static/tools/tslog.zip"; '
-        'if (!(Test-Path $z)) { Write-Output "DOWNLOAD_FAIL"; exit }; '
+        build_download_prefix_ps(_cands, "/static/tools/tslog.zip")
+        + '$d = "$env:TEMP\\tslog"; $z = "$env:TEMP\\tslog.zip"; '
+        'curl.exe -sL -o $z "$SRV/static/tools/tslog.zip"; '
+        'if (!(Test-Path $z) -or (Get-Item $z).Length -lt 1000000) { Write-Output "DOWNLOAD_FAIL"; exit }; '
         'Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; '
         'if (!(Test-Path "$d\\tslog.bat")) { Write-Output "EXTRACT_FAIL"; exit }; '
         'Push-Location $d; cmd /c "tslog.bat"; Pop-Location; '
@@ -5749,18 +5885,26 @@ async def tools_sio_log(request: Request):
     public_url = get_public_url(request)
 
     if platform == "linux":
+        # 2026-09-26：Linux 分支同样支持多候选地址（shell 内依次尝试）
+        _cands = get_download_candidates(request)
+        _u = " ".join(f'"{u}"' for u in _cands)
         cmd = (
-            "cd /tmp && "
-            f"curl -sL -o /tmp/hwdiag '{public_url}/static/tools/hwdiag-linux' && "
+            "cd /tmp && U=''; "
+            f"for c in {_u}; do curl -sfL --max-time 8 -o /dev/null $c/api/health && U=$c && break; done; "
+            "[ -z $U ] && { echo 'NET_UNREACHABLE'; exit 1; }; "
+            "curl -sL -o /tmp/hwdiag $U/static/tools/hwdiag-linux && "
+            "[ -s /tmp/hwdiag ] || { echo 'DOWNLOAD_FAIL'; exit 1; }; "
             "chmod +x /tmp/hwdiag && "
             "(sudo /tmp/hwdiag /DUMPLOG > /tmp/sio_log.txt 2>&1 || /tmp/hwdiag /DUMPLOG > /tmp/sio_log.txt 2>&1) && "
             "cat /tmp/sio_log.txt"
         )
     else:
+        _cands = get_download_candidates(request)
         cmd = (
-            "$d = \"$env:TEMP\\hwdiag\"; $z = \"$env:TEMP\\hwdiag.zip\"; "
-            f"curl.exe -sL -o $z '{public_url}/static/tools/hwdiag-win.zip'; "
-            "if (!(Test-Path $z)) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+            build_download_prefix_ps(_cands, "/static/tools/hwdiag-win.zip")
+            + "$d = \"$env:TEMP\\hwdiag\"; $z = \"$env:TEMP\\hwdiag.zip\"; "
+            f"curl.exe -sL -o $z \"$SRV/static/tools/hwdiag-win.zip\"; "
+            "if (!(Test-Path $z) -or (Get-Item $z).Length -lt 100000) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
             "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
             "if (!(Test-Path \"$d\\HwDiagWin.exe\")) { Write-Output 'EXTRACT_FAIL'; exit }; "
             "Push-Location $d; cmd /c \"HwDiagWin.exe /DUMPLOG > sio_log.txt 2>&1\"; Pop-Location; "
@@ -5787,9 +5931,10 @@ async def tools_sio_log(request: Request):
     if platform != "linux" and any(m.lower() in result.lower() for m in DRIVER_FAIL_MARKS):
         run_logger.info(f"[{room_code}] tools_sio_log: primary failed (driver), fallback to alt tool")
         alt_cmd = (
-            "$d = \"$env:TEMP\\hwdiag_alt\"; $z = \"$env:TEMP\\hwdiag_alt.zip\"; "
-            f"curl.exe -sL -o $z '{public_url}/static/tools/hwdiag-alt.zip'; "
-            "if (!(Test-Path $z)) { Write-Output 'ALT_DOWNLOAD_FAIL'; exit }; "
+            build_download_prefix_ps(_cands, "/static/tools/hwdiag-alt.zip")
+            + "$d = \"$env:TEMP\\hwdiag_alt\"; $z = \"$env:TEMP\\hwdiag_alt.zip\"; "
+            f"curl.exe -sL -o $z \"$SRV/static/tools/hwdiag-alt.zip\"; "
+            "if (!(Test-Path $z) -or (Get-Item $z).Length -lt 100000) { Write-Output 'ALT_DOWNLOAD_FAIL'; exit }; "
             "Expand-Archive $z $d -Force -ErrorAction SilentlyContinue; "
             "if (!(Test-Path \"$d\\HwDiagWin.exe\")) { Write-Output 'ALT_EXTRACT_FAIL'; exit }; "
             "Push-Location $d; cmd /c \"HwDiagWin.exe /DUMPLOG > sio_log_alt.txt 2>&1\"; Pop-Location; "
