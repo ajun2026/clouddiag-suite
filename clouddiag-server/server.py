@@ -1133,7 +1133,10 @@ def generate_room_code() -> str:
 # ============================================================
 # FastAPI app
 # ============================================================
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.7", docs_url=None, redoc_url=None, openapi_url=None)
+# 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
+APP_VERSION = "1.0.8"
+
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.8", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1218,7 +1221,7 @@ def _require_admin(request: Request):
 
 @app.post("/api/admin/login")
 async def admin_login(request: Request):
-    body = await request.json()
+    body = await _safe_json(request)
     ip = _client_ip(request)
     if _login_locked(ip) or _login_locked("u:admin"):
         return JSONResponse({"error": "尝试过于频繁，请 15 分钟后再试"}, status_code=429)
@@ -1440,7 +1443,7 @@ async def ai_providers_create(request: Request):
     _u, err = _admin_required(request)
     if err:
         return err
-    body = await request.json()
+    body = await _safe_json(request)
     name = (body.get("name") or "").strip()
     base_url = (body.get("base_url") or "").strip()
     api_key = (body.get("api_key") or "").strip()
@@ -1462,7 +1465,7 @@ async def ai_providers_update(pid: str, request: Request):
     _u, err = _admin_required(request)
     if err:
         return err
-    body = await request.json()
+    body = await _safe_json(request)
     data = _ai_providers_load()
     for pv in data.get("providers", []):
         if pv["id"] == pid:
@@ -1535,7 +1538,7 @@ async def ai_providers_activate(pid: str, request: Request):
 
 @app.post("/api/auth/login")
 async def user_login(request: Request):
-    body = await request.json()
+    body = await _safe_json(request)
     username = (body.get("username") or "").strip()
     password = body.get("password") or ""
     ip = _client_ip(request)
@@ -1591,7 +1594,7 @@ async def change_password(request: Request):
     user = _require_user(request)
     if not user:
         return JSONResponse({"error": "未登录"}, status_code=401)
-    body = await request.json()
+    body = await _safe_json(request)
     old_pw = body.get("old_password") or ""
     new_pw = body.get("new_password") or ""
     if len(new_pw) < 4:
@@ -1635,7 +1638,7 @@ async def admin_create_user(request: Request):
     admin = _require_admin_user(request)
     if not admin:
         return JSONResponse({"error": "未授权"}, status_code=401)
-    body = await request.json()
+    body = await _safe_json(request)
     username = (body.get("username") or "").strip()
     name = (body.get("name") or "").strip()
     role = body.get("role") or "engineer"
@@ -1683,7 +1686,7 @@ async def admin_reset_password(request: Request, username: str):
     admin = _require_admin_user(request)
     if not admin:
         return JSONResponse({"error": "未授权"}, status_code=401)
-    body = await request.json()
+    body = await _safe_json(request)
     new_pw = body.get("new_password") or ""
     if len(new_pw) < 4:
         return JSONResponse({"error": "新密码至少 4 位"}, status_code=400)
@@ -1766,7 +1769,7 @@ async def admin_delete_room(request: Request):
     """Delete a room's chat history (and approvals) from SQLite."""
     if not _require_admin(request):
         return JSONResponse({"error": "未授权"}, status_code=401)
-    body = await request.json()
+    body = await _safe_json(request)
     room_code = (body.get("room_code") or "").strip().upper()
     if not room_code:
         return JSONResponse({"error": "缺少房间码"}, status_code=400)
@@ -1838,6 +1841,22 @@ def get_fallback_url(public_url: str) -> str:
     if fb and fb != (public_url or "").rstrip("/"):
         return fb
     return ""
+
+
+async def _safe_json(request) -> dict:
+    """安全解析请求体 JSON —— 2026-09-27 新增（修复 P2-1）。
+
+    原实现有 4 个接口直接用 `await request.json()`，未做异常保护：
+    请求体非法（空 / 非 JSON / 被代理改写）时抛 JSONDecodeError → 500 Internal Server Error，
+    且每次向日志写入数十行 traceback，噪声淹没真实故障。
+
+    现统一改为本函数：解析失败或非 dict 一律返回 {}，由各接口用自己的字段校验返回 400。
+    """
+    try:
+        body = await request.json()
+        return body if isinstance(body, dict) else {}
+    except Exception:
+        return {}
 
 
 def get_download_candidates(request: Request) -> list:
@@ -2046,7 +2065,7 @@ async def quick_diagnoses(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.7"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.8"}
 
 
 @app.post("/api/debug_log")
@@ -2068,10 +2087,32 @@ async def create_room(request: Request):
         return JSONResponse({"error": "未登录"}, status_code=401)
     if user.get("role") == "guest":
         return JSONResponse({"error": "游客无此权限——仅可使用 IDG 日志分析"}, status_code=403)
-    body = await request.json()
-    sn = (body.get("sn") or "").strip()
-    ticket_no = (body.get("ticket_no") or "").strip()
-    machine_model = (body.get("machine_model") or "").strip()
+    body = await _safe_json(request)
+    # 2026-09-27 修复（P2-2 / P3-3）：
+    #   ① 原写法 (body.get("sn") or "").strip() —— 若传入数组/对象会抛
+    #      AttributeError: 'list' object has no attribute 'strip' → 500。
+    #   ② SN/工单/机型无长度与字符校验 → 10000 字符可入库，且为存储型 XSS 提供载荷。
+    # 现：类型安全提取 + 字符白名单（字母数字 -_. 空格 中文）+ 长度上限。
+    def _s(v, maxlen):
+        if not isinstance(v, str):
+            return ""
+        v = v.strip()
+        if len(v) > maxlen:
+            return None  # 超长 → 由调用方返回 400
+        # 白名单：拒绝 <>&"'`;|$ 等可用于注入/HTML 拼接的字符
+        if re.search(r'[<>&"\';|`$(){}\[\]]', v):
+            return None
+        return v
+
+    sn = _s(body.get("sn"), 64)
+    ticket_no = _s(body.get("ticket_no"), 64)
+    machine_model = _s(body.get("machine_model"), 128)
+    if sn is None:
+        return JSONResponse({"error": "SN 含非法字符或超过 64 字符"}, status_code=400)
+    if ticket_no is None:
+        return JSONResponse({"error": "工单号含非法字符或超过 64 字符"}, status_code=400)
+    if machine_model is None:
+        return JSONResponse({"error": "机型含非法字符或超过 128 字符"}, status_code=400)
     # 客户机系统（创建时选择——连接后 identify 自动纠正）：windows / linux
     os_choice = (body.get("os") or "windows").strip().lower()
     if os_choice not in ("windows", "linux"):
@@ -2776,7 +2817,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "1.0.7",
+        "version": "1.0.8",
     }
 
 
@@ -2895,7 +2936,8 @@ document.getElementById('login-form').addEventListener('submit', async function(
 
 
 def _generate_admin_html():
-    return HTMLResponse(r"""
+    # 2026-09-27：注入版本号（P3-1）——用 replace 而非 f-string，避免 HTML/CSS 的 114 处花括号需转义
+    _html = r"""
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -2956,7 +2998,7 @@ def _generate_admin_html():
 </style>
 </head>
 <body>
-<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v1.0.0</span></h1>
+<h1>管理后台 <span class="subtitle">云端 AI 远程运维助手 v__APP_VERSION__</span></h1>
 
 <div class="stats" id="stats-cards">
   <div class="stat-card"><div class="num" id="stat-rooms">-</div><div class="label">当前活跃房间</div></div>
@@ -3133,7 +3175,8 @@ setInterval(refresh, 15000);  // 每15秒自动刷新
 </script>
 </body>
 </html>
-""")
+"""
+    return HTMLResponse(_html.replace("__APP_VERSION__", APP_VERSION))
 
 
 # ============================================================
@@ -6027,6 +6070,22 @@ async def tools_linux_logpack(request: Request):
 async def ws_browser(websocket: WebSocket, room_code: str):
     await websocket.accept()
 
+    # 2026-09-27 安全修复（P1-1 高危 · 鉴权绕过）：
+    # 原实现只校验"房间存在"，未校验登录会话——未认证者只要拿到 8 位房间码（房间码会随
+    # .bat/.ps1 一键连接脚本、聊天记录外发）即可：
+    #   ① 覆盖 room.browser_ws（顶掉合法工程师的连接）
+    #   ② 发送 type=chat 驱动 AI 在客户机上下发命令（桥接器侧含 Tier3 修改类工具）
+    # 现与 ws_bridge / _require_user 口径一致：校验会话存在【且未过期】。
+    _ws_token = websocket.cookies.get("user_token", "")
+    _ws_sess = USER_SESSIONS.get(_ws_token)
+    if not _ws_sess or _ws_sess.get("exp", 0) <= time.time():
+        await websocket.send_json({"type": "error", "content": "未登录或会话已过期，请重新登录后再连接。"})
+        await websocket.close()
+        run_logger.warning(f"[browser] rejected unauthenticated connection to room {room_code}")
+        return
+    # 滑动续期（与 _require_user 一致：活跃连接不被打断）
+    _ws_sess["exp"] = time.time() + USER_SESSION_TTL
+
     room = rooms.get(room_code)
     if not room:
         # 房间必须先在数据库中存在（工作台创建时绑定 SN/工单号）——防止绕过创建限制
@@ -6040,9 +6099,7 @@ async def ws_browser(websocket: WebSocket, room_code: str):
 
     room.browser_ws = websocket
     # 浏览器身份（cookie 会话）——用于角色权限（field 上门工程师无对话权）
-    _ws_token = websocket.cookies.get("user_token", "")
-    _ws_sess = USER_SESSIONS.get(_ws_token)
-    ws_role = (_ws_sess or {}).get("role", "")
+    ws_role = _ws_sess.get("role", "")
     # 浏览器重连：取消闲置倒计时（宽限期内回来 = 不关闭）
     if getattr(room, "idle_task", None):
         room.idle_task.cancel()
@@ -6479,7 +6536,7 @@ async def _startup_reaper():
 
 if __name__ == "__main__":
     import uvicorn
-    run_logger.info(f"Starting server v1.0.0 on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
+    run_logger.info(f"Starting server v{APP_VERSION} on {SERVER_HOST}:{SERVER_PORT}, model={OPENAI_MODEL}, tools={len(TOOLS)}")
     run_logger.info("房间内存已清空——bridge/browser 重连时自动从 DB 恢复房间（无需重新创建）")
     run_logger.info(f"DB: {DB_PATH}, approval: enabled for Tier 2/3")
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT, log_level="info",

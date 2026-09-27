@@ -2027,19 +2027,19 @@ function renderRooms() {
     else if (r.bridge_online) stHtml = '<span class="status on">连接中</span>';
     else stHtml = '<span class="status off">已断开</span>';
     return '<tr>'
-      + '<td class="mono">' + r.room_code + '</td>'
+      + '<td class="mono">' + escapeHtml(r.room_code) + '</td>'
       + '<td>' + r.sn + '</td>'
-      + '<td>' + (r.machine_model || '-') + '</td>'
+      + '<td>' + escapeHtml(r.machine_model || '-') + '</td>'
       + '<td>' + r.ticket_no + '</td>'
       + '<td>' + (r.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + (r.last_seen || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td>' + stHtml + '</td>'
       + '<td>' + validityBadge(r.days_left) + '</td>'
       + '<td><div class="row-actions">'
-      + '<button class="btn-sm" onclick="chooseInterface(\'' + r.room_code + '\', \'' + (r.sn||'') + '\', \'' + (r.ticket_no||'') + '\', \'选择进入方式\')">' + t('enter_chat') + '</button>'
-      + '<button class="btn-sm" onclick="connectRoom(\'' + r.room_code + '\')" title="一键连接">📶 连接</button>'
-      + '<button class="btn-sm" onclick="viewHistory(\'' + r.room_code + '\')">' + t('view_history') + '</button>'
-      + '<button class="btn-sm" onclick="exportRoom(\'' + r.room_code + '\')">' + t('export_record') + '</button>'
+      + '<button class="btn-sm" onclick="chooseInterface(\'' + escapeHtml(r.room_code) + '\', \'' + escapeHtml(r.sn||'') + '\', \'' + escapeHtml(r.ticket_no||'') + '\', \'选择进入方式\')">' + t('enter_chat') + '</button>'
+      + '<button class="btn-sm" onclick="connectRoom(\'' + escapeHtml(r.room_code) + '\')" title="一键连接">📶 连接</button>'
+      + '<button class="btn-sm" onclick="viewHistory(\'' + escapeHtml(r.room_code) + '\')">' + t('view_history') + '</button>'
+      + '<button class="btn-sm" onclick="exportRoom(\'' + escapeHtml(r.room_code) + '\')">' + t('export_record') + '</button>'
       + '</div></td>'
       + '</tr>';
   }).join('');
@@ -2454,9 +2454,16 @@ function fillSntmRoom() {
   if (!online.length) {
     roomSel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
-    roomSel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    roomSel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      roomSel.appendChild(o);
+    });
   }
 }
 
@@ -2544,9 +2551,16 @@ function fillOa3Room() {
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
-    sel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    sel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      sel.appendChild(o);
+    });
   }
 }
 
@@ -2648,9 +2662,16 @@ function fillBiosRoom() {
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
-    sel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    sel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      sel.appendChild(o);
+    });
   }
 }
 
@@ -2757,9 +2778,16 @@ function fillSleepRoom() {
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
-    sel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    sel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      sel.appendChild(o);
+    });
   }
 }
 
@@ -2812,9 +2840,16 @@ function fillEnergyRoom() {
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
-    sel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    sel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      sel.appendChild(o);
+    });
   }
 }
 
@@ -2867,9 +2902,16 @@ function fillDriversRoom() {
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
-    sel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    sel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      sel.appendChild(o);
+    });
   }
 }
 
@@ -3045,7 +3087,7 @@ function fillDumpAnalyzeRoom() {
   const sel = document.getElementById('dumpanalyze-room');
   const online = toolOnlineRooms('windows');
   sel.innerHTML = online.length
-    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
+    ? online.map(r => '<option value="' + escapeHtml(r.room_code) + '">' + escapeHtml(r.room_code) + ' — ' + escapeHtml(r.sn || '') + '</option>').join('')
     : '<option value="">暂无在线房间</option>';
 }
 
@@ -3090,7 +3132,7 @@ function fillRaidRoom() {
   const sel = document.getElementById('raid-room');
   const online = toolOnlineRooms('windows');
   sel.innerHTML = online.length
-    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
+    ? online.map(r => '<option value="' + escapeHtml(r.room_code) + '">' + escapeHtml(r.room_code) + ' — ' + escapeHtml(r.sn || '') + '</option>').join('')
     : '<option value="">暂无在线房间</option>';
 }
 
@@ -3130,7 +3172,7 @@ function fillWinlogsRoom() {
   const sel = document.getElementById('winlogs-room');
   const online = toolOnlineRooms('windows');
   sel.innerHTML = online.length
-    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
+    ? online.map(r => '<option value="' + escapeHtml(r.room_code) + '">' + escapeHtml(r.room_code) + ' — ' + escapeHtml(r.sn || '') + '</option>').join('')
     : '<option value="">暂无在线房间</option>';
 }
 
@@ -3165,7 +3207,7 @@ function fillDumpRoom() {
   const sel = document.getElementById('dump-room');
   const online = toolOnlineRooms('windows');
   sel.innerHTML = online.length
-    ? online.map(r => '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + '</option>').join('')
+    ? online.map(r => '<option value="' + escapeHtml(r.room_code) + '">' + escapeHtml(r.room_code) + ' — ' + escapeHtml(r.sn || '') + '</option>').join('')
     : '<option value="">暂无在线房间</option>';
 }
 
@@ -3204,9 +3246,16 @@ function fillSmartRoom(platform) {
   if (!online.length) {
     roomSel.innerHTML = '<option value="">暂无在线房间</option>';
   } else {
-    roomSel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    roomSel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      roomSel.appendChild(o);
+    });
   }
 }
 
@@ -3249,9 +3298,16 @@ function fillSioRoom(platform) {
   if (!online.length) {
     roomSel.innerHTML = '<option value="">暂无在线房间</option>';
   } else {
-    roomSel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    roomSel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      roomSel.appendChild(o);
+    });
   }
 }
 
@@ -3334,9 +3390,16 @@ function fillLinuxLogPackRoom() {
   if (!online.length) {
     sel.innerHTML = '<option value="">' + t('sntm_no_room') + '</option>';
   } else {
-    sel.innerHTML = online.map(r =>
-      '<option value="' + r.room_code + '">' + r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-') + '</option>'
-    ).join('');
+    // 2026-09-27 安全修复（P1-2 存储型 XSS）：SN/机型由工程师自由输入，服务端已加白名单
+    // 校验，前端【必须】同步转义，否则 <img src=x onerror=...> 会在其他用户（含 admin）
+    // 打开本页时执行。同时改用 createElement+textContent 构造 option，彻底避免 HTML 解析。
+    sel.innerHTML = '';
+    online.forEach(r => {
+      const o = document.createElement('option');
+      o.value = r.room_code;
+      o.textContent = r.room_code + ' — ' + (r.sn || '') + ' / ' + (r.machine_model || '-');
+      sel.appendChild(o);
+    });
   }
 }
 

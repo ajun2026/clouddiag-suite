@@ -166,6 +166,17 @@ def _clean_name(s: str) -> str:
         return "?"
 
 
+# 2026-09-27 新增（P3-4）：健康检查端点——与 clouddiag-server 接口命名保持一致，
+# 便于统一监控与部署自检（deploy/doctor.sh 可做端到端断言）。
+APP_VERSION = "1.0.8"
+
+
+@app.get("/api/health")
+async def health():
+    """健康检查：返回服务状态与版本。"""
+    return {"status": "ok", "service": "log-analyzer", "version": APP_VERSION}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     user = await get_current_user(request)

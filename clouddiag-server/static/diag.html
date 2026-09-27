@@ -725,7 +725,7 @@ function connect() {
           bridgeConnected = !!msg.bridge_connected;
           setBridgeState(bridgeConnected);
         }
-        if (msg.content && document.getElementById('live-steps')) appendLiveStep('▸', msg.content);
+        if (msg.content && document.querySelector('.live-steps')) appendLiveStep('▸', msg.content);
         break;
       case 'approval_required':
         showApprovalDialog(msg);
@@ -894,8 +894,8 @@ function showLoading(t) {
   p.innerHTML =
     '<div class="result-title" id="live-title">⏳ ' + esc(t) + '</div>'
     + '<div class="sec-label">🔍 执行过程（实时）</div>'
-    + '<div class="manifest" id="live-steps">'
-    +   '<div class="mani-row" id="live-wait"><span class="mani-icon">⏳</span>'
+    + '<div class="manifest live-steps">'
+    +   '<div class="mani-row live-wait"><span class="mani-icon">⏳</span>'
     +   '<span class="mani-text" style="color:#8b949e">正在执行诊断命令…</span></div>'
     + '</div>'
     + '<div style="margin-top:10px;font-size:12px;color:#6e7681;" id="live-elapsed">已用时 0 秒（诊断通常需要 1-3 分钟）</div>';
@@ -910,9 +910,9 @@ function showLoading(t) {
 
 // 追加一条执行步骤（tool_start / status / tool_result 触发）
 function appendLiveStep(icon, text, color) {
-  const box = document.getElementById('live-steps');
+  const box = document.querySelector('.live-steps');
   if (!box) return;
-  const wait = document.getElementById('live-wait');
+  const wait = document.querySelector('.live-wait');
   if (wait) wait.remove();
   const el = document.createElement('div');
   el.className = 'mani-row';
@@ -1063,7 +1063,7 @@ function runStartupScan(icon, title) {
   const p = document.getElementById('result-panel');
   if (p) p.innerHTML = '<div class="result-title">' + icon + ' ' + esc(title) + '</div>'
     + '<div class="sec-label">🔍 执行过程（实时）</div>'
-    + '<div class="manifest" id="live-steps"><div class="mani-row" id="live-wait">'
+    + '<div class="manifest live-steps"><div class="mani-row live-wait">'
     + '<span class="mani-icon">⏳</span><span class="mani-text" style="color:#8b949e">正在查询开机自启动项…</span></div></div>';
   ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_scan]' }));
 }
@@ -1129,7 +1129,7 @@ async function runDriverFetch(icon, title) {
   let waited = 0;
   if (p) p.innerHTML = '<div class="result-title">' + icon + ' ' + esc(title) + '</div>'
     + '<div class="sec-label">🔍 执行过程（实时）</div>'
-    + '<div class="manifest" id="live-steps"><div class="mani-row" id="live-wait">'
+    + '<div class="manifest live-steps"><div class="mani-row live-wait">'
     + '<span class="mani-icon">⏳</span><span class="mani-text" style="color:#8b949e" id="drv-wait">正在识别机器并抓取联想官网驱动清单…（首次 1-3 分钟，之后走缓存）</span></div></div>';
   const timer = setInterval(function () {
     waited += 10;
