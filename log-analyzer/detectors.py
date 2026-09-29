@@ -145,8 +145,7 @@ def extract_archive(filepath: Path) -> Path:
         return extract_dir
     ext = filepath.suffix.lower()
     if ext == '.7z':
-        subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
-                       capture_output=True, timeout=120)
+        extract_7z(filepath, extract_dir)      # 2026-09-29：CLI 优先 + py7zr 兜底
     elif ext == '.rar':
         # 2026-09-25 v1.0.5 重构：unrar 优先（判定"有内容即成功"）+ 7z 兜底解到独立目录
         #
@@ -220,15 +219,56 @@ def extract_archive(filepath: Path) -> Path:
             result = subprocess.run(['unzip', '-o', '-O', 'gbk', str(filepath), '-d', str(extract_dir)],
                                     capture_output=True, timeout=120)
             if result.returncode != 0:
-                subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
-                               capture_output=True, timeout=120)
+                # 2026-09-29：7z 兜底，但没装 7z 时不应抛出（前面 unzip 的结果仍可用）
+                try:
+                    subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
+                                   capture_output=True, timeout=120)
+                except FileNotFoundError:
+                    run_logger.warning("7z 未安装，跳过兜底（unzip 结果保留）")
     else:
         result = subprocess.run(['unzip', '-o', str(filepath), '-d', str(extract_dir)],
                                 capture_output=True, timeout=120)
         if result.returncode != 0:
-            subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
-                           capture_output=True, timeout=120)
+            try:
+                subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
+                               capture_output=True, timeout=120)
+            except FileNotFoundError:
+                run_logger.warning("7z 未安装，跳过兜底")
     return extract_dir
+
+def extract_7z(filepath: Path, extract_dir: Path) -> None:
+    """解压 .7z：7z CLI 优先 → 缺失/失败 → py7zr 兜底（requirements 已含）。
+
+    2026-09-29 修复（外部反馈 P1 · 缺 7z 直接失败）：
+      原实现只有 `subprocess.run(['7z', ...])` 一行——服务器没装 7z 时抛
+      FileNotFoundError，整个上传被拒；7z 存在但解压失败时又不检查返回码。
+      现在：CLI 不可用或没解出内容 → 改用 py7zr（纯 Python，无外部依赖）；
+      两者都不可用才报错，并把"怎么装"写进提示。
+    """
+    cli_ok = False
+    try:
+        r = subprocess.run(['7z', 'x', '-y', str(filepath), f'-o{extract_dir}'],
+                           capture_output=True, timeout=300)
+        if r.returncode == 0 and _extract_has_content(extract_dir):
+            return
+        run_logger.warning(f"7z 返回码 {r.returncode}（或未解出内容），改用 py7zr 兜底")
+    except FileNotFoundError:
+        run_logger.warning("7z 未安装，改用 py7zr 兜底")
+    except subprocess.TimeoutExpired:
+        run_logger.warning("7z 解压超时，改用 py7zr 兜底")
+    try:
+        import py7zr
+    except ImportError:
+        raise RuntimeError(
+            "解压 .7z 失败：服务器缺少 7z 命令行工具，且未安装 py7zr 库。"
+            "请执行 apt install p7zip-full（或 pip install py7zr）后重试。"
+        )
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    with py7zr.SevenZipFile(filepath, 'r') as z:
+        z.extractall(path=extract_dir)
+    if not _extract_has_content(extract_dir):
+        raise RuntimeError("解压 .7z 失败：未能解出任何内容（压缩包可能损坏或已加密）。")
+
 
 def _fix_zip_filename(name: str) -> str:
     """Detect and fix garbled Chinese filenames from GBK-encoded zips.

@@ -166,4 +166,8 @@ async def _chat_context_inject(job_id: str, user_message: str, tslog, os_type: s
             except Exception as e:
                 errors.append(f"{ch['url']}: {str(e)[:120]}(第{attempt+1}次)")
 
-    return JSONResponse({"error": f"AI 分析所有通道均失败: {'; '.join(errors)}"}, status_code=502)
+    # 2026-09-29：同 function_call——全"空回复"时提示可能是模型不支持工具调用
+    _all_empty = bool(errors) and all("空回复" in e for e in errors)
+    _tip = ("（模型连续未返回内容——本地推理模型常不支持 Function Calling，请换用支持工具调用的模型）"
+            if _all_empty else "")
+    return JSONResponse({"error": f"AI 分析所有通道均失败: {'; '.join(errors)}{_tip}"}, status_code=502)

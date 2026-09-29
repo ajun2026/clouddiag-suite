@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 import jinja2, aiofiles, httpx
 
 from detectors import (load_history, save_history, add_to_history,
-    detect_encoding, extract_archive, extract_zip_safe, find_log_dir,
+    detect_encoding, extract_archive, extract_zip_safe, extract_7z, find_log_dir,
     normalize_log_structure,
     find_tslog_dir, iter_evtx_cached, MAX_EVENTS, UPLOAD_DIR, REPORT_DIR, BASE_DIR)
 from analyzers.windows import (analyze_overview, analyze_system_diagnostics,
@@ -168,7 +168,7 @@ def _clean_name(s: str) -> str:
 
 # 2026-09-27 新增（P3-4）：健康检查端点——与 clouddiag-server 接口命名保持一致，
 # 便于统一监控与部署自检（deploy/doctor.sh 可做端到端断言）。
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 
 
 @app.get("/api/health")
@@ -498,8 +498,8 @@ async def upload_file(request: Request, file: UploadFile = File(...), sn: str = 
                     subprocess.run(['tar', 'xf', str(inner_path), '-C', str(inner_extract)],
                                    capture_output=True, timeout=300)
                 elif inner_ext == '.7z':
-                    subprocess.run(['7z', 'x', '-y', str(inner_path), f'-o{inner_extract}'],
-                                   capture_output=True, timeout=300)
+                    # 2026-09-29：与顶层 .7z 同款——CLI 优先 + py7zr 兜底
+                    extract_7z(inner_path, inner_extract)
                 elif inner_ext == '.rar':
                     subprocess.run(['unrar', 'x', '-y', str(inner_path), str(inner_extract)],
                                    capture_output=True, timeout=300)

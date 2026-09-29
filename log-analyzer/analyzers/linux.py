@@ -11,22 +11,42 @@ from app_state import get_jobs  # 2026-09-18：不要 import main（会二次导
 from pathlib import Path as _Path
 REPORT_DIR = _Path(__file__).resolve().parent.parent / "reports"
 
+import logging as _logging
+run_logger = _logging.getLogger("analyzers.linux")   # 2026-09-29：_find_sos_root 上溯越界时留痕
+
 
 def _find_sos_root(log_dir: Path) -> Path:
     """
     For Linux sosreports, find_log_dir returns .../var/log/.
     Walk up to find the sosreport root directory so we can access
     /etc/os-release, /proc/cpuinfo, etc.
+
+    2026-09-29 修复（外部反馈 P1 · root 逃逸到文件系统根）：
+      原实现用 `for p in [log_dir] + list(log_dir.parents)` 无界上溯，且判定条件是
+      `(p/'etc').is_dir() or (p/'proc').is_dir()`——只要包内只有 log/（无 var/log），
+      上溯到 `/` 时 `/etc` 必然存在 → root 被定位成 `/`，随后 root.rglob() 全盘遍历，
+      读到的是【宿主机的 /etc/os-release】并当成客户机的系统报出去（实测泄漏宿主 OS 名），
+      还可能在全盘遍历中撞到读不了的条目而整次分析失败。
+    修复三条：①只在包内浅层上溯（最多 3 层）；②绝不越过文件系统根；
+              ③标记判定由 or 改为 and（真 sosreport 根同时含 etc/ 与 proc/）。
     """
-    # If we're inside var/log, go up 2 levels to sosreport root
+    # If we're inside var/log, go up 2 levels to sosreport root（唯一可靠形态，保持原样）
     if log_dir.name == "log" and log_dir.parent.name == "var":
         return log_dir.parent.parent
-    # If we're inside a deeper var/log, find the sosreport root
-    for p in [log_dir] + list(log_dir.parents):
-        if (p / "etc").is_dir() or (p / "proc").is_dir():
-            return p
-        if p.name.startswith("sosreport-") or p.name.startswith("sos_"):
-            return p
+    # 只在包内浅层上溯，找不到就停在 log_dir（绝不越过上传目录）
+    cur = log_dir
+    for _ in range(3):
+        if cur.name.startswith("sosreport-") or cur.name.startswith("sos_"):
+            return cur
+        if cur.parent == cur:          # 已到文件系统根
+            break
+        if (cur / "sos_commands").is_dir() or \
+           ((cur / "etc").is_dir() and (cur / "proc").is_dir()):
+            return cur
+        cur = cur.parent
+    run_logger.warning(
+        f"未在包内识别到 sosreport 结构，分析范围限定在 {log_dir}（不再上溯）"
+    )
     return log_dir
 
 
@@ -250,9 +270,14 @@ def analyze_linux_overview(log_dir: Path) -> dict:
                 break
         if not fp.exists():
             return ""
-        size = fp.stat().st_size
-        with open(fp, 'r', encoding='utf-8', errors='replace') as f:
-            return f.read(min(size, max_kb * 1024))
+        # 2026-09-29：stat/open 加保护——root 越界或包内存在读不了的条目时
+        # 不再让整次分析因单个文件失败（外部反馈：Permission denied 导致分析崩）
+        try:
+            size = fp.stat().st_size
+            with open(fp, 'r', encoding='utf-8', errors='replace') as f:
+                return f.read(min(size, max_kb * 1024))
+        except (OSError, ValueError):
+            return ""
 
     def find_read(pattern: str, max_kb: int = 50) -> str:
         # rglob with wildcard pattern like *os-release*

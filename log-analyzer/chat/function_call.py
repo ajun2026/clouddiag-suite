@@ -325,6 +325,10 @@ def _ai_channels() -> list:
     return channels
 
 
+TIP_MODEL_NO_TOOLCALL = ("（模型连续未返回 content/tool_calls——常见于本地推理模型不支持 "
+                        "Function Calling；请改用支持工具调用的模型，或改用非工具模式）")
+
+
 async def _call_deepseek(messages: list) -> dict:
     """Call AI API（多通道自动故障切换——2026-08-28 ② 备用 AI 通道）。
     主 → 备，每通道最多 3 次（递增间隔 2s/4s）；成功出口 = content 非空 **或** 有 tool_calls（工具轮）；
@@ -365,7 +369,8 @@ async def _call_deepseek(messages: list) -> dict:
                         return data  # ✅ 成功出口
                     # 2026-09-18 兜底：推理模型（deepseek-v4-flash 等）content 可能为空，
                     # 正文缺失但 reasoning_content 有思考内容 —— 取它，避免误判"空回复"
-                    reasoning = (_msg.get("reasoning_content") or "").strip()
+                    # 2026-09-29：兼容 Ollama 等本地服务把推理放在 message.reasoning 的写法
+                    reasoning = (_msg.get("reasoning_content") or _msg.get("reasoning") or "").strip()
                     if reasoning:
                         _msg["content"] = reasoning + "\n\n（注：以上为模型思考内容——本次正式回答为空，已兜底返回）"
                         return data
@@ -375,7 +380,12 @@ async def _call_deepseek(messages: list) -> dict:
             # 重试间隔递增（网关抖动时给恢复时间）
             if attempt < RETRIES - 1:
                 await asyncio.sleep(2 * (attempt + 1))
-    raise RuntimeError(f"AI 分析所有通道均失败: {'; '.join(errors)}")
+    # 2026-09-29 修复（外部反馈 P2）：全部通道都"空回复"时通常不是网络/额度问题，而是该模型
+    # 不支持 Function Calling（本地推理模型只输出推理、不返回 content/tool_calls）。
+    # 原文案"所有通道均失败"会让用户误判，故补一条可操作的提示。
+    _all_empty = bool(errors) and all("空回复" in e for e in errors)
+    _tip = TIP_MODEL_NO_TOOLCALL if _all_empty else ""
+    raise RuntimeError(f"AI 分析所有通道均失败: {'; '.join(errors)}{_tip}")
 async def _chat_function_calling(job_id: str, user_message: str, tslog):
     """Function Calling mode for Windows/Linux logs"""
 

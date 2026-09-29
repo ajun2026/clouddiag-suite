@@ -101,7 +101,8 @@ def call_llm(context: str, message: str) -> str:
                     return content  # ✅ 成功出口
                 # 2026-09-17 兜底：推理模型（如 deepseek-v4-flash）content 可能为空
                 # 而思考内容在 reasoning_content —— 取它，避免误判"空回复"
-                reasoning = (_msg.get("reasoning_content") or "").strip()
+                # 2026-09-29：兼容 Ollama 的 reasoning 字段名
+                reasoning = (_msg.get("reasoning_content") or _msg.get("reasoning") or "").strip()
                 if reasoning:
                     return reasoning + "\n\n（注：以上为模型思考内容——本次正式回答为空，已兜底返回）"
                 errors.append(f"{ch['url']}: 空回复(第{attempt+1}次)")
@@ -110,7 +111,10 @@ def call_llm(context: str, message: str) -> str:
             # 重试间隔递增（网关抖动时给恢复时间）
             if attempt < RETRIES - 1:
                 time.sleep(2 * (attempt + 1))
-    return f"【深度分析失败】AI 分析所有通道均失败: {'; '.join(errors)}"
+    _all_empty = bool(errors) and all("空回复" in e for e in errors)
+    _tip = ("（模型连续未返回内容——本地推理模型常不支持 Function Calling，请换用支持工具调用的模型）"
+            if _all_empty else "")
+    return f"【深度分析失败】AI 分析所有通道均失败: {'; '.join(errors)}{_tip}"
 
 
 def process_request(rid: str):

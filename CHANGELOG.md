@@ -1,3 +1,45 @@
+## v1.0.9 — 2026-09-29（外部使用反馈修复：部署健壮性 + 交互）
+
+> 来源：第三方在 Ubuntu 24.04(aarch64) / 局域网 HTTP / 本地 Ollama 环境下的部署使用反馈（被测 v1.0.8）。
+> 逐条核实后修复 6 项（1 项反馈有误，未采纳），全部经实测验证。
+
+### 🔴 高（数据与可诊断性）
+
+- **root 上溯越界（读宿主机数据）**：Linux 包内只有 `log/` 而无 `var/log/` 时，
+  `_find_sos_root()` 会无界上溯到 `/`（`/etc` 必然存在）→ 全盘搜索命中**宿主机**的
+  `/etc/os-release`，把它当成客户机系统写进报告。现：只在包内浅层上溯（≤3 层）、
+  绝不越过文件系统根、标记判定由 `or` 改 `and`，找不到就停在 `log_dir`。
+  同时给 `read_first()` 的 `stat/open` 加异常保护。见[事故记录 C3](docs/风险与事故记录/C3-根目录上溯越界.md)。
+- **上传失败被伪装成"600s 超时"**：`/api/bridge/upload` 只有成功分支才回写等待中的 future，
+  失败结果全靠桥接器 WS 回传；WS 一断（客户机网络异常）就干等 600s 并报"上传超时"，
+  真实原因（如 IDG 缺 7z 导致解压失败）完全看不到。现：新增 `_resolve_pending()` 统一回写入口，
+  失败也立刻回写；`/api/tools/upload` 改为单次等待、单处 pop，失败原因原样透出。
+  实测由 600s → **0.1s** 秒回真原因。见[事故记录 D3](docs/风险与事故记录/D3-上传失败被伪装成超时.md)。
+
+### 🟠 中
+
+- **`.7z` 无兜底**：服务器没有 `7z` 命令行工具时，`.7z` 上传直接抛 `FileNotFoundError` 而失败
+  （`py7zr` 虽在 `requirements.txt` 却从未被调用）。现新增 `extract_7z()`：7z CLI 优先 →
+  缺失/失败 → **py7zr 兜底**（纯 Python 无外部依赖）→ 都不可用才报错，并提示如何安装；
+  嵌套 `.7z` 与 zip 兜底路径同步加固，返回码不再被忽略。
+- **IDG 缺「退出登录」入口**：游客被强制分流到 IDG 独立页后，页面只有「返回主界面」，
+  而工作台对游客又是"加载即跳 IDG"——死循环、无出口。现两个 IDG 页面各加「🚪 退出登录」。
+- **HTTP+IP 下「复制命令」点了没反应**：非安全上下文 `navigator.clipboard` 为 `undefined`，
+  原写法**同步抛 TypeError**，连 `.catch()` 都进不去（"选中文字"降级从未执行）。
+  现新增 `copyTextSafe()`：能用 API 才用，否则 `execCommand('copy')` 降级，两条路径都有明确提示
+  （`diag.html` + `dashboard.html` 共 4 处）。
+
+### 🟡 低
+
+- **AI 失败文案区分模型问题**：全通道"空回复"时追加"常见于本地推理模型不支持 Function Calling，
+  请换支持工具调用的模型"；并兼容 Ollama 的 `message.reasoning` 字段名（原来只认 `reasoning_content`）。
+  `function_call.py` / `context_inject.py` / `deep_analyze_consumer.py` 三处同步。
+- **文档**：README FAQ 补充"本地模型必须支持工具调用"的判据与两条常见故障对照。
+
+> 未采纳：反馈称 `python-evtx` 在代码中未被使用、建议从 `requirements.txt` 删除——
+> 实际 `detectors.py` / `analyzers/dump_parser.py` 两处在用（`from Evtx.Evtx import Evtx`），保留。
+> `deploy/doctor.sh` 亦早已检测 `7z`/`lzop`/`unrar`，无需新增。
+
 ## v1.0.8 — 2026-09-27（外部安全测试问题修复）
 
 > 来源：外部安全测试报告（被测版本 v1.0.7）。报告 8 项问题全部修复，

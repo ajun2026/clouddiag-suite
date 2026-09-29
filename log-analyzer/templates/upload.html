@@ -82,6 +82,7 @@
 <body>
 <div style="padding:10px 16px;border-bottom:1px solid #30363d;background:#161b22;">
   <a href="/dashboard" style="color:#58a6ff;text-decoration:none;font-size:13px;">← 返回主界面</a>
+  <a href="#" onclick="logoutIdg();return false;" style="color:#8b949e;text-decoration:none;font-size:13px;margin-left:12px;">🚪 退出登录</a>
 </div>
     <div class="container">
         <label class="upload-zone" id="upload-zone" for="file-input">
@@ -350,6 +351,17 @@
 
         console.log('✅ 页面初始化完成');
     })();
-    </script>
+    
+// 2026-09-29 修复（外部反馈 P1）：游客从工作台自动跳到本页后，页面只有「← 返回主界面」，
+// 点回去又被自动跳回本页 → 无法退出。此处补一个退出登录入口（同源调 CloudDiag 的登出接口）。
+function logoutIdg() {
+  fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    .catch(function () {})
+    .then(function () {
+      try { localStorage.clear(); } catch (e) {}
+      location.href = '/login';
+    });
+}
+</script>
 </body>
 </html>

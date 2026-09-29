@@ -1542,15 +1542,41 @@ function syncBatButtonVisible() {
 function copyConnectCmd() {
   const el = document.getElementById('cp-cmd');
   if (!el) return;
-  const t = el.textContent || '';
-  navigator.clipboard.writeText(t).then(() => {
-    const h = document.getElementById('cp-hint');
-    if (h) { const old = h.textContent; h.textContent = '✅ 已复制到剪贴板'; setTimeout(() => { h.textContent = old; }, 2000); }
-  }).catch(() => {
-    // 降级：选中让用户手动复制
-    const r = document.createRange(); r.selectNodeContents(el);
-    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-  });
+  copyTextSafe(el.textContent || '',
+    () => setCopyHint('✅ 已复制到剪贴板'),
+    () => setCopyHint('❌ 复制失败——请手动选中文本复制'));
+}
+
+// 2026-09-29 修复（外部反馈 P1）：HTTP/局域网 IP 属"非安全上下文"，navigator.clipboard
+// 此时为 undefined——原写法 navigator.clipboard.writeText(...) 当场抛 TypeError（同步），
+// 连 .catch() 都进不去，表现为"点了复制没反应"。改为：能用 API 才用，否则降级 execCommand，
+// 两条路径都给出明确成功/失败提示。
+function copyTextSafe(text, ok, fail) {
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      const done = document.execCommand('copy');
+      document.body.removeChild(ta);
+      done ? ok() : fail();
+    } catch (e) { fail(); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
+function setCopyHint(msg) {
+  const h = document.getElementById('cp-hint');
+  if (!h) return;
+  if (h._t) clearTimeout(h._t);
+  const orig = h.dataset.copyHintOrig || h.textContent;
+  h.dataset.copyHintOrig = orig;
+  h.textContent = msg;
+  h._t = setTimeout(() => { h.textContent = orig; }, 2200);
 }
 
 // ══ 结束诊断 ══

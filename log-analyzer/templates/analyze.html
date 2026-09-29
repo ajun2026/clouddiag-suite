@@ -190,6 +190,7 @@
             <div class="sidebar-head">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
                     <a href="/dashboard" style="color:var(--info);text-decoration:none;font-size:13px;" title="返回工作台">← 返回主界面</a>
+                    <a href="#" onclick="logoutIdg();return false;" style="color:var(--text2);text-decoration:none;font-size:13px;margin-left:10px;" title="清空登录状态并回到登录页">🚪 退出登录</a>
                 </div>
                 <h3 style="margin-bottom:0;">📁 诊断文件 <span style="font-size:11px;color:var(--text2);" id="job-id-display"></span></h3>
             </div>
@@ -1537,6 +1538,17 @@
                 console.error('BMC setup error:', e);
             }
         }
-    </script>
+    
+// 2026-09-29 修复（外部反馈 P1）：游客从工作台自动跳到本页后，页面只有「← 返回主界面」，
+// 点回去又被自动跳回本页 → 无法退出。此处补一个退出登录入口（同源调 CloudDiag 的登出接口）。
+function logoutIdg() {
+  fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    .catch(function () {})
+    .then(function () {
+      try { localStorage.clear(); } catch (e) {}
+      location.href = '/login';
+    });
+}
+</script>
 </body>
 </html>

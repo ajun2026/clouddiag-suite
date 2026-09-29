@@ -1597,14 +1597,12 @@ function chooseInterface(room, sn, ticket, title) {
 }
 // 复制房间码（分流弹窗内）
 function copyRoomCodeNew(code) {
-  navigator.clipboard.writeText(code).then(function () {
+  copyText(code).then(function (ok) {
     const b = document.getElementById('iface-copy-btn');
-    if (b) { const old = b.textContent; b.textContent = '✅ 已复制'; setTimeout(function () { b.textContent = old; }, 1800); }
-  }).catch(function () {
-    // 降级：选中弹窗里的房间码文本
-    const sel = window.getSelection(); const r = document.createRange();
-    const b = document.getElementById('iface-copy-btn');
-    if (b && b.previousElementSibling) { r.selectNodeContents(b.previousElementSibling); sel.removeAllRanges(); sel.addRange(r); }
+    if (!b) return;
+    const old = b.textContent;
+    b.textContent = ok ? '✅ 已复制' : '❌ 复制失败——请手动选中';
+    setTimeout(function () { b.textContent = old; }, 1800);
   });
 }
 
@@ -1765,8 +1763,7 @@ function fieldGuideCopy() {
   const hint = fieldGuideOs === 'linux'
     ? 'Linux 命令已复制——粘贴到客户机终端（bash）运行即可连接'
     : '一键命令已复制——粘贴到客户机 PowerShell 运行即可连接';
-  navigator.clipboard.writeText(cmd).then(() => alert(hint))
-    .catch(() => { prompt(hint + '：', cmd); });
+  copyText(cmd).then((ok) => { if (ok) { alert(hint); } else { prompt(hint + '（自动复制失败，请手动复制）：', cmd); } });
 }
 
 function fieldGuideBat() {
@@ -3369,7 +3366,7 @@ function closeLogModal() {
 
 function copyLogText() {
   const text = document.getElementById('log-modal-content').textContent;
-  navigator.clipboard.writeText(text).then(() => alert('已复制全部内容')).catch(() => alert('复制失败'));
+  copyText(text).then((ok) => alert(ok ? '已复制全部内容' : '复制失败——请手动选中文本复制'));
 }
 
 function downloadLogTxt() {
@@ -3490,21 +3487,25 @@ function copyCmd(el) {
 
 // 通用复制：HTTP 环境下 navigator.clipboard 不可用（非安全上下文），自动降级 execCommand
 function copyText(text) {
-  return new Promise((resolve, reject) => {
+  // 2026-09-29：resolve(true/false) 回报成功与否——HTTP 环境下 Clipboard API 不存在，
+  // 走到 fallbackCopy；调用方据布尔值给出明确提示（原来静默、用户以为没复制）
+  return new Promise((resolve) => {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(resolve).catch(() => fallbackCopy(text, resolve));
+      navigator.clipboard.writeText(text).then(() => resolve(true)).catch(() => resolve(fallbackCopy(text)));
     } else {
-      fallbackCopy(text, resolve);
+      resolve(fallbackCopy(text));
     }
   });
 }
 
-function fallbackCopy(text, done) {
+function fallbackCopy(text) {
   const ta = document.createElement('textarea');
   ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
   document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); done(); } catch (e) { }
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
   document.body.removeChild(ta);
+  return ok;
 }
 
 document.getElementById('f-join').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });

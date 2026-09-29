@@ -1134,9 +1134,9 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.8", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.9", docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -2065,7 +2065,7 @@ async def quick_diagnoses(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.8"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.9"}
 
 
 @app.post("/api/debug_log")
@@ -2817,7 +2817,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "1.0.8",
+        "version": "1.0.9",
     }
 
 
@@ -5804,28 +5804,48 @@ async def tools_upload(request: Request):
         room.pending_commands.pop(fid, None)
         return JSONResponse({"error": f"发送上传指令失败: {e}"}, status_code=500)
 
-    # 等 bridge 分块传完（大文件——最长 600s）
+    # 等待 bridge 完成上传（2026-09-29 P0 修复：原来对同一个 future 连等两次，且第一次 finally
+    # 就把 fid 从 pending_commands 摘掉——bridge 后续回包找不到 fid。现在只等一次、只在一处 pop）
     try:
         result = await asyncio.wait_for(fut, timeout=600)
     except asyncio.TimeoutError:
-        room.pending_commands.pop(fid, None)
-        return JSONResponse({"error": "上传超时（600s）——文件可能过大或网络慢"}, status_code=504)
+        return JSONResponse({
+            "error": "上传超时：客户机桥接器 600s 内未完成上传"
+                     "（请检查客户机→服务器网络，或文件是否过大）",
+        }, status_code=504)
     finally:
         room.pending_commands.pop(fid, None)
-    # 等 bridge HTTP 直传完成（bridge 收到 file_upload_request → POST /api/bridge/upload → 回 file_upload_result{job}）
-    try:
-        result = await asyncio.wait_for(fut, timeout=600)
-    except asyncio.TimeoutError:
-        room.pending_commands.pop(fid, None)
-        return JSONResponse({"error": "上传超时——文件可能过大或网络慢"}, status_code=504)
-    finally:
-        room.pending_commands.pop(fid, None)
-    if not result.startswith("[upjob]"):
-        return JSONResponse({"error": f"上传失败: {result[:200]}"}, status_code=500)
-    job_id = result.split("job=")[1].strip()
-    return JSONResponse({"ok": True, "job_id": job_id,
-                         "analyze_url": f"/log-analyzer/analyze/{job_id}"})
+    if result.startswith("[upjob]"):
+        job_id = result.split("job=")[1].strip()
+        return JSONResponse({"ok": True, "job_id": job_id,
+                             "analyze_url": f"/log-analyzer/analyze/{job_id}"})
+    # 失败原因（IDG 上传失败 / bridge 报错）原样透出，不再伪装成"超时"
+    if result.startswith(("[upload_fail]", "[file_error]")):
+        _reason = result.split("]", 1)[1].strip()
+    else:
+        _reason = result[:200]
+    return JSONResponse({"error": f"上传失败: {_reason}"}, status_code=502)
 
+
+
+def _resolve_pending(room_code: str, fid: str, value: str) -> None:
+    """把上传结果（成功/失败）立刻写回等待中的工具调用。
+
+    2026-09-29 修复（外部反馈 P0 · 误报 600s 超时）：
+      原来只有【成功】路径才给 future 塞结果，失败结果完全依赖 bridge 的 WS 回传
+      （file_upload_result / file_upload_error）。客户机网络异常时 WS 往往已断开，
+      于是 /api/tools/upload 只能干等到 600s 超时，前端显示"上传超时"——
+      真实原因（如 IDG 缺 7z 导致解压失败）被彻底掩盖。
+    """
+    if not fid:
+        return
+    rm = rooms.get(room_code)
+    fut = rm.pending_commands.get(fid) if rm else None
+    if fut and not fut.done():
+        try:
+            fut.set_result(value)
+        except Exception:
+            pass
 
 
 @app.post("/api/bridge/upload")
@@ -5880,18 +5900,12 @@ async def bridge_upload(request: Request, file: UploadFile = File(...)):
                 )
         d = resp.json()
         if resp.status_code != 200 or not d.get("job_id"):
-            return JSONResponse({"error": f"IDG 上传失败: {d.get('error', resp.status_code)}"}, status_code=502)
+            _err = f"IDG 上传失败: {d.get('error', resp.status_code)}"
+            # 2026-09-29 P0：失败也要立刻回写 future——前端秒看到真原因，不再干等 600s
+            _resolve_pending(room_code, request.query_params.get("fid", ""), f"[upload_fail] {_err}")
+            return JSONResponse({"error": _err}, status_code=502)
         # 2026-09-10：直接完成 pending future（不依赖 bridge WS 回传——防 bridge 断线丢结果导致前端卡死）
-        fid = request.query_params.get("fid", "")
-        if fid:
-            rm = rooms.get(room_code)
-            if rm:
-                fut = rm.pending_commands.get(fid)
-                if fut and not fut.done():
-                    try:
-                        fut.set_result(f"[upjob] job={d['job_id']}")
-                    except Exception:
-                        pass
+        _resolve_pending(room_code, request.query_params.get("fid", ""), f"[upjob] job={d['job_id']}")
         return JSONResponse({"ok": True, "job_id": d["job_id"],
                              "analyze_url": f"/log-analyzer/analyze/{d['job_id']}"})
     except Exception as e:

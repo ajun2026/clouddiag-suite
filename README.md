@@ -150,8 +150,10 @@ sudo apt install -y caddy
 | 上传 .rar 报「服务器错误」 | 缺 7z / unrar | 装 `p7zip-full`（+ optional `unrar`），见[事故记录](docs/风险与事故记录/) |
 | AI 分析报「空回复」 | 网关抖动 / 推理模型 content 为空 | 已内置 3 次重试 + reasoning 兜底；持续失败需查网关 |
 | 桥接器连不上 | 地址协议不对 / 端口不通 | HTTP 部署用 `ws://`，HTTPS 用 `wss://`；检查端口 |
+| 上传 .7z 报「解压失败」 | 服务器既无 `7z` 也无 `py7zr` | 已内置 py7zr 兜底；仍失败则 `apt install p7zip-full`（见[事故记录](docs/风险与事故记录/)）|
+| 上传后只显示「上传超时」 | 旧版把失败结果埋在 WS 回传里，WS 一断就干等 600s | 升级到 v1.0.9+，失败原因会立刻显示 |
 | Linux 上敲 `bridge` 弹出诊断程序 | 历史版本命名冲突（现已改名） | 升级到 `clouddiag-bridge`（见[事故记录 A1](docs/风险与事故记录/)） |
-| **能不能用别的 AI 模型？** | — | **可以**。任何 OpenAI 兼容接口都支持：改 `.env` 的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` 即可（OpenAI / 通义 / 智谱 / 中转站 / 本地 Ollama 均可）。🔴 前提：模型**必须支持 Function Calling**，否则诊断无法下发命令。详见 [.env.example](clouddiag-server/.env.example) |
+| **能不能用别的 AI 模型？** | — | **可以**。任何 OpenAI 兼容接口都支持：改 `.env` 的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` 即可（OpenAI / 通义 / 智谱 / 中转站 / 本地 Ollama 均可）。🔴 前提：模型**必须支持 Function Calling**，否则诊断无法下发命令。本地 Ollama 请选**支持 tools 调用**的模型（具体以模型官方说明为准）；若 AI 分析报「所有通道均失败」且错误明细里全是「空回复」，即为该模型不支持工具调用——换支持工具调用的模型即可。详见 [.env.example](clouddiag-server/.env.example) |
 
 更多见 [docs/04-常见问题.md](docs/04-常见问题.md)。
 
@@ -172,6 +174,9 @@ sudo apt install -y caddy
 | D1 | 包内混入旧文件，覆盖现网修复 | 运维 |
 | A7 | `install.sh` 覆盖已有 `.env`（已加固） | 部署 |
 | C2 | 外部安全测试发现 8 项（鉴权绕过 / XSS 等） | 安全 |
+| C3 | 根目录上溯越界（读到宿主机数据） | 安全 |
+| D3 | 上传失败被伪装成"600s 超时" | 运维 |
+| E2 | HTTP 部署下 3 处交互缺陷（复制 / 游客退出 / 模型提示） | 产品 |
 
 完整索引：[docs/风险与事故记录/README.md](docs/风险与事故记录/README.md)
 
@@ -181,6 +186,7 @@ sudo apt install -y caddy
 
 | 版本 | 说明 |
 |---|---|
+| **v1.0.9** | 外部使用反馈修复：root 上溯越界（读宿主机数据）/ 上传失败伪装成 600s 超时 / `.7z` 缺 7z 时 py7zr 兜底 / IDG 退出登录入口 / HTTP 下复制按钮降级 / 模型工具调用提示 |
 | **v1.0.8** | 外部安全测试 8 项问题修复（WebSocket 鉴权绕过 / 存储型 XSS / 非法 JSON 500 / 版本号统一 等）|
 | **v1.0.7** | 部署引导完善（三种形态对齐 / install.sh 支持 FRP + 任意 OpenAI 兼容模型引导）+ 脚本覆盖 .env 加固 |
 | **v1.0.6** | 界面体验与部署普适性优化（IDG 独立全屏 + 布局固定 + 页签精简 / 导航闭环 / 一键连接自动提权 / 工具下载降级 / 8443 可配置 / 英文系统兼容） |
