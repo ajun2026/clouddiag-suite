@@ -1563,6 +1563,20 @@ function openIdgJob(jobId) {
 
 // 打开对话（iframe 加载 /chat?room=XXX，不跳页）
 // ── 界面分流弹窗（2026-09-16）：创建/加入房间后选择进入哪个界面 ──
+// ── P0（2026-10-12）：界面介绍里的项数动态取自服务端，不再写死 ──
+// diag-count-fill
+window.__diagCount = null;
+function diagCountText() { return window.__diagCount == null ? '多' : String(window.__diagCount); }
+function fillDiagCount() {
+  const v = diagCountText();
+  document.querySelectorAll('.diag-count').forEach(el => { if (el.textContent !== v) el.textContent = v; });
+}
+(function loadDiagCount() {
+  fetch('/api/quick_diagnoses').then(r => r.ok ? r.json() : Promise.reject('HTTP ' + r.status))
+    .then(list => { if (Array.isArray(list) && list.length) { window.__diagCount = list.length; fillDiagCount(); } })
+    .catch(e => console.warn('诊断项数量获取失败（文案回退为“多”）：', e));
+})();
+
 function chooseInterface(room, sn, ticket, title) {
   const old = document.getElementById('iface-modal');
   if (old) old.remove();
@@ -1581,7 +1595,7 @@ function chooseInterface(room, sn, ticket, title) {
     + '<div onclick="ifaceGo(\'/diag?room=' + room + (sn ? '&sn=' + encodeURIComponent(sn) : '') + (ticket ? '&ticket=' + encodeURIComponent(ticket) : '') + '\')" '
     + 'style="cursor:pointer;border:1.5px solid #58a6ff;background:rgba(56,139,253,.08);border-radius:10px;padding:15px 18px;margin-bottom:12px;">'
     + '<div style="font-size:14.5px;font-weight:650;color:#e6edf3;margin-bottom:4px;">🔍 诊断台（推荐）</div>'
-    + '<div style="font-size:12.5px;color:#8b949e;line-height:1.55;">左侧 26 项诊断工具 → 右侧结构化结果（采集项清单 / 观察 / 依据 / 缺失）<br>点击工具自动执行标准化诊断，结果可追溯</div>'
+    + '<div style="font-size:12.5px;color:#8b949e;line-height:1.55;">左侧 <span class="diag-count">多</span> 项诊断工具 → 右侧结构化结果（采集项清单 / 观察 / 依据 / 缺失 / 初步判读）<br>每条判读结论标注依据、置信度与未知项，结果可追溯</div>'
     + '</div>'
 
     + '<div onclick="ifaceGo(\'/chat?room=' + room + '\')" '
@@ -1594,6 +1608,7 @@ function chooseInterface(room, sn, ticket, title) {
     + 'style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:7px;padding:7px 16px;font-size:13px;cursor:pointer;">稍后再说</button></div>'
     + '</div>';
   document.body.appendChild(box);
+  fillDiagCount();   // P0：卡片渲染后回填真实项数（服务端清单条数）
 }
 // 复制房间码（分流弹窗内）
 function copyRoomCodeNew(code) {

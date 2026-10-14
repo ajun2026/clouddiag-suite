@@ -171,7 +171,24 @@
   .bubble th,.bubble td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)}
   .bubble th{color:var(--text2);font-size:11.5px;background:var(--surface2)}
   .bubble code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px;color:#79c0ff}
+
+  /* ── A档（2026-10-12）：判读三件套徽章 —— 加法式新增，不影响既有样式 ── */
+  .jj-chip{display:inline-block;margin:0 4px 0 0;padding:1px 7px;border-radius:9px;font-size:11.5px;
+           line-height:17px;white-space:nowrap;border:1px solid transparent}
+  .jj-evidence{color:#79c0ff;background:rgba(56,139,253,.12);border-color:rgba(56,139,253,.35)}
+  .jj-conf-high{color:#3fb950;background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.35)}
+  .jj-conf-mid{color:#d29922;background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.35)}
+  .jj-conf-low{color:#f85149;background:rgba(248,81,73,.12);border-color:rgba(248,81,73,.35)}
+  .jj-unknown{color:#8b949e;background:rgba(139,148,158,.12);border-color:rgba(139,148,158,.3)}
+  .jj-coverage{display:block;margin-top:8px;padding:5px 9px;border-left:3px solid #8957e5;
+               background:rgba(137,87,229,.08);color:#c9a9ff;font-size:12px;border-radius:0 6px 6px 0}
+.jj-conf-na{color:#6e7681;background:rgba(110,118,129,.12);border-color:rgba(110,118,129,.3)}
+.jj-evidence-none{color:#6e7681;background:rgba(110,118,129,.10);border-color:rgba(110,118,129,.28)}
+.jj-reason{font-size:11.5px;color:#7d8590;margin-right:6px;white-space:normal}
+.jj-unknown{color:#9aa4b0}
+.jj-chip{margin-right:6px}
 </style>
+
 </head>
 <body>
 
@@ -874,7 +891,7 @@ function pick(el) {
   diagBuffer = [];
   setCardState(key, 'running');
   showLoading(icon + ' ' + title + ' · 调查中…');
-  const FIVE = '输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。';
+  const FIVE = '输出用五段：【采集项】（本次实际采集项，逐项标 成功/失败(原因)/不适用）、【观察】（事实：数值/时间/事件ID，无建议）、【依据】（支撑每条观察的本次采集字段）、【缺失】（应采未采的项，无则写「无」）、【初步判读】（方向提示：数据指向哪些方向、优先关注什么、下一步核验什么——不是结论）。【初步判读】禁止武断措辞（如"肯定是/必须更换/一定是"），用"倾向于/提示…方向/需结合…确认"这类措辞；数据不足时直接写"当前数据不足以判读方向"。【初步判读】每条结论独占一行并携带三件套标签：【依据: 本次采集到的具体字段/数值】 【置信度: 高|中|低 — 一句话理由】 【未知: 影响该结论但未采集或无法确认的内容，无则写 —】；数据不足时写「▸ 当前数据不足以判读方向 【依据: 无】 【置信度: —】 【未知: <缺什么>】」；最后单独一行给出：【覆盖度】采集 X 项 · 缺失 Y 项 · 不适用 Z 项。';
   const base = PROMPTS[key] || ('请对这台电脑执行【' + title + '调查】，逐项采集并输出五段：');
   // 去掉 prompt 里已有的"输出用N段"尾巴（避免重复），再统一追加五段要求
   const prompt = base.replace(/输出用[三四五]段：[\s\S]*$/, '');
@@ -956,13 +973,36 @@ function renderResult(room, md) {
   const prog = document.getElementById('diag-progress');
   if (prog) prog.remove();
   let html = '<div class="result-title">📋 诊断结果</div>';
-  html += renderDiagnosis(md);
+  html += chipifyHtml(renderDiagnosis(md));   // A档：三件套徽章
   html += '<div style="margin-top:18px;"><button class="hdr-btn" onclick="showRaw()">📄 查看原始输出</button></div>';
   html += '<div id="raw-out" style="display:none;margin-top:10px;padding:12px;background:#010409;border:1px solid #30363d;border-radius:8px;font-size:12.5px;white-space:pre-wrap;color:#c9d1d9;">' + esc(md) + '</div>';
   p.innerHTML = html;
 }
 function showRaw() { const el = document.getElementById('raw-out'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
 
+// ── A档（2026-10-12）：判读三件套徽章 —— 把【依据: …】【置信度: …】【未知: …】【覆盖度】渲染成彩色徽章 ──
+// 加法式：作用在既有渲染结果上做标签替换，不改动任何原渲染逻辑；整段删除即回退。
+function chipifyHtml(html) {
+  // 允许值里含 markdown 渲染出的行内标签（<b>/<code> 等），但不跨行（遇 <br> 即止），长度有界
+  var out = String(html || '').replace(/【(依据|置信度|未知)[:：]\s*((?:(?!<br)[^】]){0,300}?)】/g, function (m, k, v) {
+    var t = (v || '').trim();
+    if (k === '依据') return '<span class="jj-chip ' + (/^(无|—|-|N\/A)/.test(t) ? 'jj-evidence-none' : 'jj-evidence') + '">依据 · ' + t + '</span>';
+    if (k === '置信度') {
+      var lvl = t, rsn = '', mm = t.match(/^([^—–\-（(]*?)\s*(?:[—–-]|（|\()\s*([\s\S]+)$/);
+      if (mm) { lvl = mm[1].trim(); rsn = mm[2].trim().replace(/[）)]\s*$/, '').trim(); }
+      if (!lvl || lvl === '—' || lvl === '-') {
+        return '<span class="jj-chip jj-conf-na">置信度 · 不适用</span>' + (rsn ? '<span class="jj-reason">' + rsn + '</span>' : '');
+      }
+      var cls = /高/.test(lvl) ? 'jj-conf-high' : (/中/.test(lvl) ? 'jj-conf-mid' : (/低/.test(lvl) ? 'jj-conf-low' : 'jj-conf-na'));
+      return '<span class="jj-chip ' + cls + '">置信度 · ' + lvl + '</span>' + (rsn ? '<span class="jj-reason">' + rsn + '</span>' : '');
+    }
+    return '<span class="jj-chip jj-unknown">未知 · ' + t + '</span>';
+  });
+  // 覆盖度行同样允许行内标签，到行尾（<br>/块结束）为止
+  return out.replace(/【覆盖度】\s*([\s\S]{0,200}?)(?=<br|<\/div|<\/p|$)/g, function (m, v) {
+    return '<span class="jj-coverage">📐 覆盖度 · ' + (v || '').trim() + '</span>';
+  });
+}
 function renderDiagnosis(md) {
   md = String(md || '');
   if (md.indexOf('【采集项】') === -1) return '<div class="obs-box">' + renderMd(md) + '</div>';
@@ -1168,10 +1208,27 @@ function renderDriverTable(d) {
   const groups = {};
   list.forEach(function (dr) { const k = dr.category || '其他'; (groups[k] = groups[k] || []).push(dr); });
 
+  // 适用系统（官网同源）：用于筛选 + 「适配本机系统」标注
+  const clientOs = (mach.os || '').trim();
+  const searchKey = mach.search_key || '';
+  const fams = [];
+  list.forEach(function (dr) { (dr.os_family || []).forEach(function (f) { if (fams.indexOf(f) < 0) fams.push(f); }); });
+  fams.sort();
+
   let html = '<div class="result-title">📥 联想官网驱动清单' + (d.cached ? ' <span style="font-size:11px;color:#3fb950;">（缓存）</span>' : '') + '</div>';
-  html += '<div style="font-size:12.5px;color:#8b949e;margin-bottom:10px;">机型：<b style="color:#e6edf3">' + esc(model || '-') + '</b>'
+  html += '<div style="font-size:12.5px;color:#8b949e;margin-bottom:8px;">机型：<b style="color:#e6edf3">' + esc(model || '-') + '</b>'
     + (sn ? ' | SN：' + esc(sn) : '') + ' | 共 <b style="color:#e6edf3">' + list.length + '</b> 项'
+    + (clientOs ? ' | 本机系统：<b style="color:#3fb950">' + esc(clientOs) + '</b>' : '')
     + (d.note ? '<br>📝 ' + esc(d.note) : '') + '</div>';
+
+  html += '<div class="drv-wrap">';
+  html += '<div style="font-size:12px;color:#8b949e;margin-bottom:8px;">适用系统：'
+    + '<select class="drv-os-sel" onchange="drvApplyFilter(this)" style="background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:2px 6px;font-size:12px;">'
+    + '<option value="">全部系统</option>'
+    + fams.map(function (f) { return '<option value="' + esc(f) + '"' + (f === clientOs ? ' selected' : '') + '>' + esc(f) + '</option>'; }).join('')
+    + '</select><span class="drv-cnt" style="margin-left:8px;"></span>'
+    + (clientOs ? '<span style="margin-left:10px;">✅ 适配本机系统（' + esc(clientOs) + '）</span>' : '')
+    + '<span class="drv-msg" style="margin-left:10px;color:#58a6ff;"></span></div>';
 
   Object.keys(groups).forEach(function (cat) {
     const arr = groups[cat];
@@ -1181,18 +1238,77 @@ function renderDriverTable(d) {
       const ver = dr.version || dr.ver || '';
       const date = dr.date || dr.release_date || '';
       const size = dr.size || dr.filesize || '';
-      const url = dr.url || dr.download_url || dr.link || '';
-      rows += '<tr><td style="font-size:12px;">' + esc(name) + '</td>'
+      const matched = clientOs && (dr.os_family || []).indexOf(clientOs) >= 0;
+      rows += '<tr class="drv-row" data-os="' + esc((dr.os_family || []).join('|')) + '" data-grp="' + esc(cat) + '">'
+        + '<td style="font-size:12px;">' + esc(name) + (matched ? ' <span title="适配本机系统">✅</span>' : '') + '</td>'
         + '<td style="font-size:11.5px;color:#8b949e;">' + esc(ver) + '</td>'
         + '<td style="font-size:11.5px;color:#8b949e;">' + esc(date) + '</td>'
         + '<td style="font-size:11.5px;color:#8b949e;">' + esc(size) + '</td>'
-        + '<td>' + (url ? '<a href="' + esc(url) + '" target="_blank" style="color:#58a6ff;">下载</a>' : '—') + '</td></tr>';
+        + '<td style="font-size:11.5px;color:#8b949e;">' + esc((dr.os_tags || []).join(' / ')) + '</td>'
+        + '<td><button type="button" class="drv-dl" onclick="drvDownload(this)" data-key="' + esc(searchKey) + '" data-name="' + esc(dr.name_raw || name) + '" data-ver="' + esc(ver) + '"'
+        + ' style="cursor:pointer;background:transparent;border:1px solid #30363d;color:#58a6ff;border-radius:4px;padding:2px 9px;font-size:12px;">下载</button></td></tr>';
     });
-    html += '<div class="sec-label">📂 ' + esc(cat) + '（' + arr.length + '）</div>'
+    html += '<div class="sec-label" data-grp-head="' + esc(cat) + '">📂 ' + esc(cat) + '（' + arr.length + '）</div>'
       + '<div class="obs-box" style="padding:6px 12px;"><table>'
-      + '<tr><th>驱动名称</th><th>版本</th><th>日期</th><th>大小</th><th>链接</th></tr>' + rows + '</table></div>';
+      + '<tr><th>驱动名称</th><th>版本</th><th>日期</th><th>大小</th><th>适用系统</th><th>下载</th></tr>' + rows + '</table></div>';
   });
+  html += '</div>';
   p.innerHTML = html;
+  const sel0 = p.querySelector('.drv-os-sel');
+  if (sel0) drvApplyFilter(sel0);
+}
+
+// 驱动清单筛选：按「适用系统」收敛显示（默认选中本机系统，与官网一致）
+function drvApplyFilter(sel) {
+  const wrap = sel.closest('.drv-wrap');
+  if (!wrap) return;
+  const want = sel.value;
+  const vis = {};
+  let shown = 0, total = 0;
+  wrap.querySelectorAll('tr.drv-row').forEach(function (tr) {
+    total++;
+    const ok = !want || (tr.getAttribute('data-os') || '').split('|').indexOf(want) >= 0;
+    tr.style.display = ok ? '' : 'none';
+    if (ok) { shown++; const g = tr.getAttribute('data-grp'); vis[g] = 1; }
+  });
+  wrap.querySelectorAll('[data-grp-head]').forEach(function (h) {
+    h.style.display = vis[h.getAttribute('data-grp-head')] ? '' : 'none';
+  });
+  const cnt = wrap.querySelector('.drv-cnt');
+  if (cnt) cnt.textContent = want ? '（' + want + '：' + shown + ' / ' + total + ' 项）' : '（共 ' + total + ' 项）';
+}
+
+// 下载：点击时实时换新链接（联想 CDN 直链带时效 token，缓存过的必然 403）
+function drvDownload(btn) {
+  if (btn.disabled) return;
+  const wrap = btn.closest('.drv-wrap');
+  const msg = wrap ? wrap.querySelector('.drv-msg') : null;
+  const label = btn.textContent;
+  const say = function (t) { if (msg) msg.textContent = t; };
+  btn.disabled = true; btn.textContent = '获取链接…'; say('');
+  const payload = {
+    key: btn.getAttribute('data-key') || '',
+    name: btn.getAttribute('data-name') || '',
+    version: btn.getAttribute('data-ver') || '',
+    room_code: (typeof ROOM !== 'undefined' && ROOM) ? ROOM : ''
+  };
+  fetch('/api/tools/drivers/link', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+    .then(function (res) {
+      const d = res.d || {};
+      if (!res.ok || d.status === 'error' || !d.url) {
+        btn.textContent = '重试'; btn.disabled = false; say('⚠️ ' + (d.error || '下载链接获取失败')); return;
+      }
+      const f = document.createElement('iframe');       // 隐藏 iframe 触发下载：当前页面不跳转、不新开标签页
+      f.style.display = 'none'; f.src = d.url;
+      document.body.appendChild(f);
+      setTimeout(function () { f.remove(); }, 60000);
+      btn.textContent = '已开始下载';
+      say('✅ 开始下载：' + (d.name || '') + (d.attempts > 1 ? '（已自动重取链接）' : ''));
+      setTimeout(function () { btn.textContent = label; btn.disabled = false; }, 3000);
+    })
+    .catch(function (e) { btn.textContent = '重试'; btn.disabled = false; say('⚠️ 下载链接获取失败：' + e.message); });
 }
 
 // ══ 审批弹窗（Tier 2/3 安全边界——与对话页一致）══
@@ -1501,7 +1617,7 @@ async function downloadBat() {
   const d = roomConnData || {};
   const dl = d.downloads || {};
     // 2026-09-25 二次修正：优先用【同源相对路径】下载 .bat。
-    // 原因：服务端 downloads.bat 返回的是公网绝对地址（如 https://clouddiag.online/...），
+    // 原因：服务端 downloads.bat 返回的是公网绝对地址（如 https://<部署域名>/...），
     // 当页面通过其他来源访问（如内网 IP / 反向代理 / 本地调试）时会变成跨域 fetch → Failed to fetch。
     // 用相对路径（/api/room_bat/XXX）始终同源，且保留 dl.bat 作为兜底。
     const url = ROOM ? ('/api/room_bat/' + encodeURIComponent(ROOM)) : (dl.bat || '');

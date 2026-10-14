@@ -15,14 +15,19 @@
 # ============================================================
 
 SERVER="{{PUBLIC_URL}}"
-# 备用地址（2026-09-26 改为可配置）：由服务端注入 {{PUBLIC_URL_FALLBACK}}
-#   · 配置了 → 主地址不可达时自动切换（如生产 443 被中间设备拦截 → 切 :8443）
-#   · 未配置 → 与主地址相同（不做降级，适用于纯 HTTP / 内网 IP / FRP 单端口部署）
-FALLBACK="{{PUBLIC_URL_FALLBACK}}"
-if [ -n "$FALLBACK" ] && [ "$FALLBACK" != "$SERVER" ] && ! curl -sf --max-time 5 "$SERVER/api/health" >/dev/null 2>&1; then
-    echo "  主地址不可达，自动切换到备用地址: $FALLBACK"
-    SERVER="$FALLBACK"
-fi
+# 访问候选（2026-10-13 改为多级）：主地址 + 备用地址列表（逗号分隔，由服务端注入）
+#   · 未配置备用 → 只用主地址（适用于纯 HTTP / 内网 IP / FRP 单端口部署）
+#   · 配了多个   → 按顺序挑第一个可达的（如 443 被中间设备拦截 → 8443 → 明文 IP 兜底）
+FALLBACKS="{{PUBLIC_URL_FALLBACK}}"
+_PRIMARY="$SERVER"
+for _C in "$_PRIMARY" $(echo "$FALLBACKS" | tr ',' ' '); do
+    [ -z "$_C" ] && continue
+    if curl -sf --max-time 5 "$_C/api/health" >/dev/null 2>&1; then
+        [ "$_C" != "$_PRIMARY" ] && echo "  主地址不可达，已切换到备用地址: $_C"
+        SERVER="$_C"; break
+    fi
+    SERVER="$_C"
+done
 # WS 地址由 SERVER 推导（https→wss，http→ws）
 WS_URL="${SERVER/http:\/\//ws:\/\/}"
 WS_URL="${WS_URL/https:\/\//wss:\/\/}"

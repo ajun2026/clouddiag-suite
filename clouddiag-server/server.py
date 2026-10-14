@@ -972,6 +972,14 @@ Rules for 【初步判读】 — it must NOT be categorical/assertive:
 - Use hedged wording: "倾向于…"、"提示…方向"、"需结合…进一步确认"、"目前数据尚不足以…"
 - If evidence is insufficient, say so plainly — that is a valid and preferred outcome.
 
+### 三件套标签 — 【初步判读】每条结论的强制格式
+在【初步判读】中，每条结论独占一行，行内必须携带三个标签：
+▸ <倾向性结论> 【依据: 本次实际采集到的字段/事件ID/数值（含来源工具）】 【置信度: 高|中|低 — 一句话理由】 【未知: 影响该结论但本次未采集或无法确认的内容，无则写 —】
+- 【依据】必须引用【观察】里出现过的真实数据（带具体值）；只写工具名不算依据
+- 置信度判据：高＝≥2 条独立证据互相印证；中＝单一证据或存在其他解释；低＝仅间接线索
+- 若没有任何数据可支撑方向，就写一行：「▸ 当前数据不足以判读方向 【依据: 无】 【置信度: —】 【未知: <缺什么>】」
+- 【初步判读】的**最后必须单独一行**给出覆盖度：【覆盖度】采集 X 项 · 缺失 Y 项 · 不适用 Z 项
+
 Other rules: never recommend hardware replacement (that is the engineer's call); never present a clue as evidence; never present an unverified inference as established fact."""
 
 SYSTEM_PROMPT_LINUX = """You are a professional Linux remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's Linux machine to help troubleshoot computer issues.
@@ -1013,6 +1021,14 @@ FIVE sections, Chinese labels exactly as given:
 - FORBIDDEN: asserting "X is broken" / "must replace X" / replacement advice (warranty liability) / words like 肯定是/一定是/必然是
 - Use hedged wording: 倾向于…、提示…方向、需结合…进一步确认、目前数据尚不足以…
 
+### 三件套标签 — 【初步判读】每条结论的强制格式
+在【初步判读】中，每条结论独占一行，行内必须携带三个标签：
+▸ <倾向性结论> 【依据: 本次实际采集到的字段/事件ID/数值（含来源工具）】 【置信度: 高|中|低 — 一句话理由】 【未知: 影响该结论但本次未采集或无法确认的内容，无则写 —】
+- 【依据】必须引用【观察】里出现过的真实数据（带具体值）；只写工具名不算依据
+- 置信度判据：高＝≥2 条独立证据互相印证；中＝单一证据或存在其他解释；低＝仅间接线索
+- 若没有任何数据可支撑方向，就写一行：「▸ 当前数据不足以判读方向 【依据: 无】 【置信度: —】 【未知: <缺什么>】」
+- 【初步判读】的**最后必须单独一行**给出覆盖度：【覆盖度】采集 X 项 · 缺失 Y 项 · 不适用 Z 项
+
 Other rules: never recommend hardware replacement (engineer's call); never present a clue as evidence."""
 
 SYSTEM_PROMPT_MACOS = """You are a professional macOS remote diagnostics assistant. You remotely execute diagnostic commands via a bridge program installed on the user's Mac to help troubleshoot computer issues.
@@ -1051,6 +1067,14 @@ FIVE sections, Chinese labels exactly as given:
 - ALLOWED: likely direction (e.g. fails cluster around graphics) / priority items / what to verify next / plainly stating the data is insufficient
 - FORBIDDEN: asserting "X is broken" / "must replace X" / replacement advice (warranty liability) / words like 肯定是/一定是/必然是
 - Use hedged wording: 倾向于…、提示…方向、需结合…进一步确认、目前数据尚不足以…
+
+### 三件套标签 — 【初步判读】每条结论的强制格式
+在【初步判读】中，每条结论独占一行，行内必须携带三个标签：
+▸ <倾向性结论> 【依据: 本次实际采集到的字段/事件ID/数值（含来源工具）】 【置信度: 高|中|低 — 一句话理由】 【未知: 影响该结论但本次未采集或无法确认的内容，无则写 —】
+- 【依据】必须引用【观察】里出现过的真实数据（带具体值）；只写工具名不算依据
+- 置信度判据：高＝≥2 条独立证据互相印证；中＝单一证据或存在其他解释；低＝仅间接线索
+- 若没有任何数据可支撑方向，就写一行：「▸ 当前数据不足以判读方向 【依据: 无】 【置信度: —】 【未知: <缺什么>】」
+- 【初步判读】的**最后必须单独一行**给出覆盖度：【覆盖度】采集 X 项 · 缺失 Y 项 · 不适用 Z 项
 
 Other rules: never recommend hardware replacement (engineer's call); never present a clue as evidence."""
 
@@ -1134,9 +1158,9 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.1.0"
 
-app = FastAPI(title="Cloud AI Remote Diagnostics", version="1.0.9", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -1831,7 +1855,7 @@ def get_fallback_url(public_url: str) -> str:
     代码不再对任何部署形态做假设。
 
     配置方式（clouddiag-server/.env）：
-        PUBLIC_URL_FALLBACK=https://clouddiag.online:8443
+        PUBLIC_URL_FALLBACK=https://example.com:8443,http://192.0.2.10:8000
 
     读取优先级：
       1) .env 的 PUBLIC_URL_FALLBACK（推荐，显式配置）
@@ -1841,6 +1865,63 @@ def get_fallback_url(public_url: str) -> str:
     if fb and fb != (public_url or "").rstrip("/"):
         return fb
     return ""
+
+
+def get_fallback_urls(public_url: str) -> list:
+    """备用访问地址【列表】——2026-10-13 新增（多级降级，加法式，不改动 get_fallback_url 行为）。
+
+    .env 的 PUBLIC_URL_FALLBACK 支持逗号分隔多个地址，按书写顺序依次降级：
+        PUBLIC_URL_FALLBACK=https://example.com:8443,http://1.2.3.4:8000
+      · 未配置      → 返回 []（不降级，与旧版行为一致）
+      · 只配一个    → 返回长度 1 的列表（与旧版行为一致）
+    """
+    raw = os.getenv("PUBLIC_URL_FALLBACK", "").strip()
+    if not raw:
+        return []
+    primary = (public_url or "").rstrip("/")
+    out = []
+    for part in re.split(r"[,\s]+", raw):
+        u = part.strip().rstrip("/")
+        if u and u != primary and u not in out:
+            out.append(u)
+    return out
+
+
+def build_url_chain(public_url: str) -> list:
+    """访问候选链 = [主地址] + 备用地址列表（顺序即降级顺序）。"""
+    chain = []
+    p = (public_url or "").rstrip("/")
+    if p:
+        chain.append(p)
+    for u in get_fallback_urls(p):
+        if u not in chain:
+            chain.append(u)
+    return chain
+
+
+def to_ws(u: str) -> str:
+    """http/https → ws/wss（保持其余部分不变）。"""
+    return u.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+
+
+def _bat_url_cascade(chain: list) -> str:
+    """生成 Windows .bat 的多级地址选择段（2026-10-13 新增）。
+
+    逐个候选做健康检查（curl -skf，HTTP 非 2xx 也会返回非 0），第一个可达的即采用；
+    最后一个候选不再检查（作为最终兜底直接采用）。
+    用 goto 标签实现，避免 batch 括号块内变量延迟展开（delayedexpansion）陷阱。
+    """
+    out = []
+    last = len(chain) - 1
+    for i, u in enumerate(chain):
+        out.append('set "SRV=' + u + '"\r\n')
+        out.append('set "WSRV=' + to_ws(u) + '"\r\n')
+        if i < last:
+            out.append('curl -skf --max-time 5 -o NUL "' + u + '/api/health"\r\n')
+            out.append('if not errorlevel 1 goto srv_ready\r\n')
+    out.append(':srv_ready\r\n')
+    return "".join(out)
+
 
 
 async def _safe_json(request) -> dict:
@@ -1871,7 +1952,7 @@ def get_download_candidates(request: Request) -> list:
 
     返回示例：
         ["http://192.168.1.100:8000"]
-        ["https://clouddiag.online", "https://clouddiag.online:8443"]
+        ["https://example.com", "https://example.com:8443"]
     """
     public_url = get_public_url(request).rstrip("/")
     candidates = [public_url]
@@ -2065,7 +2146,7 @@ async def quick_diagnoses(request: Request):
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": "1.0.9"}
+    return {"status": "ok", "rooms": len(rooms), "tools": len(TOOLS), "version": APP_VERSION}
 
 
 @app.post("/api/debug_log")
@@ -2469,15 +2550,20 @@ async def room_connect(room_code: str, request: Request):
     # 未配置备用地址时，_fallback == _primary（脚本里等价于不降级）。
     _primary = public_url.rstrip("/")
     _fallback = get_fallback_url(_primary) or _primary
-    _ws_primary = _primary.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
-    _ws_fallback = _fallback.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+    _ws_primary = to_ws(_primary)
+    _ws_fallback = to_ws(_fallback)
+    # 2026-10-13 多级降级：主地址 → 备用1 → 备用2…（PUBLIC_URL_FALLBACK 逗号分隔，顺序即降级顺序）
+    _chain = build_url_chain(_primary) or [_primary]
 
     # 连接令牌：有效期内复用（多次获取不互相顶掉）
     token = get_or_create_room_token(room_code)
 
+    # 2026-10-13：改为多候选链 + 按【退出码】判断可达性
+    # （旧写法 if (!(curl.exe … -o NUL)) 判的是输出真值，空输出恒为"失败"，永远走备用地址）
     ps1_cmd = (
-        '$u="' + _primary + '"; '
-        + 'if (!(curl.exe -sk --max-time 5 "$u/api/health" -o NUL 2>$null)) { $u="' + _fallback + '" }; '
+        '$us=@(' + ",".join('"' + u + '"' for u in _chain) + '); $u=$null; '
+        + 'foreach($x in $us){ curl.exe -skf --max-time 5 "$x/api/health" -o NUL 2>$null; if ($LASTEXITCODE -eq 0) { $u=$x; break } }; '
+        + 'if (-not $u) { $u=$us[-1] }; '
         + '$env:BRIDGE_SERVER=($u -replace "^http","ws"); $env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; '
         + 'iex (iwr "$u/static/bridge.ps1" -UseBasicParsing).Content'
     )
@@ -2497,15 +2583,8 @@ async def room_connect(room_code: str, request: Request):
         "    exit /b\r\n"
         ")\r\n"
         "echo [1/3] Checking network...\r\n"
-        "curl -sk --max-time 5 -o NUL \"" + _primary + "/api/health\"\r\n"
-        "if errorlevel 1 (\r\n"
-        "    echo [1/3] Primary failed, using fallback...\r\n"
-        "    set \"SRV=" + _fallback + "\"\r\n"
-        "    set \"WSRV=" + _ws_fallback + "\"\r\n"
-        ") else (\r\n"
-        "    set \"SRV=" + _primary + "\"\r\n"
-        "    set \"WSRV=" + _ws_primary + "\"\r\n"
-        ")\r\n"
+        + _bat_url_cascade(_chain)
+        + "echo [1/3] Server: %SRV%\r\n"
         "echo [2/3] Downloading latest bridge...\r\n"
         "curl -sL -o \"clouddiag-bridge-win64.exe\" \"%SRV%/static/clouddiag-bridge-win64.exe\"\r\n"
         "if errorlevel 1 (\r\n"
@@ -2519,10 +2598,12 @@ async def room_connect(room_code: str, request: Request):
         "\"clouddiag-bridge-win64.exe\" -server %WSRV% -room " + room_code + " -token " + token + "\r\n"
         "pause\r\n"
     )
+    # 2026-10-13：多候选链（第一个可达的地址胜出；全不可达则用最后一个兜底）
     linux_cmd = (
-        "U=\"" + _primary + "\"; "
-        "curl -sf --max-time 5 \"$U/api/health\" >/dev/null 2>&1 || U=\"" + _fallback + "\"; "
-        "curl -sL \"$U/static/install-linux.sh\" | bash -s -- " + room_code + " " + token
+        'U="' + _chain[-1] + '"; '
+        + 'for X in ' + " ".join('"' + u + '"' for u in _chain) + '; do '
+        + 'curl -sf --max-time 5 "$X/api/health" >/dev/null 2>&1 && { U="$X"; break; }; done; '
+        + 'curl -sL "$U/static/install-linux.sh" | bash -s -- ' + room_code + ' ' + token
     )
 
     return {
@@ -2578,8 +2659,10 @@ async def room_bat(room_code: str, request: Request):
     # 2026-09-26 普适性修复：备用地址改为可配置项（PUBLIC_URL_FALLBACK），不再硬编码 :8443
     _primary = public_url.rstrip("/")
     _fallback = get_fallback_url(_primary) or _primary
-    _ws_primary = _primary.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
-    _ws_fallback = _fallback.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+    _ws_primary = to_ws(_primary)
+    _ws_fallback = to_ws(_fallback)
+    # 2026-10-13 多级降级：主地址 → 备用1 → 备用2…（PUBLIC_URL_FALLBACK 逗号分隔，顺序即降级顺序）
+    _chain = build_url_chain(_primary) or [_primary]
 
     # 连接令牌：有效期内复用（多次获取不互相顶掉）
     token = get_or_create_room_token(room_code)
@@ -2599,15 +2682,8 @@ async def room_bat(room_code: str, request: Request):
         "    exit /b\r\n"
         ")\r\n"
         "echo [1/3] Checking network...\r\n"
-        "curl -sk --max-time 5 -o NUL \"" + _primary + "/api/health\"\r\n"
-        "if errorlevel 1 (\r\n"
-        "    echo [1/3] Primary failed, using fallback...\r\n"
-        "    set \"SRV=" + _fallback + "\"\r\n"
-        "    set \"WSRV=" + _ws_fallback + "\"\r\n"
-        ") else (\r\n"
-        "    set \"SRV=" + _primary + "\"\r\n"
-        "    set \"WSRV=" + _ws_primary + "\"\r\n"
-        ")\r\n"
+        + _bat_url_cascade(_chain)
+        + "echo [1/3] Server: %SRV%\r\n"
         "echo [2/3] Downloading latest bridge...\r\n"
         "curl -sL -o \"clouddiag-bridge-win64.exe\" \"%SRV%/static/clouddiag-bridge-win64.exe\"\r\n"
         "if errorlevel 1 (\r\n"
@@ -2817,7 +2893,7 @@ async def admin_stats(request: Request):
         "active_count": len(active_rooms),
         **db_stats,
         "tool_count": len(TOOLS),
-        "version": "1.0.9",
+        "version": APP_VERSION,
     }
 
 
@@ -4891,7 +4967,9 @@ async def tools_drivers_list(request: Request):
 DRIVERS_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drivers_cache")
 IDENTIFY_CMD = (
     "$p=Get-CimInstance Win32_ComputerSystemProduct; $b=Get-CimInstance Win32_BIOS; "
-    "\"Vendor: $($p.Vendor)`nName: $($p.Name)`nSN: $($p.IdentifyingNumber)`nBIOS: $($b.SMBIOSBIOSVersion)`n\""
+    "$o=Get-CimInstance Win32_OperatingSystem; "
+    "\"Vendor: $($p.Vendor)`nName: $($p.Name)`nSN: $($p.IdentifyingNumber)`nBIOS: $($b.SMBIOSBIOSVersion)"
+    "`nOSCaption: $($o.Caption)`nOSBuild: $($o.BuildNumber)`n\""
 )
 LENOVO_DRIVE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
@@ -4899,8 +4977,110 @@ LENOVO_DRIVE_HEADERS = {
 }
 
 
-async def _fetch_lenovo_drivers(search_key: str) -> list:
-    """联想官网驱动 API 直连（逆向接口 drive_listnew）。"""
+# ── 2026-10-14 新增：驱动「适用系统」解析 + 下载链接实时换新（403 修复）──
+#    背景：联想 CDN 的下载直链带时效 token（实测 90 秒仍有效、当天缓存到下午已失效 → 403
+#    "remote auth failed, err: auth server response code 403"）。因此缓存只存元数据，
+#    链接一律在点击下载时按（机型+驱动名+版本）实时换新。
+_DRIVER_OS_RE = re.compile(r"[（(]([^（()）]*Windows[^（()）]*)[)）]\s*$")
+
+
+def _parse_driver_os(name: str):
+    """从驱动名尾部括号解析「适用系统」（官网该列就是这段文本）。
+
+    返回 (os_tags, clean_name)：
+      "Intel主板芯片组驱动程序(Windows 11 21H2 及之后版本/Windows 10 64-bit 1909 及之后版本)"
+      → (["Windows 11 21H2 及之后版本", "Windows 10 64-bit 1909 及之后版本"], "Intel主板芯片组驱动程序")
+    无括号 → ([], 原名)
+    """
+    s = (name or "").strip()
+    m = _DRIVER_OS_RE.search(s)
+    if not m:
+        return [], s
+    tags = []
+    for part in re.split(r"[/、]", m.group(1)):
+        part = part.strip()
+        if not part:
+            continue
+        # "Windows 11/10/7" 这类简写：后段只写版本号，补回系统前缀（保持每段自解释）
+        if "windows" not in part.lower() and re.match(r"^\d", part):
+            part = "Windows " + part
+        tags.append(part)
+    return tags, s[:m.start()].strip()
+
+
+def _driver_os_family(os_tags) -> list:
+    """适用系统归一为系统族（Windows 11 / Windows 10 / Windows 7…），供前端筛选与适配判断。"""
+    fams = []
+    for t in os_tags or []:
+        m = re.search(r"Windows\s*(\d+(?:\.\d+)?)", str(t))
+        if m:
+            f = "Windows " + m.group(1)
+            if f not in fams:
+                fams.append(f)
+    return fams
+
+
+def _norm_driver_name(name: str) -> str:
+    """匹配用名：去掉尾部适用系统括号并压缩空白（保证缓存与实时清单能对上）。"""
+    return re.sub(r"\s+", " ", _parse_driver_os(name)[1]).strip()
+
+
+def _os_family_from_caption(caption: str, build: str = "") -> str:
+    """客户机系统族（Windows 11 / Windows 10 / Windows 7…）：先看 Caption，再看 BuildNumber。"""
+    c = (caption or "").lower()
+    for n in ("11", "10", "8.1", "8", "7"):
+        if f"windows {n}" in c:
+            return f"Windows {n}"
+    b = int(build) if str(build).strip().isdigit() else 0
+    if b >= 22000:
+        return "Windows 11"
+    if b >= 10240:
+        return "Windows 10"
+    if b >= 7600:
+        return "Windows 7"
+    return ""
+
+
+def _strip_driver_urls(payload: dict, machine_os: str = "") -> dict:
+    """缓存/下发给前端时清空下载链接（链接改由 /api/tools/drivers/link 实时换新）。
+
+    · 同时兼容历史缓存：补算 os_tags / os_family（旧缓存里没有这两个字段）
+    · 传入 machine_os 时刷新 machine.os（客户机系统每次识别都可能不同）
+    """
+    for d in payload.get("drivers") or []:
+        d["url"] = ""
+        if not d.get("os_tags"):
+            tags, clean = _parse_driver_os(d.get("name_raw") or d.get("name") or "")
+            d["os_tags"] = tags
+            if clean:
+                d["name"] = clean
+        d["os_family"] = _driver_os_family(d.get("os_tags"))
+    if machine_os:
+        payload.setdefault("machine", {})["os"] = machine_os
+    return payload
+
+
+async def _url_alive(url: str) -> bool:
+    """下载链接预检（HEAD）：200/206/3xx=可用；403/404/410=已失效；405/501=不支持 HEAD，按可用处理。"""
+    if not url:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=12.0, headers=LENOVO_DRIVE_HEADERS, follow_redirects=True) as hc:
+            r = await hc.head(url)
+        if r.status_code in (403, 404, 410):
+            return False
+        return True
+    except Exception:
+        return True   # 网络抖动不当作失效，交给浏览器实测
+
+
+async def _fetch_lenovo_drivers(search_key: str):
+    """联想官网驱动 API 直连（逆向接口 drive_listnew）。
+
+    返回 (drivers, os_options)：
+      drivers    — 每条含 category/name(展示名)/name_raw/os_tags/os_family/version/date/size/url
+      os_options — 官网可选系统清单（odList → [{"id","name"}]），供前端下拉
+    """
     async with httpx.AsyncClient(timeout=25.0, headers=LENOVO_DRIVE_HEADERS) as hc:
         resp = await hc.get(
             "https://newsupport.lenovo.com.cn/api/drive/drive_listnew",
@@ -4909,16 +5089,28 @@ async def _fetch_lenovo_drivers(search_key: str) -> list:
         d = resp.json()
     if d.get("statusCode") not in ("200", 200):
         raise ValueError(f"联想 API 返回异常: {d.get('statusCode')} {d.get('message', '')}")
+    data = d.get("data", {})
+    os_options = []
+    for o in (data.get("osList") or []):
+        oid = str(o.get("OSID") or o.get("osId") or "").strip()
+        onm = str(o.get("OSName") or o.get("osName") or "").strip()
+        if oid and onm:
+            os_options.append({"id": oid, "name": onm})
     drivers = []
-    for p in d.get("data", {}).get("partList", []):
+    for p in data.get("partList", []):
         cat = p.get("PartName") or "其他"
         for drv in p.get("drivelist", []):
             fp = str(drv.get("FilePath") or "").strip()
             if not fp:
                 continue
+            raw_name = drv.get("DriverName", "")
+            os_tags, clean_name = _parse_driver_os(raw_name)
             drivers.append({
                 "category": cat,
-                "name": drv.get("DriverName", ""),
+                "name": clean_name or raw_name,      # 展示名：移出适用系统，交给独立列
+                "name_raw": raw_name,                # 原名（含适用系统括号，供匹配/追溯）
+                "os_tags": os_tags,                  # 适用系统（结构化，官网同源）
+                "os_family": _driver_os_family(os_tags),
                 "version": drv.get("Version", ""),
                 "date": drv.get("DriverIssuedDateTime", ""),
                 "size": drv.get("FileSize", ""),
@@ -4926,7 +5118,7 @@ async def _fetch_lenovo_drivers(search_key: str) -> list:
             })
     if not drivers:
         raise ValueError("联想 API 返回空驱动列表（该机型可能无官方驱动或 SN 无效）")
-    return drivers
+    return drivers, os_options
 
 
 @app.post("/api/tools/drivers/fetch")
@@ -4958,6 +5150,17 @@ async def tools_drivers_fetch(request: Request):
         m = re.search(r"Name:\s*(\S+)", result or "")
         if m:
             mt = m.group(1)
+        # 2026-10-14：同时识别客户机系统（供驱动「适用系统」自动匹配）
+        os_caption = os_build = ""
+        # 行首锚定 + 专用字段名：避免 "BIOS: xxx" 里的 "OS:" 子串误命中（2026-10-14 实测踩坑）
+        m = re.search(r"(?:^|[\r\n])OSBuild:\s*(\d+)", result or "")
+        if m:
+            os_build = m.group(1)
+        m = re.search(r"(?:^|[\r\n])OSCaption:\s*([^\r\n]+)", result or "")
+        if m:
+            os_caption = m.group(1).strip()
+        machine_os = _os_family_from_caption(os_caption, os_build)
+        run_logger.info(f"[{room_code}] identify os: {os_caption!r} build={os_build} → {machine_os}")
         search_key = sn or mt
         if not search_key:
             return JSONResponse({"status": "error", "error": "未能识别机器 SN/MT（识别命令输出为空）"}, status_code=502)
@@ -4971,29 +5174,93 @@ async def tools_drivers_fetch(request: Request):
                 cache = json.load(f)
             if cache.get("date") == today:
                 run_logger.info(f"[{room_code}] drivers fetch cache hit: {search_key}")
-                return JSONResponse({"status": "ok", **cache, "cached": True})
+                # 2026-10-14：缓存只给元数据，下载链接一律实时换新（CDN token 有时效）
+                return JSONResponse({"status": "ok",
+                                     **_strip_driver_urls(cache, machine_os), "cached": True})
         except Exception:
             pass
 
         # ③ 联想 API 直连（~0.8s）
-        drivers = await _fetch_lenovo_drivers(search_key)
+        drivers, os_options = await _fetch_lenovo_drivers(search_key)
 
-        # ④ 组装 + 缓存
+        # ④ 组装（剥离下载链接）→ 缓存 → 返回
         payload = {
-            "machine": {"sn": sn, "mt": mt, "model": mt, "search_key": search_key},
+            "machine": {"sn": sn, "mt": mt, "model": mt, "search_key": search_key,
+                        "os_caption": os_caption, "os_build": os_build, "os": machine_os},
             "drivers": drivers,
             "count": len(drivers),
+            "os_options": os_options,
             "source": "数据来源:联想官网 API (drive_listnew)",
             "date": today,
             "cached": False,
         }
+        payload = _strip_driver_urls(payload, machine_os)   # 链接不落盘、不下发
         with open(cache_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
-        run_logger.info(f"[{room_code}] drivers fetch ok: {search_key} {len(drivers)} drivers")
+        run_logger.info(f"[{room_code}] drivers fetch ok: {search_key} {len(drivers)} drivers os={machine_os}")
         return JSONResponse({"status": "ok", **payload})
     except Exception as e:
         run_logger.error(f"[{room_code}] drivers fetch error: {e}", exc_info=True)
         return JSONResponse({"status": "error", "error": str(e)}, status_code=502)
+
+
+@app.post("/api/tools/drivers/link")
+async def tools_drivers_link(request: Request):
+    """🔗 驱动下载链接实时换新（修复「缓存后下载 403」）。
+
+    联想 CDN 的下载直链带时效 token（实测 90 秒仍有效、当天缓存到下午已失效 → 403
+    「remote auth failed, err: auth server response code 403」）。
+    因此前端点「下载」时调本接口：按 机型+驱动名(+版本) 实时取新链接 → HEAD 预检 →
+    失效自动重取一次 → 仍失败返回中文提示（不让工程师看到 CDN 的英文报错）。
+    """
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    key = str(body.get("key") or body.get("search_key") or "").strip()
+    name = str(body.get("name") or body.get("name_raw") or "").strip()
+    version = str(body.get("version") or "").strip()
+    room_code = str(body.get("room_code") or "").upper()
+    if not key or not name:
+        return JSONResponse({"status": "error", "error": "缺少机型或驱动名"}, status_code=400)
+
+    target = _norm_driver_name(name)
+    last_err = "官网下载链接暂不可用"
+    for attempt in (1, 2):
+        try:
+            drivers, _ = await _fetch_lenovo_drivers(key)
+        except Exception as e:
+            last_err = f"官网清单获取失败：{e}"
+            continue
+        hit = None
+        for d in drivers:
+            if _norm_driver_name(d.get("name") or d.get("name_raw") or "") == target \
+                    and (not version or str(d.get("version") or "") == version):
+                hit = d
+                break
+        if not hit:
+            for d in drivers:
+                if _norm_driver_name(d.get("name") or d.get("name_raw") or "") == target:
+                    hit = d
+                    break
+        if not hit:
+            run_logger.info(f"[{room_code}] drivers link not found: {key} / {name[:40]}")
+            return JSONResponse({"status": "error",
+                                 "error": "官网清单里已找不到该驱动（可能已下架或改名），请重新获取驱动清单"},
+                                status_code=404)
+        url = str(hit.get("url") or "").strip()
+        if await _url_alive(url):
+            run_logger.info(f"[{room_code}] drivers link ok: {key} / {name[:40]} (attempt {attempt})")
+            return JSONResponse({"status": "ok", "url": url, "name": hit.get("name", name),
+                                 "version": hit.get("version", version), "size": hit.get("size", ""),
+                                 "attempts": attempt})
+        last_err = "官网链接校验未通过（token 已失效）"
+        run_logger.info(f"[{room_code}] drivers link dead token, retry: {key} / {name[:40]}")
+    return JSONResponse({"status": "error",
+                         "error": last_err + "，已自动重试一次，请稍后再点一次下载"}, status_code=502)
 
 
 # ============================================================

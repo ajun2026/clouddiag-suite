@@ -179,7 +179,24 @@
         .deep-tab.active { background: var(--bg); color: #bc8cff; border-color: #8957e5; border-bottom-color: var(--bg); font-weight: 600; }
         .deep-tab:not(.active):hover { color: #bc8cff; border-color: #8957e5; }
 
-    </style>
+    
+  /* ── A档（2026-10-12）IDG：判读三件套徽章 —— 加法式新增，不影响既有样式 ── */
+  .jj-chip{display:inline-block;margin:0 4px 0 0;padding:1px 7px;border-radius:9px;font-size:11.5px;
+           line-height:17px;white-space:nowrap;border:1px solid transparent}
+  .jj-evidence{color:#79c0ff;background:rgba(56,139,253,.12);border-color:rgba(56,139,253,.35)}
+  .jj-conf-high{color:#3fb950;background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.35)}
+  .jj-conf-mid{color:#d29922;background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.35)}
+  .jj-conf-low{color:#f85149;background:rgba(248,81,73,.12);border-color:rgba(248,81,73,.35)}
+  .jj-unknown{color:#8b949e;background:rgba(139,148,158,.12);border-color:rgba(139,148,158,.3)}
+  .jj-coverage{display:block;margin-top:8px;padding:5px 9px;border-left:3px solid #8957e5;
+               background:rgba(137,87,229,.08);color:#c9a9ff;font-size:12px;border-radius:0 6px 6px 0}
+.jj-conf-na{color:#6e7681;background:rgba(110,118,129,.12);border-color:rgba(110,118,129,.3)}
+.jj-evidence-none{color:#6e7681;background:rgba(110,118,129,.10);border-color:rgba(110,118,129,.28)}
+.jj-reason{font-size:11.5px;color:#7d8590;margin-right:6px;white-space:normal}
+.jj-unknown{color:#9aa4b0}
+.jj-chip{margin-right:6px}
+</style>
+
 </head>
 <body>
 <h1 id="page-title" style="display:none;">🔬 日志分析中心</h1>
@@ -1269,6 +1286,29 @@
             inp.disabled = btn.disabled = false;
             inp.focus();
         }
+// ── A档（2026-10-12）：判读三件套徽章 —— 把【依据: …】【置信度: …】【未知: …】【覆盖度】渲染成彩色徽章 ──
+// 加法式：作用在既有渲染结果上做标签替换，不改动任何原渲染逻辑；整段删除即回退。
+function chipifyHtml(html) {
+  // 允许值里含 markdown 渲染出的行内标签（<b>/<code> 等），但不跨行（遇 <br> 即止），长度有界
+  var out = String(html || '').replace(/【(依据|置信度|未知)[:：]\s*((?:(?!<br)[^】]){0,300}?)】/g, function (m, k, v) {
+    var t = (v || '').trim();
+    if (k === '依据') return '<span class="jj-chip ' + (/^(无|—|-|N\/A)/.test(t) ? 'jj-evidence-none' : 'jj-evidence') + '">依据 · ' + t + '</span>';
+    if (k === '置信度') {
+      var lvl = t, rsn = '', mm = t.match(/^([^—–\-（(]*?)\s*(?:[—–-]|（|\()\s*([\s\S]+)$/);
+      if (mm) { lvl = mm[1].trim(); rsn = mm[2].trim().replace(/[）)]\s*$/, '').trim(); }
+      if (!lvl || lvl === '—' || lvl === '-') {
+        return '<span class="jj-chip jj-conf-na">置信度 · 不适用</span>' + (rsn ? '<span class="jj-reason">' + rsn + '</span>' : '');
+      }
+      var cls = /高/.test(lvl) ? 'jj-conf-high' : (/中/.test(lvl) ? 'jj-conf-mid' : (/低/.test(lvl) ? 'jj-conf-low' : 'jj-conf-na'));
+      return '<span class="jj-chip ' + cls + '">置信度 · ' + lvl + '</span>' + (rsn ? '<span class="jj-reason">' + rsn + '</span>' : '');
+    }
+    return '<span class="jj-chip jj-unknown">未知 · ' + t + '</span>';
+  });
+  // 覆盖度行同样允许行内标签，到行尾（<br>/块结束）为止
+  return out.replace(/【覆盖度】\s*([\s\S]{0,200}?)(?=<br|<\/div|<\/p|$)/g, function (m, v) {
+    return '<span class="jj-coverage">📐 覆盖度 · ' + (v || '').trim() + '</span>';
+  });
+}
         function appendMessage(role, content, extraClass) {
             const msgs = document.getElementById('chat-messages');
             const div = document.createElement('div');
@@ -1282,7 +1322,7 @@
                 .replace(/\n\d+\. /g, (m) => '\n' + m.trim() + ' ')
                 .replace(/\n\n/g, '</p><p>')
                 .replace(/\n/g, '<br>');
-            html = '<p>' + html + '</p>';
+            html = chipifyHtml('<p>' + html + '</p>');   // A档：三件套徽章
             div.innerHTML = html;
             msgs.appendChild(div);
             msgs.scrollTop = msgs.scrollHeight;
