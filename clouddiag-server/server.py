@@ -1158,7 +1158,7 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -2573,29 +2573,41 @@ async def room_connect(room_code: str, request: Request):
     bat = (
         "@echo off\r\n"
         "chcp 65001 >nul\r\n"
-        "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
+        "title 云端AI远程运维助手 - 一键连接\r\n"
         "cd /d \"%~dp0\"\r\n"
         # ── 自动提权 ──
         "net session >nul 2>&1\r\n"
         "if %errorlevel% neq 0 (\r\n"
-        "    echo Requesting administrator privileges...\r\n"
+        "    echo 正在请求管理员权限（UAC 弹窗请选择「是」）...\r\n"
         "    powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
         "    exit /b\r\n"
         ")\r\n"
-        "echo [1/3] Checking network...\r\n"
+        "echo ==============================================\r\n"
+        "echo   云端AI远程运维助手 · 一键连接\r\n"
+        "echo ==============================================\r\n"
+        "echo   若出现「Windows 已保护你的电脑」提示：\r\n"
+        "echo     点「更多信息」→「仍要运行」即可。\r\n"
+        "echo.\r\n"
+        "echo [1/3] 正在检测网络...\r\n"
         + _bat_url_cascade(_chain)
-        + "echo [1/3] Server: %SRV%\r\n"
-        "echo [2/3] Downloading latest bridge...\r\n"
+        + "echo [1/3] 服务器: %SRV%\r\n"
+        "echo [2/3] 正在下载桥接器（约 5MB）...\r\n"
         "curl -sL -o \"clouddiag-bridge-win64.exe\" \"%SRV%/static/clouddiag-bridge-win64.exe\"\r\n"
         "if errorlevel 1 (\r\n"
-        "    echo Download failed. Please check network and retry.\r\n"
+        "    echo 下载失败：请确认本机能访问服务器后重试。\r\n"
         "    pause\r\n"
         "    exit /b 1\r\n"
         ")\r\n"
-        "echo [3/3] Connecting to room " + room_code + " ...\r\n"
-        "echo Keep this window open. Go back to the browser chat page.\r\n"
+        "echo [3/3] 正在连接房间 " + room_code + " ...\r\n"
         "echo.\r\n"
         "\"clouddiag-bridge-win64.exe\" -server %WSRV% -room " + room_code + " -token " + token + "\r\n"
+        "echo.\r\n"
+        "echo ==============================================\r\n"
+        "echo   连接已结束（诊断完成或连接断开）。\r\n"
+        "echo   如需彻底清理桥接器，请下载并运行卸载脚本：\r\n"
+        "echo     %SRV%/static/uninstall-windows.bat\r\n"
+        "echo   （也可在诊断台「连接你的电脑」面板中找到卸载入口）\r\n"
+        "echo ==============================================\r\n"
         "pause\r\n"
     )
     # 2026-10-13：多候选链（第一个可达的地址胜出；全不可达则用最后一个兜底）
@@ -2672,29 +2684,41 @@ async def room_bat(room_code: str, request: Request):
     bat = (
         "@echo off\r\n"
         "chcp 65001 >nul\r\n"
-        "title Cloud AI Remote Diagnostics - One-Click Connect\r\n"
+        "title 云端AI远程运维助手 - 一键连接\r\n"
         "cd /d \"%~dp0\"\r\n"
         # ── 自动提权：非管理员时用 UAC 自我提权重启 ──
         "net session >nul 2>&1\r\n"
         "if %errorlevel% neq 0 (\r\n"
-        "    echo Requesting administrator privileges...\r\n"
+        "    echo 正在请求管理员权限（UAC 弹窗请选择「是」）...\r\n"
         "    powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
         "    exit /b\r\n"
         ")\r\n"
-        "echo [1/3] Checking network...\r\n"
+        "echo ==============================================\r\n"
+        "echo   云端AI远程运维助手 · 一键连接\r\n"
+        "echo ==============================================\r\n"
+        "echo   若出现「Windows 已保护你的电脑」提示：\r\n"
+        "echo     点「更多信息」→「仍要运行」即可。\r\n"
+        "echo.\r\n"
+        "echo [1/3] 正在检测网络...\r\n"
         + _bat_url_cascade(_chain)
-        + "echo [1/3] Server: %SRV%\r\n"
-        "echo [2/3] Downloading latest bridge...\r\n"
+        + "echo [1/3] 服务器: %SRV%\r\n"
+        "echo [2/3] 正在下载桥接器（约 5MB）...\r\n"
         "curl -sL -o \"clouddiag-bridge-win64.exe\" \"%SRV%/static/clouddiag-bridge-win64.exe\"\r\n"
         "if errorlevel 1 (\r\n"
-        "    echo Download failed. Please check network and retry.\r\n"
+        "    echo 下载失败：请确认本机能访问服务器后重试。\r\n"
         "    pause\r\n"
         "    exit /b 1\r\n"
         ")\r\n"
-        "echo [3/3] Connecting to room " + room_code + " ...\r\n"
-        "echo Keep this window open. Go back to the browser chat page.\r\n"
+        "echo [3/3] 正在连接房间 " + room_code + " ...\r\n"
         "echo.\r\n"
         "\"clouddiag-bridge-win64.exe\" -server %WSRV% -room " + room_code + " -token " + token + "\r\n"
+        "echo.\r\n"
+        "echo ==============================================\r\n"
+        "echo   连接已结束（诊断完成或连接断开）。\r\n"
+        "echo   如需彻底清理桥接器，请下载并运行卸载脚本：\r\n"
+        "echo     %SRV%/static/uninstall-windows.bat\r\n"
+        "echo   （也可在诊断台「连接你的电脑」面板中找到卸载入口）\r\n"
+        "echo ==============================================\r\n"
         "pause\r\n"
     )
     return Response(content=bat, media_type="text/plain; charset=utf-8",
@@ -2725,7 +2749,11 @@ async def room_close(room_code: str, request: Request):
     if room:
         if room.bridge_ws:
             try:
-                await room.bridge_ws.send_json({"type": "error", "content": "房间已结束诊断，连接将断开。"})
+                # 2026-10-15：新增 fatal 字段（机器可读）——老版桥接器忽略未知字段，
+                # 新版桥接器据 fatal 直接判"永久拒绝"；同时文案补上老版关键词表里已有的
+                # "请回到对话页/重新获取一键连接"，使已分发的旧 exe 也能立即停止重连。
+                await room.bridge_ws.send_json({"type": "error", "fatal": True,
+                    "content": "房间已结束诊断，连接将断开。如需继续诊断，请回到对话页重新获取一键连接。"})
                 await room.bridge_ws.close()
             except Exception:
                 pass
@@ -6555,13 +6583,13 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
 
     # 校验 1：房间存在 + 未过期（每次连接都查 DB，不受内存缓存影响）
     if not room_record_exists(room_code):
-        await websocket.send_json({"type": "error", "content": "Room not found. Create it from the dashboard first (SN + ticket required)."})
+        await websocket.send_json({"type": "error", "fatal": True, "content": "Room not found. Create it from the dashboard first (SN + ticket required)."})
         await websocket.close()
         return
     if room_expired_db(room_code):
         set_room_status(room_code, "archived")  # 过期即归档（历史保留）
         run_logger.info(f"[bridge] rejected: room {room_code} expired")
-        await websocket.send_json({"type": "error", "content": "房间已过期，无法连接。历史记录仍可查看，如需继续诊断请创建新房间。"})
+        await websocket.send_json({"type": "error", "fatal": True, "content": "房间已过期，无法连接。历史记录仍可查看，如需继续诊断请创建新房间。"})
         await websocket.close()
         return
 
@@ -6572,11 +6600,13 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
         if status == "idle":
             msg = "房间已闲置。请回到对话页重新获取一键连接（自动生成新令牌）。"
         elif status == "archived":
-            msg = "房间已结束诊断（归档）。历史记录仍可查看。"
+            # 2026-10-15：补"请回到对话页重新获取一键连接"——命中老版桥接器关键词表，
+            # 避免"结束诊断后桥接器无限重连"（每 30s 一轮，客户机窗口停不下来）。
+            msg = "房间已结束诊断（归档）。历史记录仍可查看，如需继续诊断，请回到对话页重新获取一键连接。"
         else:
             msg = "连接令牌无效或已过期。请回到对话页重新获取一键连接。"
         run_logger.info(f"[bridge] rejected: {room_code} bad token (status={status})")
-        await websocket.send_json({"type": "error", "content": msg})
+        await websocket.send_json({"type": "error", "fatal": True, "content": msg})
         await websocket.close()
         return
 

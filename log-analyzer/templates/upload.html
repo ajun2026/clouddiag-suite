@@ -6,35 +6,54 @@
     <title>IDG 日志诊断分析系统</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        :root { --bg: #0d1117; --surface: #161b22; --text: #e6edf3; --text2: #8b949e; --info: #58a6ff; --border: #30363d; }
+        :root {
+    /* ===== 联想擎天设计令牌（全站统一 · 单一来源）===== */
+    --primary:#2468F2; --primary-hover:#1E56D6; --primary-soft:#EEF4FE; --primary-line:#C9D9FB;
+    --ai:#AF61FF; --ai-soft:#F6EFFF; --info-soft:#EEF4FE; --info-line:#C9D9FB; --ai-soft:#F6EFFF; --success-soft:#ECFDF5; --warn-soft:#FFFBEB; --warn-line:rgba(180,83,9,.3); --error-soft:#FEF2F2; --error-line:#FECACA;
+    --info:#2468F2; --success:#059669; --success-text:#047857; --success-fill:#047857; --ai-fill:#7C3AED; --ai-text:#7C3AED; --error-text:#DC2626; --warning:#B45309; --error:#DC2626; --purple:#AF61FF; --accent:#AF61FF;
+    --bg:#F9F9F9; --surface:#FFFFFF; --surface2:#F2F3F5; --container:#F9F9F9;
+    --text:#151B26; --text-strong:#0F172A; --text2:#5C5F66; --text3:#9CA3AF; --placeholder:#C9CDD4;
+    --border:#E8E9EB; --line:#F2F3F5;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:20px;
+    --shadow-card:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.03);
+    --shadow-pop:0 4px 24px rgba(0,0,0,.08);
+    --shadow-sheet:0 12px 20px rgba(0,0,0,.05);
+    --font-sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",-apple-system,system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;
+    --ease:150ms ease-out;
+    /* 旧命名别名（既有引用不断） */
+    --background:var(--bg); --text-body:var(--text); --text-title:var(--text-strong);
+    --text-2:var(--text2); --text-3:var(--text3); --accent-bg:var(--primary-soft); --heading:var(--text-strong);
+    --danger:var(--error); --warn:var(--warning); --radius-input:var(--radius-sm); --radius-btn:var(--radius-md); --radius-card:var(--radius-lg);
+  }
   body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            font-family:var(--font-sans);
             background: var(--bg, var(--bg));
             color: var(--text); min-height: 100vh;
         }
         .container { width: 100%; padding: 24px 28px; box-sizing: border-box; }
         .subtitle { color: var(--text2); font-size: 15px; margin-bottom: 20px; }
         .upload-zone {
-            display: block; border: 2px dashed var(--border); border-radius: 12px; padding: 60px 30px;
+            display: block; border: 2px dashed var(--border); border-radius:12px; padding: 60px 30px;
             cursor: pointer; transition: all 0.2s; background: var(--surface); margin-bottom: 24px; text-align: center;
         }
-        .upload-zone:hover, .upload-zone.dragover { border-color: var(--info); background: var(--surface2); }
+        .upload-zone:hover, .upload-zone.dragover { border-color:#1E56D6; background: var(--surface2); }
         .upload-zone .icon { font-size: 56px; margin-bottom: 16px; opacity: 0.6; }
         .upload-zone p { font-size: 16px; color: var(--text2); }
         .upload-zone .formats { font-size: 13px; color: var(--text2); margin-top: 8px; }
         #file-input { display: none; }
         .progress-wrap { display: none; margin-top: 16px; }
-        .progress-bar { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
-        .progress-fill { height: 100%; width: 0; background: linear-gradient(90deg, #238636, var(--success)); border-radius: 3px; transition: width 0.3s; }
+        .progress-bar { height: 6px; background: var(--surface2); border-radius:4px; overflow: hidden; }
+        .progress-fill { height: 100%; width: 0; background: linear-gradient(90deg, #2468F2, var(--success)); border-radius:4px; transition: width 0.3s; }
         .progress-text { font-size: 13px; color: var(--text2); margin-top: 8px; }
-        .error-box { display: none; background: #490202; border: 1px solid var(--error); border-radius: 8px; padding: 16px; margin-top: 16px; color: var(--error); font-size: 14px; text-align: left; }
+        .error-box { display: none; background: #FEF2F2; border: 1px solid var(--error); border-radius:8px; padding: 16px; margin-top: 16px; color:#B91C1C; font-size: 14px; text-align: left; }
 
         /* SN Modal */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.6); z-index: 100; justify-content: center; align-items: center; }
+            background: rgba(15,23,42,.45); z-index: 100; justify-content: center; align-items: center; }
         .modal-overlay.open { display: flex; }
-        .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-            max-width: 440px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        .modal { background: var(--surface); border: 1px solid var(--border); border-radius:12px;
+            max-width: 440px; width: 90%; box-shadow: 0 8px 32px rgba(15,23,42,.40);
             animation: modalIn 0.2s ease-out; }
         @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(-10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         .modal-header { padding: 20px 24px 0; }
@@ -42,47 +61,55 @@
         .modal-header .file-hint { font-size: 13px; color: var(--text2); margin-top: 6px; line-height: 1.5; }
         .modal-body { padding: 20px 24px; }
         .modal-body label { display: block; font-size: 14px; color: var(--text2); margin-bottom: 8px; }
-        .modal-body input { width: 100%; background: var(--bg, var(--bg)); border: 1px solid var(--border); border-radius: 8px;
+        .modal-body input { width: 100%; background: var(--bg, var(--bg)); border: 1px solid var(--border); border-radius:8px;
             padding: 10px 14px; color: var(--text); font-size: 15px;
             font-family: "SF Mono", "Fira Code", monospace; outline: none;
             transition: border-color 0.2s; text-align: center; letter-spacing: 1px; }
-        .modal-body input:focus { border-color: var(--info); }
+        .modal-body input:focus { border-color:#1E56D6; }
         .modal-body input::placeholder { color: var(--text2); letter-spacing: 0; }
         .modal-footer { padding: 0 24px 20px; display: flex; gap: 10px; justify-content: flex-end; }
         .btn-cancel { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); padding: 9px 20px;
-            border-radius: 8px; font-size: 14px; cursor: pointer; transition: all 0.15s; }
+            border-radius:8px; font-size: 14px; cursor: pointer; transition: all 0.15s; }
         .btn-cancel:hover { background: var(--border); color: var(--text); }
         .btn-confirm { background: var(--info); color: #fff; border: none; padding: 9px 24px;
-            border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-        .btn-confirm:hover { background: #388bfd; }
+            border-radius:8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+        .btn-confirm:hover { background: #2468F2; }
         .btn-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* History section */
         .history-section { margin-top: 48px; text-align: left; }
         .history-section h2 { font-size: 20px; color: var(--text); margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--surface2); }
         .history-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        .history-table th { color: #484f58; font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--surface2); font-size: 13px; }
+        .history-table th { color: var(--text2); font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--surface2); font-size: 13px; }
         .history-table td { padding: 12px; border-bottom: 1px solid var(--surface2)36; vertical-align: middle; }
         .history-table tr:hover { background: var(--surface); }
         .history-table tr:hover td:first-child { border-left: 3px solid var(--info); }
-        .history-table .name { color: var(--info); font-weight: 600; cursor: pointer; text-decoration: none; }
+        .history-table .name { color:#1E56D6; font-weight: 600; cursor: pointer; text-decoration: none; }
         .history-table .name:hover { text-decoration: underline; }
         .history-table .meta { color: var(--text2); font-size: 12px; }
-        .history-table .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-right: 4px; }
-        .badge-dump { background: #490202; color: var(--error); }
-        .badge-siolog { background: #2e1e00; color: var(--warn); }
-        .badge-events { background: #0d2b4e; color: var(--info); }
+        .history-table .badge { display: inline-block; padding: 2px 8px; border-radius:12px; font-size: 11px; margin-right: 4px; }
+        .badge-dump { background: #FEF2F2; color:#B91C1C; }
+        .badge-siolog { background: #FFFBEB; color: var(--warn); }
+        .badge-events { background: #EEF4FE; color:#1E56D6; }
         .empty-history { color: var(--text2); font-size: 14px; text-align: center; padding: 40px 0; }
-        .btn-delete { background: none; border: 1px solid var(--border); color: var(--text2); padding: 4px 10px; border-radius: 6px;
+        .btn-delete { background: none; border: 1px solid var(--border); color: var(--text2); padding: 4px 10px; border-radius:8px;
             cursor: pointer; font-size: 12px; transition: all 0.2s; }
-        .btn-delete:hover { color: var(--error); border-color: var(--error); background: #490202; }
+        .btn-delete:hover { color:#B91C1C; border-color:#B91C1C; background: #FEF2F2; }
         .btn-delete:disabled { opacity: 0.4; cursor: not-allowed; }
-    </style>
+    
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#DCE0E6;border-radius:8px;border:2px solid transparent;background-clip:content-box}
+  ::selection{background:#D6E4FF;color:#0F172A}
+
+  /* 表单控件字体继承（消除 Arial 混入） */
+  button,input,select,textarea{font-family:inherit}
+</style>
 </head>
 <body>
-<div style="padding:10px 16px;border-bottom:1px solid #30363d;background:#161b22;">
-  <a href="/dashboard" style="color:#58a6ff;text-decoration:none;font-size:13px;">← 返回主界面</a>
-  <a href="#" onclick="logoutIdg();return false;" style="color:#8b949e;text-decoration:none;font-size:13px;margin-left:12px;">🚪 退出登录</a>
+<div style="padding:10px 16px;border-bottom:1px solid #E8E9EB;background:#FFFFFF;">
+  <a href="/dashboard" style="color:#1E56D6;text-decoration:none;font-size:13px;">← 返回主界面</a>
+  <a href="#" onclick="logoutIdg();return false;" style="color:#5C5F66;text-decoration:none;font-size:13px;margin-left:12px;">🚪 退出登录</a>
 </div>
     <div class="container">
         <label class="upload-zone" id="upload-zone" for="file-input">
@@ -147,9 +174,9 @@
         function escHtml(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
         function formatMB(bytes) { return bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KB' : (bytes / 1048576).toFixed(1) + ' MB'; }
         function osTypeBadge(osType) {
-            if (osType === 'windows') return '<span class="badge" style="background:#0d2b4e;color:var(--info);">🪟 Windows</span>';
-            if (osType === 'linux') return '<span class="badge" style="background:#0d3320;color:var(--success);">🐧 Linux</span>';
-            if (osType === 'bmc') return '<span class="badge" style="background:#2e1e00;color:var(--warn);">🔧 BMC</span>';
+            if (osType === 'windows') return '<span class="badge" style="background:#EEF4FE;color:#1E56D6;">🪟 Windows</span>';
+            if (osType === 'linux') return '<span class="badge" style="background:#ECFDF5;color:#047857;">🐧 Linux</span>';
+            if (osType === 'bmc') return '<span class="badge" style="background:#FFFBEB;color:var(--warn);">🔧 BMC</span>';
             return '<span class="badge" style="background:var(--surface2);color:var(--text2);">📁 ' + escHtml(osType || '未知') + '</span>';
         }
 
@@ -168,7 +195,7 @@
                 if (h.dump) badges += '<span class="badge badge-dump">💾 Dump</span>';
                 if (h.siolog) badges += '<span class="badge badge-siolog">📋 SIO</span>';
                 if (h.evtx_count > 0) badges += '<span class="badge badge-events">📝 ' + h.evtx_count + ' evtx</span>';
-                var snDisplay = h.sn ? '<span style="font-family:\'SF Mono\',\'Fira Code\',monospace;color:var(--info);font-size:13px;">' + escHtml(h.sn) + '</span>' : '<span style="color:var(--text2);">-</span>';
+                var snDisplay = h.sn ? '<span style="font-family:\'SF Mono\',\'Fira Code\',monospace;color:#1E56D6;font-size:13px;">' + escHtml(h.sn) + '</span>' : '<span style="color:var(--text2);">-</span>';
                 html += '<tr>' +
                     '<td><a class="name" href="analyze/' + h.job_id + '">' + escHtml(h.name || h.filename) + '</a></td>' +
                     '<td>' + snDisplay + '</td>' +

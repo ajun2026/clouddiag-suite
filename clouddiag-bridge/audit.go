@@ -15,12 +15,17 @@ type AuditLogger struct {
 	file *os.File
 }
 
-func NewAuditLogger() *AuditLogger {
+// AuditDir 返回审计日志目录（~/.clouddiag），供"如何清理"指引复用
+func AuditDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	dir := filepath.Join(home, ".clouddiag")
+	return filepath.Join(home, ".clouddiag")
+}
+
+func NewAuditLogger() *AuditLogger {
+	dir := AuditDir()
 	_ = os.MkdirAll(dir, 0o755)
 	f, err := os.OpenFile(filepath.Join(dir, "bridge.log"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)

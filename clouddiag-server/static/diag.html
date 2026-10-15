@@ -6,138 +6,153 @@
 <title>诊断台 · 云端 AI 远程运维助手</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  :root{
-    --bg:#0d1117; --surface:#161b22; --surface2:#21262d; --border:#30363d;
-    --text:#e6edf3; --text2:#8b949e; --text3:#6e7681;
-    --info:#58a6ff; --success:#3fb950; --warn:#d29922; --error:#f85149; --purple:#bc8cff;
+  :root {
+    /* ===== 联想擎天设计令牌（全站统一 · 单一来源）===== */
+    --primary:#2468F2; --primary-hover:#1E56D6; --primary-soft:#EEF4FE; --primary-line:#C9D9FB;
+    --ai:#AF61FF; --ai-soft:#F6EFFF; --info-soft:#EEF4FE; --info-line:#C9D9FB; --ai-soft:#F6EFFF; --success-soft:#ECFDF5; --warn-soft:#FFFBEB; --warn-line:rgba(180,83,9,.3); --error-soft:#FEF2F2; --error-line:#FECACA;
+    --info:#2468F2; --success:#059669; --success-text:#047857; --success-fill:#047857; --ai-fill:#7C3AED; --ai-text:#7C3AED; --error-text:#DC2626; --warning:#B45309; --error:#DC2626; --purple:#AF61FF; --accent:#AF61FF;
+    --bg:#F9F9F9; --surface:#FFFFFF; --surface2:#F2F3F5; --container:#F9F9F9;
+    --text:#151B26; --text-strong:#0F172A; --text2:#5C5F66; --text3:#9CA3AF; --placeholder:#C9CDD4;
+    --border:#E8E9EB; --line:#F2F3F5;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:20px;
+    --shadow-card:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.03);
+    --shadow-pop:0 4px 24px rgba(0,0,0,.08);
+    --shadow-sheet:0 12px 20px rgba(0,0,0,.05);
+    --font-sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",-apple-system,system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;
+    --ease:150ms ease-out;
+    /* 旧命名别名（既有引用不断） */
+    --background:var(--bg); --text-body:var(--text); --text-title:var(--text-strong);
+    --text-2:var(--text2); --text-3:var(--text3); --accent-bg:var(--primary-soft); --heading:var(--text-strong);
+    --danger:var(--error); --warn:var(--warning); --radius-input:var(--radius-sm); --radius-btn:var(--radius-md); --radius-card:var(--radius-lg);
   }
-  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  body{font-family:var(--font-sans);
     background:var(--bg);color:var(--text);font-size:14px;line-height:1.6;height:100vh;display:flex;flex-direction:column;overflow:hidden}
 
   /* ── 顶栏 ── */
   header{background:var(--surface);border-bottom:1px solid var(--border);padding:9px 16px;
     display:flex;align-items:center;gap:14px;row-gap:8px;flex-wrap:wrap;flex:0 0 auto}
-  .status-dot{width:8px;height:8px;border-radius:50%;background:var(--success);
+  .status-dot{width:8px;height:8px;border-radius:50%;background:#047857;
     box-shadow:0 0 6px var(--success);flex:0 0 auto}
   .hdr-item{font-size:12.5px;color:var(--text2);display:inline-flex;align-items:center;gap:5px;
     white-space:nowrap}
   .hdr-item b{color:var(--text);font-weight:600}
   .hdr-sep{width:1px;height:13px;background:var(--border);flex:0 0 auto}
   .hdr-btn{padding:3px 10px;font-size:12px;background:var(--surface2);color:var(--text2);
-    border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto}
-  .hdr-btn:hover{color:var(--text);border-color:var(--text3)}
+    border:1px solid var(--border);border-radius:8px;cursor:pointer;white-space:nowrap;flex:0 0 auto}
+  .hdr-btn:hover{color:var(--text);border-color:var(--text2)}
   .spacer{flex:1}
 
   /* ── 主区 ── */
   .main{flex:1;display:flex;min-height:0}
 
   /* 左：标签面板 */
-  .tags-panel{flex:0 0 340px;border-right:1px solid var(--border);overflow-y:auto;padding:14px 12px 30px}
-  .panel-title{font-size:12px;color:var(--text3);font-weight:600;letter-spacing:.5px;
+  .tags-panel{box-shadow:var(--shadow-card);flex:0 0 340px;border-right:1px solid var(--border);overflow-y:auto;padding:14px 12px 30px}
+  .panel-title{font-size:12px;color:var(--text2);font-weight:600;letter-spacing:.5px;
     padding:0 4px 8px;text-transform:uppercase}
-  .group-title{font-size:12px;color:var(--text3);padding:12px 4px 6px;font-weight:600}
+  .group-title{font-size:12px;color:var(--text2);padding:12px 4px 6px;font-weight:600}
 
   /* 诊断卡片（新版：带说明 + 状态） */
-  .diag-card{display:flex;gap:10px;padding:9px 11px;margin-bottom:6px;background:var(--surface);
+  .diag-card{box-shadow:var(--shadow-card);display:flex;gap:10px;padding:9px 11px;margin-bottom:6px;background:var(--surface);
     border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:all .12s}
-  .diag-card:hover{border-color:var(--info);background:var(--surface2)}
-  .diag-card.running{border-color:var(--warn);background:rgba(210,153,34,.08)}
-  .diag-card.done{border-color:var(--success);background:rgba(63,185,80,.06)}
+  .diag-card:hover{border-color:#1E56D6;background:var(--surface2)}
+  .diag-card.running{border-color:var(--warn);background:#FFFBEB}
+  .diag-card.done{border-color:#047857;background:#ECFDF5}
   .dc-icon{font-size:17px;flex:0 0 auto;line-height:1.3}
   .dc-body{flex:1;min-width:0}
   .dc-title{font-size:13.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px}
   .dc-desc{font-size:11.5px;color:var(--text2);margin-top:2px;line-height:1.45;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .dc-status{font-size:11px;flex:0 0 auto;align-self:center;padding:1px 7px;border-radius:10px;
-    background:var(--surface2);color:var(--text3)}
-  .dc-status.run{background:rgba(210,153,34,.15);color:var(--warn)}
-  .dc-status.ok{background:rgba(63,185,80,.15);color:var(--success)}
+  .dc-status{font-size:11px;flex:0 0 auto;align-self:center;padding:1px 7px;border-radius:12px;
+    background:var(--surface2);color:var(--text2)}
+  .dc-status.run{background:rgba(180,83,9,.15);color:var(--warn)}
+  .dc-status.ok{background:rgba(5,150,105,.15);color:#047857}
 
   /* 右：结果区 */
-  .result-panel{flex:1;overflow-y:auto;padding:18px 22px 60px;min-width:0}
-  .ticket-bar{background:var(--surface);border:1px solid var(--border);border-radius:9px;
+  .result-panel{box-shadow:var(--shadow-card);flex:1;overflow-y:auto;padding:18px 22px 60px;min-width:0}
+  .ticket-bar{box-shadow:var(--shadow-card);background:var(--surface);border:1px solid var(--border);border-radius:8px;
     padding:11px 15px;margin-bottom:16px;display:flex;gap:22px;flex-wrap:wrap;align-items:center}
   .tb-item{font-size:12.5px;color:var(--text2)}
   .tb-item b{color:var(--text)}
   .machine-bar{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text2);
-    background:var(--surface2);border-radius:7px;padding:7px 12px;margin-bottom:16px}
+    background:var(--surface2);border-radius:8px;padding:7px 12px;margin-bottom:16px}
   .machine-bar span b{color:var(--text)}
 
   .result-title{font-size:16px;font-weight:650;margin-bottom:12px;display:flex;align-items:center;gap:8px}
   .sec-label{font-size:12.5px;font-weight:600;color:var(--text2);margin:16px 0 7px;display:flex;align-items:center;gap:6px}
 
   /* 采集项清单 */
-  .manifest{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:12px 15px}
+  .manifest{box-shadow:var(--shadow-card);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 15px}
   .mani-row{display:flex;gap:9px;padding:5px 0;font-size:13px;align-items:flex-start;
-    border-bottom:1px solid rgba(48,54,61,.5)}
+    border-bottom:1px solid var(--border)}
   .mani-row:last-child{border-bottom:none}
   .mani-icon{flex:0 0 auto;font-size:13px}
   .mani-text{flex:1;color:var(--text)}
   .mani-note{color:var(--text2);font-size:12px}
-  .mani-ok .mani-text{color:var(--success)}
+  .mani-ok .mani-text{color:#047857}
   .mani-ok .mani-note{color:var(--text2)}
-  .mani-fail .mani-text{color:var(--error)}
-  .mani-na .mani-text{color:var(--text3)}
+  .mani-fail .mani-text{color:#B91C1C}
+  .mani-na .mani-text{color:var(--text2)}
 
   /* 观察/依据/缺失 */
-  .obs-box{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:12px 15px;
+  .obs-box{box-shadow:var(--shadow-card);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 15px;
     font-size:13.5px;line-height:1.75}
   .obs-box table{width:100%;border-collapse:collapse;margin:6px 0;font-size:12.5px}
   .obs-box th,.obs-box td{text-align:left;padding:5px 9px;border-bottom:1px solid var(--border)}
   .obs-box th{color:var(--text2);font-size:11.5px;font-weight:600;background:var(--surface2)}
-  .obs-box code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px;color:#79c0ff}
-  .gap-box{background:rgba(210,153,34,.07);border-left:3px solid var(--warn);border-radius:0 8px 8px 0;
-    padding:11px 15px;font-size:13px;color:#e8c26a}
-  .clue-box{background:rgba(188,140,255,.07);border-left:3px solid var(--purple);border-radius:0 8px 8px 0;
-    padding:10px 14px;font-size:12.5px;color:#d8b9ff;margin-bottom:8px}
+  .obs-box code{background:var(--surface2);padding:1px 5px;border-radius:4px;font-size:12px;color:#1E56D6}
+  .gap-box{background:#FFFBEB;border-left:3px solid var(--warn);border-radius:0 8px 8px 0;
+    padding:11px 15px;font-size:13px;color:#B45309}
+  .clue-box{background:#F6EFFF;border-left:3px solid var(--purple);border-radius:0 8px 8px 0;
+    padding:10px 14px;font-size:12.5px;color:#7C3AED;margin-bottom:8px}
 
   /* 底部输入区 */
   .input-area{flex:0 0 auto;border-top:1px solid var(--border);background:var(--surface);
     padding:10px 16px;display:flex;gap:10px;align-items:center}
   .input-area input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;
     padding:9px 13px;color:var(--text);font-size:13.5px;outline:none}
-  .input-area input:focus{border-color:var(--info)}
+  .input-area input:focus{border-color:#1E56D6}
   .send-btn{background:var(--info);color:#fff;border:none;border-radius:8px;padding:9px 20px;
     font-size:13.5px;font-weight:600;cursor:pointer}
 
   /* ── 初步判读框（第五段）── */
-  .read-box{background:rgba(188,140,255,.07);border-left:3px solid var(--purple,#bc8cff);
-    border-radius:0 8px 8px 0;padding:11px 15px;font-size:13.5px;line-height:1.75;color:#d8b9ff}
-  .read-box code{background:rgba(255,255,255,.06);padding:1px 5px;border-radius:3px;font-size:12px;color:#e2ccff}
-  .warn-flag{margin-top:8px;font-size:11.5px;color:#e8c26a;background:rgba(210,153,34,.08);
-    border-left:3px solid var(--warn);border-radius:0 6px 6px 0;padding:7px 11px}
+  .read-box{background:#F6EFFF;border-left:3px solid var(--purple,#AF61FF);
+    border-radius:0 8px 8px 0;padding:11px 15px;font-size:13.5px;line-height:1.75;color:#7C3AED}
+  .read-box code{background:rgba(124,58,237,.10);padding:1px 5px;border-radius:4px;font-size:12px;color:#6D28D9}
+  .warn-flag{margin-top:8px;font-size:11.5px;color:#B45309;background:#FFFBEB;
+    border-left:3px solid var(--warn);border-radius:0 8px 8px 0;padding:7px 11px}
 
   /* ── 启动项列表（可勾选）── */
-  .st-row{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid rgba(48,54,61,.5);align-items:flex-start}
+  .st-row{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);align-items:flex-start}
   .st-row:last-child{border-bottom:none}
   .st-dis{opacity:.55}
 
   /* ── 连接面板 tab ── */
-  .cp-tab{padding:5px 12px;font-size:12px;background:var(--surface2);color:var(--text2);
-    border:1px solid var(--border);border-radius:6px;cursor:pointer}
-  .cp-tab.active{background:rgba(56,139,253,.12);color:var(--info);border-color:var(--info)}
+  .cp-tab{box-shadow:var(--shadow-card);padding:5px 12px;font-size:12px;background:var(--surface2);color:var(--text2);
+    border:1px solid var(--border);border-radius:8px;cursor:pointer}
+  .cp-tab.active{background:#EEF4FE;color:#1E56D6;border-color:#1E56D6}
 
   /* ── 审批弹窗（与对话页同款）── */
-  #approval-overlay{display:none;position:fixed;inset:0;background:rgba(1,4,9,.8);z-index:10000;
+  #approval-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:10000;
     align-items:center;justify-content:center;padding:20px}
-  #approval-dialog{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  #approval-dialog{box-shadow:var(--shadow-pop);background:var(--surface);border:1px solid var(--border);border-radius:12px;
     max-width:520px;width:100%;padding:22px 24px}
   #approval-dialog h3{font-size:16px;font-weight:650;margin-bottom:8px;color:var(--text)}
   .human-desc{background:var(--surface2);border-left:3px solid var(--info);border-radius:0 8px 8px 0;
     padding:11px 14px;font-size:13.5px;color:var(--text);margin:10px 0;line-height:1.65}
   .detail-toggle{background:none;border:none;color:var(--text2);font-size:12px;cursor:pointer;padding:4px 0}
-  .detail-toggle:hover{color:var(--info)}
-  .tool-info{display:none;background:#010409;border:1px solid var(--border);border-radius:7px;
+  .detail-toggle:hover{color:#1E56D6}
+  .tool-info{display:none;background:#F2F3F5;border:1px solid var(--border);border-radius:8px;
     padding:10px 12px;margin:6px 0;font-size:12px}
-  .args-display{white-space:pre-wrap;color:#c9d1d9;font-family:Consolas,Monaco,monospace;font-size:11.5px;
+  .args-display{white-space:pre-wrap;color:#151B26;font-family:Consolas,Monaco,monospace;font-size:11.5px;
     max-height:180px;overflow-y:auto}
-  .timer{font-size:12px;color:var(--text3);margin:8px 0}
+  .timer{font-size:12px;color:var(--text2);margin:8px 0}
   .btn-row{display:flex;gap:10px;margin:12px 0 8px}
   .btn-approve,.btn-deny{flex:1;padding:9px;border:none;border-radius:8px;font-size:13.5px;
     font-weight:600;cursor:pointer}
-  .btn-approve{background:var(--success);color:#fff}
+  .btn-approve{background:#047857;color:#fff}
   .btn-deny{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
-  .deny-reason{display:none;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:7px;
+  .deny-reason{display:none;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;
     padding:8px 11px;color:var(--text);font-size:12.5px;resize:vertical;min-height:56px}
 
 
@@ -147,8 +162,8 @@
   .tab{padding:7px 15px;font-size:13px;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;
     display:flex;align-items:center;gap:6px;user-select:none}
   .tab:hover{color:var(--text)}
-  .tab.active{color:var(--info);border-bottom-color:var(--info);font-weight:600}
-  .tab .badge-mini{background:var(--error);color:#fff;font-size:10px;padding:0 5px;border-radius:9px;line-height:15px}
+  .tab.active{color:#1E56D6;border-bottom-color:#1E56D6;font-weight:600}
+  .tab .badge-mini{background:var(--error);color:#fff;font-size:10px;padding:0 5px;border-radius:8px;line-height:15px}
   .tab-panel{display:none}
   /* 2026-09-26：右侧面板改为【纵向 flex 布局】——页签固定不滚动，只有内容区滚动。
      改前：.result-panel{overflow-y:auto} 让页签跟着内容一起滚走，用户看不到当前页签 */
@@ -163,30 +178,40 @@
   .msg{display:flex;gap:10px;margin-bottom:14px}
   .msg .avatar{flex:0 0 28px;height:28px;border-radius:50%;display:flex;align-items:center;
     justify-content:center;font-size:14px;background:var(--surface2)}
-  .msg .bubble{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  .msg .bubble{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:12px;
     padding:10px 14px;font-size:13.5px;line-height:1.72;min-width:0}
-  .msg.user .bubble{background:rgba(56,139,253,.09);border-color:rgba(56,139,253,.35)}
-  .msg .mtime{font-size:11px;color:var(--text3);margin-top:5px}
+  .msg.user .bubble{background:rgba(36,104,242,.09);border-color:rgba(36,104,242,.35)}
+  .msg .mtime{font-size:11px;color:var(--text2);margin-top:5px}
   .bubble table{width:100%;border-collapse:collapse;margin:6px 0;font-size:12.5px}
   .bubble th,.bubble td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)}
   .bubble th{color:var(--text2);font-size:11.5px;background:var(--surface2)}
-  .bubble code{background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:12px;color:#79c0ff}
+  .bubble code{background:var(--surface2);padding:1px 5px;border-radius:4px;font-size:12px;color:#1E56D6}
 
   /* ── A档（2026-10-12）：判读三件套徽章 —— 加法式新增，不影响既有样式 ── */
-  .jj-chip{display:inline-block;margin:0 4px 0 0;padding:1px 7px;border-radius:9px;font-size:11.5px;
+  .jj-chip{display:inline-block;margin:0 4px 0 0;padding:1px 7px;border-radius:8px;font-size:11.5px;
            line-height:17px;white-space:nowrap;border:1px solid transparent}
-  .jj-evidence{color:#79c0ff;background:rgba(56,139,253,.12);border-color:rgba(56,139,253,.35)}
-  .jj-conf-high{color:#3fb950;background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.35)}
-  .jj-conf-mid{color:#d29922;background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.35)}
-  .jj-conf-low{color:#f85149;background:rgba(248,81,73,.12);border-color:rgba(248,81,73,.35)}
-  .jj-unknown{color:#8b949e;background:rgba(139,148,158,.12);border-color:rgba(139,148,158,.3)}
-  .jj-coverage{display:block;margin-top:8px;padding:5px 9px;border-left:3px solid #8957e5;
-               background:rgba(137,87,229,.08);color:#c9a9ff;font-size:12px;border-radius:0 6px 6px 0}
-.jj-conf-na{color:#6e7681;background:rgba(110,118,129,.12);border-color:rgba(110,118,129,.3)}
-.jj-evidence-none{color:#6e7681;background:rgba(110,118,129,.10);border-color:rgba(110,118,129,.28)}
-.jj-reason{font-size:11.5px;color:#7d8590;margin-right:6px;white-space:normal}
-.jj-unknown{color:#9aa4b0}
+  .jj-evidence{color:#1E56D6;background:#EEF4FE;border-color:rgba(36,104,242,.35)}
+  .jj-conf-high{color:#047857;background:rgba(5,150,105,.12);border-color:rgba(5,150,105,.35)}
+  .jj-conf-mid{color:#B45309;background:rgba(180,83,9,.12);border-color:rgba(180,83,9,.35)}
+  .jj-conf-low{color:#B91C1C;background:rgba(220,38,38,.12);border-color:rgba(220,38,38,.35)}
+  .jj-unknown{color:#5C5F66;background:rgba(92,95,102,.12);border-color:rgba(92,95,102,.3)}
+  .jj-coverage{display:block;margin-top:8px;padding:5px 9px;border-left:3px solid #AF61FF;
+               background:#F6EFFF;color:#7C3AED;font-size:12px;border-radius:0 8px 8px 0}
+.jj-conf-na{color:var(--text2);background:rgba(156,163,175,.12);border-color:rgba(156,163,175,.3)}
+.jj-evidence-none{color:var(--text2);background:rgba(156,163,175,.10);border-color:rgba(156,163,175,.28)}
+.jj-reason{font-size:11.5px;color:#5C5F66;margin-right:6px;white-space:normal}
+.jj-unknown{color:#5C5F66}
 .jj-chip{margin-right:6px}
+
+  /* 亮色主题补充：滚动条 / 选中态（擎天） */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#DCE0E6;border-radius:8px;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#C9CDD4;background-clip:content-box}
+  ::selection{background:#D6E4FF;color:#0F172A}
+
+  /* 表单控件字体继承（消除 Arial 混入） */
+  button,input,select,textarea{font-family:inherit}
 </style>
 
 </head>
@@ -197,19 +222,19 @@
   <span class="status-dot"></span>
   <span class="hdr-item" id="hdr-svc">服务已连接</span>
   <span class="hdr-sep"></span>
-  <span class="hdr-item" id="hdr-bridge" style="color:#f85149">桥接器未连接</span>
+  <span class="hdr-item" id="hdr-bridge" style="color:#B91C1C">桥接器未连接</span>
   <span class="hdr-sep"></span>
   <span class="hdr-item">📋 房间 <b id="hdr-room">------</b></span>
   <span class="hdr-item">SN: <b id="hdr-sn">-</b></span>
   <span class="hdr-item">工单: <b id="hdr-ticket">-</b></span>
   <span class="hdr-item">剩 <b id="hdr-days">-</b> 天</span>
-  <span class="hdr-item" id="hdr-status" style="color:var(--info)">诊断中</span>
+  <span class="hdr-item" id="hdr-status" style="color:#1E56D6">诊断中</span>
   <span class="spacer"></span>
   <button class="hdr-btn" id="btn-connect" onclick="toggleConnectPanel()">📶 连接你的电脑 ▾</button>
   <button class="hdr-btn" onclick="backToChat()">💬 转对话界面</button>
   <!-- 2026-09-26 新增：回工作台。诊断台/对话页需能回到主界面（IDG 日志分析、Win/Lin 工具、诊断记录等入口都在那里） -->
   <button class="hdr-btn" onclick="backToDashboard()" title="返回工作台（日志分析 / 工具 / 诊断记录）">🏠 工作台</button>
-  <button class="hdr-btn" onclick="closeRoom()" style="color:#f85149;">⛔ 结束诊断</button>
+  <button class="hdr-btn" onclick="closeRoom()" style="color:#B91C1C;">⛔ 结束诊断</button>
   <button class="hdr-btn" id="btn-export" onclick="exportReport()">📄 导出报告</button>
 </header>
 
@@ -224,12 +249,20 @@
     <button class="cp-tab" data-tab="linux" data-os="linux" onclick="switchConnectTab('linux')">Linux</button>
   </div>
   <div id="cp-body" style="font-size:12px;color:var(--text2);">
-    <div id="cp-cmd" style="background:#010409;border:1px solid var(--border);border-radius:7px;padding:11px 13px;
-      font-family:Consolas,Monaco,monospace;font-size:11.5px;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;max-height:190px;overflow:auto;"></div>
+    <div id="cp-cmd" style="background:#F2F3F5;border:1px solid var(--border);border-radius:8px;padding:11px 13px;
+      font-family:Consolas,Monaco,monospace;font-size:11.5px;color:#151B26;white-space:pre-wrap;word-break:break-all;max-height:190px;overflow:auto;"></div>
     <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-      <button class="hdr-btn" id="cp-dl-bat" onclick="downloadBat()" style="display:none;background:#238636;border-color:#2ea043;color:#fff;font-weight:600;">⬇ 下载一键连接脚本（.bat）</button>
+      <button class="hdr-btn" id="cp-dl-bat" onclick="downloadBat()" style="display:none;background:#2468F2;border-color:#1E56D6;color:#fff;font-weight:600;">⬇ 下载一键连接脚本（.bat）</button>
       <button class="hdr-btn" id="cp-copy-btn" onclick="copyConnectCmd()">📋 复制命令</button>
-      <span id="cp-hint" style="font-size:11.5px;color:var(--text3);"></span>
+      <span id="cp-hint" style="font-size:11.5px;color:var(--text2);"></span>
+      <button class="hdr-btn" id="cp-cleanup-btn" onclick="toggleCleanup()" title="诊断结束后如何清理/卸载桥接器">🧹 清理/卸载说明</button>
+    </div>
+    <!-- 2026-10-15 新增（加法式）：清理入口 + 客户机提示。此前页面只有 Linux 清理说明、无 Windows 入口 -->
+    <div id="cp-cleanup" style="display:none;margin-top:10px;padding:10px 12px;background:#F2F3F5;border:1px solid var(--border);border-radius:8px;font-size:11.5px;color:var(--text2);line-height:1.85;">
+      <div style="font-weight:650;color:var(--text);margin-bottom:4px;">🧹 诊断结束后如何清理（可选）</div>
+      <div>· Windows：下载 <a href="/static/uninstall-windows.bat" style="color:#1E56D6;">uninstall-windows.bat</a> 并双击运行 —— 停止进程、删除程序文件与审计日志，不碰系统其它内容。</div>
+      <div>· Linux：<code style="color:#151B26;">curl -sL <span class="uninstall-linux-url">…</span> | sudo bash</code></div>
+      <div style="margin-top:6px;color:var(--text2);">客户机提示：若出现「Windows 已保护你的电脑」→ 点「更多信息」→「仍要运行」；连接成功后请保持桥接器窗口开启（可最小化），<b>关闭窗口即断开</b>。</div>
     </div>
   </div>
 </div>
@@ -617,20 +650,20 @@
       <div class="tab active" id="tab-diag" onclick="switchTab('diag')">📊 诊断结果</div>
       <div class="tab" id="tab-chat" onclick="switchTab('chat')">💬 对话<span class="badge-mini" id="chat-badge" style="display:none">!</span></div>
       <span class="spacer" style="flex:1"></span>
-      <span id="cur-diag-label" style="font-size:11.5px;color:var(--text3);margin-right:6px"></span>
+      <span id="cur-diag-label" style="font-size:11.5px;color:var(--text2);margin-right:6px"></span>
     </div>
 
     <!-- 面板1：诊断结果 -->
     <div class="tab-panel active" id="panel-diag">
       <div id="result-panel">
-        <div style="padding:30px 0;color:#8b949e;font-size:13.5px;">👈 选择左侧诊断工具开始调查（或已在加载历史记录…）</div>
+        <div style="padding:30px 0;color:#5C5F66;font-size:13.5px;">👈 选择左侧诊断工具开始调查（或已在加载历史记录…）</div>
       </div>
     </div>
 
     <!-- 面板2：对话 -->
     <div class="tab-panel" id="panel-chat">
       <div class="chat-flow" id="chat-flow">
-        <div style="padding:26px 0;color:#8b949e;font-size:13.5px;">💬 这里可与 AI 自由对话——诊断结果在「📊 诊断结果」页签</div>
+        <div style="padding:26px 0;color:#5C5F66;font-size:13.5px;">💬 这里可与 AI 自由对话——诊断结果在「📊 诊断结果」页签</div>
       </div>
     </div>
   </div><!-- /右侧 result-panel -->
@@ -641,11 +674,11 @@
   <div id="approval-dialog">
     <h3 id="approval-title">操作确认</h3>
     <p id="approval-desc" style="font-size:13px;color:var(--text2);">助手想执行以下操作：</p>
-    <p style="font-size:12px;color:var(--success);margin:0 0 6px;">✅ 允许后，本次任务后续操作将不再询问（自动放行）</p>
+    <p style="font-size:12px;color:#047857;margin:0 0 6px;">✅ 允许后，本次任务后续操作将不再询问（自动放行）</p>
     <div class="human-desc" id="approval-human"></div>
     <button class="detail-toggle" id="approval-toggle-detail" onclick="toggleApprovalDetail()">▸ 查看命令详情</button>
     <div class="tool-info" id="approval-detail">
-      <strong id="approval-tool" style="color:var(--info);"></strong>
+      <strong id="approval-tool" style="color:#1E56D6;"></strong>
       <div class="args-display" id="approval-args" style="margin-top:8px;"></div>
     </div>
     <p class="timer" id="approval-timer"></p>
@@ -748,7 +781,7 @@ function connect() {
         showApprovalDialog(msg);
         break;
       case 'tool_start':
-        appendLiveStep('🔧', '执行 ' + (msg.tool || '命令') + (msg.tier ? '（Tier ' + msg.tier + '）' : ''), '#58a6ff');
+        appendLiveStep('🔧', '执行 ' + (msg.tool || '命令') + (msg.tier ? '（Tier ' + msg.tier + '）' : ''), '#2468F2');
         break;
       case 'startup_result':
         {
@@ -756,7 +789,7 @@ function connect() {
           if (closed.length) {
             startupItemsCache = startupItemsCache.filter(function (it) { return !closed.includes(it.name); });
             renderStartupTable(startupItemsCache);
-            appendLiveStep('✅', '已关闭 ' + closed.length + ' 项：' + closed.join('、'), '#3fb950');
+            appendLiveStep('✅', '已关闭 ' + closed.length + ' 项：' + closed.join('、'), '#059669');
           }
         }
         break;
@@ -767,7 +800,7 @@ function connect() {
       case 'tool_result':
         appendLiveStep(msg.denied ? '🚫' : '✅',
           (msg.tool || '命令') + (msg.denied ? ' 已拒绝' : ' 执行完成') + (msg.content ? '（' + String(msg.content).length + ' 字符）' : ''),
-          msg.denied ? '#f85149' : '#3fb950');
+          msg.denied ? '#DC2626' : '#059669');
         break;
       case 'bridge_status':
         bridgeConnected = !!msg.connected;
@@ -832,14 +865,14 @@ function connect() {
 // 不显示"服务断开"（那会让用户误以为系统故障），而是中性的"正在连接服务…"
 function setConnStateConnecting() {
   const dot = document.querySelector('.status-dot');
-  if (dot) { dot.style.background = '#d29922'; dot.style.boxShadow = 'none'; }
+  if (dot) { dot.style.background = '#B45309'; dot.style.boxShadow = 'none'; }
   const el = document.getElementById('hdr-svc');
-  if (el) { el.textContent = '正在连接服务…'; el.style.color = '#d29922'; }
+  if (el) { el.textContent = '正在连接服务…'; el.style.color = '#B45309'; }
 }
 
 function setConnState(ok, reconnecting, explicitText) {
   const dot = document.querySelector('.status-dot');
-  if (dot) { dot.style.background = ok ? '#3fb950' : '#f85149'; dot.style.boxShadow = ok ? '0 0 6px #3fb950' : 'none'; }
+  if (dot) { dot.style.background = ok ? '#059669' : '#DC2626'; dot.style.boxShadow = ok ? '0 0 6px #059669' : 'none'; }
   const el = document.getElementById('hdr-svc');
   if (!el) return;
   if (ok) {
@@ -847,14 +880,14 @@ function setConnState(ok, reconnecting, explicitText) {
     el.style.color = '';
   } else if (explicitText) {
     el.textContent = explicitText;
-    el.style.color = '#f85149';
+    el.style.color = '#DC2626';
   } else if (reconnecting) {
     // 顶栏直接显示重连进度（原左下角浮标签的功能并入此处）
     el.textContent = '服务断开 · ' + reconnecting;
-    el.style.color = '#d29922';
+    el.style.color = '#B45309';
   } else {
     el.textContent = '服务断开';
-    el.style.color = '#f85149';
+    el.style.color = '#DC2626';
   }
 }
 function setBridgeState(ok) {
@@ -862,7 +895,7 @@ function setBridgeState(ok) {
   const el = document.getElementById('hdr-bridge');
   if (el) {
     el.textContent = ok ? '桥接器已连接' : '桥接器未连接';
-    el.style.color = ok ? '#3fb950' : '#f85149';
+    el.style.color = ok ? '#059669' : '#DC2626';
   }
 }
 
@@ -871,7 +904,7 @@ let currentRunningKey = null;
 let diagBuffer = [];   // 一次诊断的 AI 分段输出缓冲（分段拼接后渲染）
 function pick(el) {
   document.querySelectorAll('.diag-card').forEach(x => x.style.outline = 'none');
-  el.style.outline = '2px solid #58a6ff';
+  el.style.outline = '2px solid #2468F2';
   setTimeout(() => el.style.outline = 'none', 900);
 
   const key = el.dataset.key;
@@ -913,9 +946,9 @@ function showLoading(t) {
     + '<div class="sec-label">🔍 执行过程（实时）</div>'
     + '<div class="manifest live-steps">'
     +   '<div class="mani-row live-wait"><span class="mani-icon">⏳</span>'
-    +   '<span class="mani-text" style="color:#8b949e">正在执行诊断命令…</span></div>'
+    +   '<span class="mani-text" style="color:#5C5F66">正在执行诊断命令…</span></div>'
     + '</div>'
-    + '<div style="margin-top:10px;font-size:12px;color:#6e7681;" id="live-elapsed">已用时 0 秒（诊断通常需要 1-3 分钟）</div>';
+    + '<div style="margin-top:10px;font-size:12px;color:var(--text2);" id="live-elapsed">已用时 0 秒（诊断通常需要 1-3 分钟）</div>';
   if (liveTimer) clearInterval(liveTimer);
   liveTimer = setInterval(function () {
     const el = document.getElementById('live-elapsed');
@@ -934,7 +967,7 @@ function appendLiveStep(icon, text, color) {
   const el = document.createElement('div');
   el.className = 'mani-row';
   el.innerHTML = '<span class="mani-icon">' + icon + '</span>'
-    + '<span class="mani-text" style="color:' + (color || '#e6edf3') + '">' + esc(text) + '</span>';
+    + '<span class="mani-text" style="color:' + (color || '#151B26') + '">' + esc(text) + '</span>';
   box.appendChild(el);
   const rp = document.querySelector('.result-panel');
   if (rp) rp.scrollTop = rp.scrollHeight;
@@ -943,7 +976,7 @@ function appendLiveStep(icon, text, color) {
 function clearLoadingTimer() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
 function showError(t) {
   const p = document.getElementById('result-panel');
-  if (p) p.innerHTML = '<div class="gap-box" style="border-color:#f85149;color:#ff9d97;background:rgba(248,81,73,.07)">❌ ' + esc(t) + '</div>';
+  if (p) p.innerHTML = '<div class="gap-box" style="border-color:#B91C1C;color:#B91C1C;background:#FEF2F2">❌ ' + esc(t) + '</div>';
 }
 function showInfo(t) {
   const p = document.getElementById('result-panel');
@@ -975,7 +1008,7 @@ function renderResult(room, md) {
   let html = '<div class="result-title">📋 诊断结果</div>';
   html += chipifyHtml(renderDiagnosis(md));   // A档：三件套徽章
   html += '<div style="margin-top:18px;"><button class="hdr-btn" onclick="showRaw()">📄 查看原始输出</button></div>';
-  html += '<div id="raw-out" style="display:none;margin-top:10px;padding:12px;background:#010409;border:1px solid #30363d;border-radius:8px;font-size:12.5px;white-space:pre-wrap;color:#c9d1d9;">' + esc(md) + '</div>';
+  html += '<div id="raw-out" style="display:none;margin-top:10px;padding:12px;background:#F2F3F5;border:1px solid #E8E9EB;border-radius:8px;font-size:12.5px;white-space:pre-wrap;color:#151B26;">' + esc(md) + '</div>';
   p.innerHTML = html;
 }
 function showRaw() { const el = document.getElementById('raw-out'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
@@ -1040,12 +1073,12 @@ function renderManifest(text) {
   lines.forEach(function (l) {
     var clean = l.replace(/^[-*•]\s*/, '').replace(/`/g, '');
     var tail = clean.split(/[—-]{1,2}/).pop() || clean;
-    var color = '#8b949e', icon = '•';
-    if (/不适用|无此硬件|台式机|没有.*硬件/i.test(tail)) { color = '#6e7681'; icon = '⚪'; }
-    else if (/失败|超时|无法|读取不到/i.test(tail)) { color = '#f85149'; icon = '❌'; }
-    else if (/成功|完成|已获取|正常|ok\b/i.test(tail)) { color = '#3fb950'; icon = '✅'; }
-    else if (/失败|超时|无法/i.test(clean)) { color = '#f85149'; icon = '❌'; }
-    else if (/成功|完成|已获取/i.test(clean)) { color = '#3fb950'; icon = '✅'; }
+    var color = '#5C5F66', icon = '•';
+    if (/不适用|无此硬件|台式机|没有.*硬件/i.test(tail)) { color = 'var(--text2)'; icon = '⚪'; }
+    else if (/失败|超时|无法|读取不到/i.test(tail)) { color = '#DC2626'; icon = '❌'; }
+    else if (/成功|完成|已获取|正常|ok\b/i.test(tail)) { color = '#059669'; icon = '✅'; }
+    else if (/失败|超时|无法/i.test(clean)) { color = '#DC2626'; icon = '❌'; }
+    else if (/成功|完成|已获取/i.test(clean)) { color = '#059669'; icon = '✅'; }
     var cls = icon === '✅' ? 'mani-ok' : (icon === '❌' ? 'mani-fail' : (icon === '⚪' ? 'mani-na' : ''));
     rows += '<div class="mani-row ' + cls + '"><span class="mani-icon">' + icon + '</span><span class="mani-text">' + clean + '</span></div>';
   });
@@ -1090,7 +1123,7 @@ async function loadHistory() {
       renderResult(ROOM, last.content || '');
     } else {
       const p = document.getElementById('result-panel');
-      if (p) p.innerHTML = '<div style="padding:30px 0;color:#8b949e;font-size:13.5px;">👈 从左侧选择一个诊断项目开始调查</div>';
+      if (p) p.innerHTML = '<div style="padding:30px 0;color:#5C5F66;font-size:13.5px;">👈 从左侧选择一个诊断项目开始调查</div>';
     }
   } catch (e) { /* 忽略 */ }
 }
@@ -1104,7 +1137,7 @@ function runStartupScan(icon, title) {
   if (p) p.innerHTML = '<div class="result-title">' + icon + ' ' + esc(title) + '</div>'
     + '<div class="sec-label">🔍 执行过程（实时）</div>'
     + '<div class="manifest live-steps"><div class="mani-row live-wait">'
-    + '<span class="mani-icon">⏳</span><span class="mani-text" style="color:#8b949e">正在查询开机自启动项…</span></div></div>';
+    + '<span class="mani-icon">⏳</span><span class="mani-text" style="color:#5C5F66">正在查询开机自启动项…</span></div></div>';
   ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_scan]' }));
 }
 
@@ -1118,21 +1151,21 @@ function renderStartupTable(items) {
     p.innerHTML = '<div class="result-title">⚙️ 开机自启动</div><div class="obs-box">未发现开机自启动项。</div>';
     return;
   }
-  const CAT = { necessary: ['🟢 必需', '#3fb950'], common: ['🟡 常用', '#d29922'],
-                advisory: ['🔴 建议关闭', '#f85149'], suspicious: ['⚠️ 可疑', '#f85149'] };
+  const CAT = { necessary: ['🟢 必需', '#059669'], common: ['🟡 常用', '#B45309'],
+                advisory: ['🔴 建议关闭', '#DC2626'], suspicious: ['⚠️ 可疑', '#DC2626'] };
   let rows = '';
   items.forEach(function (it, idx) {
     const cat = it.category || 'common';
     const isNecessary = cat === 'necessary';
     const checked = !!it.recommend && !isNecessary;
-    const catInfo = CAT[cat] || ['—', '#8b949e'];
+    const catInfo = CAT[cat] || ['—', '#5C5F66'];
     rows += '<div class="st-row' + (isNecessary ? ' st-dis' : '') + '">'
       + '<input type="checkbox" data-idx="' + idx + '"' + (checked ? ' checked' : '') + (isNecessary ? ' disabled' : '')
       + ' style="margin-top:3px;flex:0 0 auto;">'
       + '<div style="flex:1;min-width:0;">'
-      + '<div style="font-size:13px;font-weight:600;color:' + (isNecessary ? '#6e7681' : '#e6edf3') + ';">' + esc(it.name || '?') + '</div>'
-      + (it.display && it.display !== it.name ? '<div style="font-size:11.5px;color:#8b949e;">' + esc(it.display) + '</div>' : '')
-      + '<div style="font-size:11px;color:#6e7681;word-break:break-all;margin-top:2px;">' + esc(it.command || '') + '</div>'
+      + '<div style="font-size:13px;font-weight:600;color:' + (isNecessary ? 'var(--text2)' : '#151B26') + ';">' + esc(it.name || '?') + '</div>'
+      + (it.display && it.display !== it.name ? '<div style="font-size:11.5px;color:#5C5F66;">' + esc(it.display) + '</div>' : '')
+      + '<div style="font-size:11px;color:var(--text2);word-break:break-all;margin-top:2px;">' + esc(it.command || '') + '</div>'
       + '</div>'
       + '<span style="flex:0 0 auto;font-size:11px;color:' + catInfo[1] + ';">' + catInfo[0] + '</span>'
       + '</div>';
@@ -1141,9 +1174,9 @@ function renderStartupTable(items) {
     + '<div class="sec-label">📋 启动项清单（可勾选关闭）</div>'
     + '<div class="obs-box" id="startup-list" style="padding:8px 12px;">' + rows + '</div>'
     + '<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
-    +   '<button class="hdr-btn" style="background:rgba(56,139,253,.15);color:#58a6ff;border-color:#58a6ff;" onclick="confirmStartupClose()">✔ 关闭所选</button>'
+    +   '<button class="hdr-btn" style="background:rgba(36,104,242,.15);color:#1E56D6;border-color:#1E56D6;" onclick="confirmStartupClose()">✔ 关闭所选</button>'
     +   '<button class="hdr-btn" onclick="document.querySelectorAll(\'#startup-list input:not(:disabled)\').forEach(cb=>cb.checked=false)">全不选</button>'
-    +   '<span style="font-size:11.5px;color:#6e7681;">🔴 建议关闭项已预勾选 · 🟢 系统必需不可关闭（关闭前自动备份到客户机桌面）</span>'
+    +   '<span style="font-size:11.5px;color:var(--text2);">🔴 建议关闭项已预勾选 · 🟢 系统必需不可关闭（关闭前自动备份到客户机桌面）</span>'
     + '</div>';
 }
 
@@ -1157,7 +1190,7 @@ function confirmStartupClose() {
   if (!items.length) { alert('请先勾选要关闭的启动项'); return; }
   if (!confirm('将关闭以下开机自启动项（执行前自动备份到客户机桌面）：\n\n' + names.join('、') + '\n\n确定执行？')) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) { alert('连接未建立'); return; }
-  appendLiveStep('🔧', '正在关闭所选启动项…', '#d29922');
+  appendLiveStep('🔧', '正在关闭所选启动项…', '#B45309');
   ws.send(JSON.stringify({ type: 'chat', content: '[QUICK_ACTION:startup_close] ' + JSON.stringify({ items: items }) }));
 }
 
@@ -1170,7 +1203,7 @@ async function runDriverFetch(icon, title) {
   if (p) p.innerHTML = '<div class="result-title">' + icon + ' ' + esc(title) + '</div>'
     + '<div class="sec-label">🔍 执行过程（实时）</div>'
     + '<div class="manifest live-steps"><div class="mani-row live-wait">'
-    + '<span class="mani-icon">⏳</span><span class="mani-text" style="color:#8b949e" id="drv-wait">正在识别机器并抓取联想官网驱动清单…（首次 1-3 分钟，之后走缓存）</span></div></div>';
+    + '<span class="mani-icon">⏳</span><span class="mani-text" style="color:#5C5F66" id="drv-wait">正在识别机器并抓取联想官网驱动清单…（首次 1-3 分钟，之后走缓存）</span></div></div>';
   const timer = setInterval(function () {
     waited += 10;
     const el = document.getElementById('drv-wait');
@@ -1215,20 +1248,20 @@ function renderDriverTable(d) {
   list.forEach(function (dr) { (dr.os_family || []).forEach(function (f) { if (fams.indexOf(f) < 0) fams.push(f); }); });
   fams.sort();
 
-  let html = '<div class="result-title">📥 联想官网驱动清单' + (d.cached ? ' <span style="font-size:11px;color:#3fb950;">（缓存）</span>' : '') + '</div>';
-  html += '<div style="font-size:12.5px;color:#8b949e;margin-bottom:8px;">机型：<b style="color:#e6edf3">' + esc(model || '-') + '</b>'
-    + (sn ? ' | SN：' + esc(sn) : '') + ' | 共 <b style="color:#e6edf3">' + list.length + '</b> 项'
-    + (clientOs ? ' | 本机系统：<b style="color:#3fb950">' + esc(clientOs) + '</b>' : '')
+  let html = '<div class="result-title">📥 联想官网驱动清单' + (d.cached ? ' <span style="font-size:11px;color:#047857;">（缓存）</span>' : '') + '</div>';
+  html += '<div style="font-size:12.5px;color:#5C5F66;margin-bottom:8px;">机型：<b style="color:#151B26">' + esc(model || '-') + '</b>'
+    + (sn ? ' | SN：' + esc(sn) : '') + ' | 共 <b style="color:#151B26">' + list.length + '</b> 项'
+    + (clientOs ? ' | 本机系统：<b style="color:#047857">' + esc(clientOs) + '</b>' : '')
     + (d.note ? '<br>📝 ' + esc(d.note) : '') + '</div>';
 
   html += '<div class="drv-wrap">';
-  html += '<div style="font-size:12px;color:#8b949e;margin-bottom:8px;">适用系统：'
-    + '<select class="drv-os-sel" onchange="drvApplyFilter(this)" style="background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:4px;padding:2px 6px;font-size:12px;">'
+  html += '<div style="font-size:12px;color:#5C5F66;margin-bottom:8px;">适用系统：'
+    + '<select class="drv-os-sel" onchange="drvApplyFilter(this)" style="background:#F9F9F9;color:#151B26;border:1px solid #E8E9EB;border-radius:4px;padding:2px 6px;font-size:12px;">'
     + '<option value="">全部系统</option>'
     + fams.map(function (f) { return '<option value="' + esc(f) + '"' + (f === clientOs ? ' selected' : '') + '>' + esc(f) + '</option>'; }).join('')
     + '</select><span class="drv-cnt" style="margin-left:8px;"></span>'
     + (clientOs ? '<span style="margin-left:10px;">✅ 适配本机系统（' + esc(clientOs) + '）</span>' : '')
-    + '<span class="drv-msg" style="margin-left:10px;color:#58a6ff;"></span></div>';
+    + '<span class="drv-msg" style="margin-left:10px;color:#1E56D6;"></span></div>';
 
   Object.keys(groups).forEach(function (cat) {
     const arr = groups[cat];
@@ -1241,12 +1274,12 @@ function renderDriverTable(d) {
       const matched = clientOs && (dr.os_family || []).indexOf(clientOs) >= 0;
       rows += '<tr class="drv-row" data-os="' + esc((dr.os_family || []).join('|')) + '" data-grp="' + esc(cat) + '">'
         + '<td style="font-size:12px;">' + esc(name) + (matched ? ' <span title="适配本机系统">✅</span>' : '') + '</td>'
-        + '<td style="font-size:11.5px;color:#8b949e;">' + esc(ver) + '</td>'
-        + '<td style="font-size:11.5px;color:#8b949e;">' + esc(date) + '</td>'
-        + '<td style="font-size:11.5px;color:#8b949e;">' + esc(size) + '</td>'
-        + '<td style="font-size:11.5px;color:#8b949e;">' + esc((dr.os_tags || []).join(' / ')) + '</td>'
+        + '<td style="font-size:11.5px;color:#5C5F66;">' + esc(ver) + '</td>'
+        + '<td style="font-size:11.5px;color:#5C5F66;">' + esc(date) + '</td>'
+        + '<td style="font-size:11.5px;color:#5C5F66;">' + esc(size) + '</td>'
+        + '<td style="font-size:11.5px;color:#5C5F66;">' + esc((dr.os_tags || []).join(' / ')) + '</td>'
         + '<td><button type="button" class="drv-dl" onclick="drvDownload(this)" data-key="' + esc(searchKey) + '" data-name="' + esc(dr.name_raw || name) + '" data-ver="' + esc(ver) + '"'
-        + ' style="cursor:pointer;background:transparent;border:1px solid #30363d;color:#58a6ff;border-radius:4px;padding:2px 9px;font-size:12px;">下载</button></td></tr>';
+        + ' style="cursor:pointer;background:transparent;border:1px solid #E8E9EB;color:#1E56D6;border-radius:4px;padding:2px 9px;font-size:12px;">下载</button></td></tr>';
     });
     html += '<div class="sec-label" data-grp-head="' + esc(cat) + '">📂 ' + esc(cat) + '（' + arr.length + '）</div>'
       + '<div class="obs-box" style="padding:6px 12px;"><table>'
@@ -1346,7 +1379,7 @@ function updateApprovalTimer() {
   const mins = Math.floor(remaining / 60), secs = remaining % 60;
   if (el) {
     el.textContent = '剩余时间: ' + mins + ':' + (secs < 10 ? '0' : '') + secs;
-    el.style.color = remaining <= 10 ? '#f85149' : '';
+    el.style.color = remaining <= 10 ? '#DC2626' : '';
   }
   if (remaining <= 0) {
     clearInterval(approvalTimerInterval);
@@ -1391,7 +1424,7 @@ function showProgress(t) {
   if (!el) {
     const rp = document.getElementById('result-panel');
     if (!rp) return;
-    rp.insertAdjacentHTML('afterbegin', '<div id="diag-progress" style="font-size:12.5px;color:#8b949e;margin-bottom:8px;"></div>');
+    rp.insertAdjacentHTML('afterbegin', '<div id="diag-progress" style="font-size:12.5px;color:#5C5F66;margin-bottom:8px;"></div>');
     el = document.getElementById('diag-progress');
   }
   if (el) el.textContent = '⏳ ' + t;
@@ -1604,6 +1637,21 @@ function renderConnectCmd() {
   if (hint) hint.textContent = h + (os ? '（本房间系统：' + os + '）' : '');
   if (typeof syncBatButtonVisible === 'function') syncBatButtonVisible();
 }
+
+// ══ 清理/卸载说明（2026-10-15 新增，加法式：新函数 + 新元素，不碰既有逻辑）══
+function toggleCleanup() {
+  const el = document.getElementById('cp-cleanup');
+  if (!el) return;
+  const btn = document.getElementById('cp-cleanup-btn');
+  const show = (el.style.display !== 'block');
+  el.style.display = show ? 'block' : 'none';
+  if (btn) btn.textContent = show ? '🧹 收起清理说明' : '🧹 清理/卸载说明';
+}
+(function fillUninstallUrls() {
+  document.querySelectorAll('.uninstall-linux-url').forEach(function (e) {
+    e.textContent = location.origin + '/static/uninstall-linux.sh';
+  });
+})();
 
 // ══ 下载一键连接脚本（.bat）══
 // 2026-09-25：Windows 客户只需点这个按钮 → 下载 .bat → 双击（UAC 点"是"）

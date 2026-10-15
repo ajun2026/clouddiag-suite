@@ -5,12 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>日志分析中心</title>
     <style>
-  :root { --bg: #0d1117; --surface: #161b22; --surface2: #21262d; --border: #30363d; --text: #e6edf3; --text2: #8b949e; --info: #58a6ff; --success: #3fb950; --warn: #d29922; --error: #f85149; --heading: #f0f6fc; }
+  :root {
+    /* ===== 联想擎天设计令牌（全站统一 · 单一来源）===== */
+    --primary:#2468F2; --primary-hover:#1E56D6; --primary-soft:#EEF4FE; --primary-line:#C9D9FB;
+    --ai:#AF61FF; --ai-soft:#F6EFFF; --info-soft:#EEF4FE; --info-line:#C9D9FB; --ai-soft:#F6EFFF; --success-soft:#ECFDF5; --warn-soft:#FFFBEB; --warn-line:rgba(180,83,9,.3); --error-soft:#FEF2F2; --error-line:#FECACA;
+    --info:#2468F2; --success:#059669; --success-text:#047857; --success-fill:#047857; --ai-fill:#7C3AED; --ai-text:#7C3AED; --error-text:#DC2626; --warning:#B45309; --error:#DC2626; --purple:#AF61FF; --accent:#AF61FF;
+    --bg:#F9F9F9; --surface:#FFFFFF; --surface2:#F2F3F5; --container:#F9F9F9;
+    --text:#151B26; --text-strong:#0F172A; --text2:#5C5F66; --text3:#9CA3AF; --placeholder:#C9CDD4;
+    --border:#E8E9EB; --line:#F2F3F5;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:20px;
+    --shadow-card:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.03);
+    --shadow-pop:0 4px 24px rgba(0,0,0,.08);
+    --shadow-sheet:0 12px 20px rgba(0,0,0,.05);
+    --font-sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",-apple-system,system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;
+    --ease:150ms ease-out;
+    /* 旧命名别名（既有引用不断） */
+    --background:var(--bg); --text-body:var(--text); --text-title:var(--text-strong);
+    --text-2:var(--text2); --text-3:var(--text3); --accent-bg:var(--primary-soft); --heading:var(--text-strong);
+    --danger:var(--error); --warn:var(--warning); --radius-input:var(--radius-sm); --radius-btn:var(--radius-md); --radius-card:var(--radius-lg);
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; }
+        body { font-family:var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh; }
         .header { background: var(--surface); padding: 10px 16px; position: sticky; top: 0; z-index: 10;
             display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-        .header a { color: var(--info); text-decoration: none; font-size: 14px; }
+        .header a { color:#1E56D6; text-decoration: none; font-size: 14px; }
         .header h1 { font-size: 18px; color: var(--heading); flex: 1; }
         /* 2026-09-26：整页固定高度——左侧文件树与右侧内容区【各自独立滚动】，
            不再整页滚动（原来 .layout 用 min-height，页面高度随内容增长 → 滚轮滚动时
@@ -25,17 +44,17 @@
         .sidebar h3 { font-size: 14px; color: var(--text2); margin-bottom: 12px; }
         .file-tree { font-size: 13px; }
         /* 注意：.file-tree 的 flex/overflow 规则见上方（侧边栏固定顶部导航段），此处仅保留字号 */
-        .tree-dir { color: var(--info); font-weight: 600; cursor: pointer; padding: 3px 0; display: flex; align-items: center; gap: 4px; }
-        .tree-dir:hover { color: #79c0ff; }
+        .tree-dir { color:#1E56D6; font-weight: 600; cursor: pointer; padding: 3px 0; display: flex; align-items: center; gap: 4px; }
+        .tree-dir:hover { color: #1E56D6; }
         .tree-dir .arrow { font-size: 10px; width: 12px; display: inline-block; transition: transform 0.15s; }
         .tree-dir .arrow.open { transform: rotate(90deg); }
         .tree-file { color: var(--text2); padding: 2px 0 2px 20px; font-family: "SF Mono", "Fira Code", monospace; font-size: 12px;
             display: flex; justify-content: space-between; }
-        .tree-file .cat { font-size: 10px; padding: 1px 6px; border-radius: 8px; }
-        .cat-events { background: #0d2b4e; color: var(--info); }
-        .cat-dump { background: #490202; color: var(--error); }
-        .cat-hardware { background: #0d3320; color: var(--success); }
-        .cat-siolog { background: #2e1e00; color: var(--warn); }
+        .tree-file .cat { font-size: 10px; padding: 1px 6px; border-radius:8px; }
+        .cat-events { background: #EEF4FE; color:#1E56D6; }
+        .cat-dump { background: #FEF2F2; color:#B91C1C; }
+        .cat-hardware { background: #ECFDF5; color:#047857; }
+        .cat-siolog { background: #FFFBEB; color: var(--warn); }
         .cat-text { background: var(--surface2); color: var(--text2); }
         .tree-children { display: none; padding-left: 12px; }
         .tree-children.open { display: block; }
@@ -45,86 +64,86 @@
            改前：.tabs 在滚动容器内 → 上下翻滚时标签栏被滚走，用户看不到当前页签 */
         .tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: nowrap; overflow-x: auto; border-bottom: 1px solid var(--surface2);
                 padding-bottom: 12px; flex-shrink: 0; }
-        .tab { padding: 8px 20px; border-radius: 6px 6px 0 0; font-size: 14px; cursor: pointer; background: var(--surface2); color: var(--text2);
+        .tab { padding: 8px 20px; border-radius:8px 8px 0 0; font-size: 14px; cursor: pointer; background: var(--surface2); color: var(--text2);
             border: 1px solid transparent; transition: all 0.15s; white-space: nowrap; flex-shrink: 0; }
-        .tab:hover { color: #c9d1d9; border-color: var(--border); }
-        .tab.active { background: var(--bg); color: var(--info); border-color: var(--info); border-bottom-color: var(--bg); font-weight: 600; }
+        .tab:hover { color: #151B26; border-color: var(--border); }
+        .tab.active { background: var(--bg); color:#1E56D6; border-color:#1E56D6; border-bottom-color: var(--bg); font-weight: 600; }
         /* 内容区独立滚动（标签栏固定在上面） */
         .tab-content { min-height: 300px; flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
         .loading { text-align: center; padding: 60px; color: var(--text2); }
-        .loading .spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--surface2); border-top-color: var(--info);
-            border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
+        .loading .spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--surface2); border-top-color:#1E56D6;
+            border-radius:50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
         @keyframes spin { to { transform: rotate(360deg); } }
         /* 报告样式（原 report.html 已废弃删除，样式保留在 analyze.html 内） */
-        .card { background: var(--surface); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+        .card { background: var(--surface); border-radius:8px; padding: 20px; margin-bottom: 16px; }
         .card h3 { font-size: 16px; color: var(--text); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--surface2); }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--surface2); }
         th { color: var(--text2); font-weight: 600; }
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
-        .badge-critical { background: #490202; color: var(--error); }
-        .badge-error { background: #3d1e00; color: var(--warn); }
-        .badge-info { background: #0d2b4e; color: var(--info); }
-        .badge-ok { background: #0d3320; color: var(--success); }
-        .badge-warning { background: #3d1e00; color: var(--warn); }
-        .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 14px; }
-        .alert-critical { background: #490202; border: 1px solid var(--error); color: var(--error); }
-        .alert-warning { background: #3d1e00; border: 1px solid var(--warn); color: var(--warn); }
-        .alert-info { background: #0d2b4e; border: 1px solid var(--info); color: var(--info); }
-        .alert-ok { background: #0d3320; border: 1px solid var(--success); color: var(--success); }
+        .badge { display: inline-block; padding: 2px 8px; border-radius:12px; font-size: 12px; font-weight: 600; }
+        .badge-critical { background: #FEF2F2; color:#B91C1C; }
+        .badge-error { background: #FFFBEB; color: var(--warn); }
+        .badge-info { background: #EEF4FE; color:#1E56D6; }
+        .badge-ok { background: #ECFDF5; color:#047857; }
+        .badge-warning { background: #FFFBEB; color: var(--warn); }
+        .alert { padding: 12px 16px; border-radius:8px; margin-bottom: 12px; font-size: 14px; }
+        .alert-critical { background: #FEF2F2; border: 1px solid var(--error); color:#B91C1C; }
+        .alert-warning { background: #FFFBEB; border: 1px solid var(--warn); color: var(--warn); }
+        .alert-info { background: #EEF4FE; border: 1px solid var(--info); color:#1E56D6; }
+        .alert-ok { background: #ECFDF5; border: 1px solid var(--success); color:#047857; }
         .alert-summary { padding: 20px; font-size: 15px; line-height: 1.8; }
         .alert-summary h3 { font-size: 20px; margin-bottom: 16px; }
         .event-list { max-height: 500px; overflow-y: auto; }
         .event-item { padding: 8px 12px; border-bottom: 1px solid var(--surface2)36; font-size: 13px; font-family: "SF Mono", "Fira Code", monospace; }
-        .stat-box { text-align: center; padding: 16px; background: var(--bg); border-radius: 8px; }
+        .stat-box { text-align: center; padding: 16px; background: var(--bg); border-radius:8px; }
         .stat-box .number { font-size: 32px; font-weight: 700; color: var(--text); }
         .stat-box .label { font-size: 13px; color: var(--text2); margin-top: 4px; }
         .file-list { display: flex; flex-wrap: wrap; gap: 8px; }
-        .file-chip { background: var(--surface2); padding: 4px 12px; border-radius: 14px; font-size: 12px; color: var(--text2); }
+        .file-chip { background: var(--surface2); padding: 4px 12px; border-radius:12px; font-size: 12px; color: var(--text2); }
         /* File preview modal */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100;
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15,23,42,0.45); z-index: 100;
             justify-content: center; align-items: center; }
         .modal-overlay.open { display: flex; }
-        .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; max-width: 900px; width: 90%; max-height: 85vh;
-            display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+        .modal { background: var(--surface); border: 1px solid var(--border); border-radius:12px; max-width: 900px; width: 90%; max-height: 85vh;
+            display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(15,23,42,.40); }
         .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--surface2); }
         .modal-header h2 { font-size: 16px; color: var(--heading); }
-        .modal-close { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+        .modal-close { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius:4px; }
         .modal-close:hover { color: var(--text); background: var(--surface2); }
         .modal-meta { font-size: 12px; color: var(--text2); padding: 8px 20px; background: var(--bg); border-bottom: 1px solid var(--surface2); }
         .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
         .modal-body pre { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all;
             color: var(--text); line-height: 1.5; margin: 0; }
         .tree-file.clickable { cursor: pointer; }
-        .tree-file.clickable:hover { color: var(--info); background: #1c2333; border-radius: 4px; }
+        .tree-file.clickable:hover { color:#1E56D6; background: var(--primary-soft); border-radius:4px; }
         /* Chat UI */
         .chat-container { display: flex; flex-direction: column; height: calc(100vh - 160px); }
         .chat-messages { flex: 1; overflow-y: auto; padding: 8px 0; }
-        .chat-msg { margin-bottom: 12px; padding: 10px 14px; border-radius: 10px; max-width: 90%; font-size: 14px; line-height: 1.6; }
+        .chat-msg { margin-bottom: 12px; padding: 10px 14px; border-radius:12px; max-width: 90%; font-size: 14px; line-height: 1.6; }
         .chat-msg.user { background: var(--info); color: var(--text); margin-left: auto; border-bottom-right-radius: 4px; }
         .chat-msg.assistant { background: var(--surface); color: var(--text); border: 1px solid var(--surface2); margin-right: auto; border-bottom-left-radius: 4px; }
         .chat-msg p { margin: 4px 0; }
-        .chat-msg code { background: var(--surface2); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
-        .chat-msg pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 8px 0; }
+        .chat-msg code { background: var(--surface2); padding: 1px 6px; border-radius:4px; font-size: 13px; }
+        .chat-msg pre { background: var(--bg); padding: 10px; border-radius:8px; overflow-x: auto; font-size: 12px; margin: 8px 0; }
         .chat-msg ul, .chat-msg ol { padding-left: 20px; margin: 4px 0; }
         .chat-input-wrap { display: flex; gap: 8px; padding: 12px 0; border-top: 1px solid var(--surface2); }
-        .chat-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+        .chat-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius:8px; padding: 10px 14px;
             color: var(--text); font-size: 14px; font-family: inherit; resize: none; outline: none; }
-        .chat-input:focus { border-color: var(--info); }
-        .chat-send { background: var(--info); color: #fff; border: none; border-radius: 8px; padding: 10px 18px;
+        .chat-input:focus { border-color:#1E56D6; }
+        .chat-send { background: var(--info); color: #fff; border: none; border-radius:8px; padding: 10px 18px;
             cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; }
-        .chat-send:hover { background: #388bfd; }
+        .chat-send:hover { background: #2468F2; }
         .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
         .chat-typing { color: var(--text2); font-size: 13px; padding: 8px 14px; }
         /* Chat mode switch */
-        .chat-mode-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-right: 8px; flex-shrink: 0; }
+        .chat-mode-switch { display: inline-flex; border: 1px solid var(--border); border-radius:8px; overflow: hidden; margin-right: 8px; flex-shrink: 0; }
         .mode-pill { padding: 6px 12px; font-size: 12px; cursor: pointer; color: var(--text2); background: var(--bg); user-select: none; white-space: nowrap; transition: all 0.15s; }
         .mode-pill.active { background: var(--info); color: #fff; }
-        .mode-pill.hermes.active { background: #8957e5; }
-        .mode-pill:not(.active):hover { color: #c9d1d9; }
-        .chat-msg.hermes { border-left: 3px solid #8957e5; }
+        .mode-pill.hermes.active { background: #7C3AED; }
+        .mode-pill:not(.active):hover { color: #151B26; }
+        .chat-msg.hermes { border-left: 3px solid #AF61FF; }
         /* BMC/Other layout: file viewer + AI chat */
         .other-layout { display: flex; flex-direction: column; height: calc(100vh - 52px); }
         .other-viewer { flex: 1; display: flex; flex-direction: column; border-bottom: 1px solid var(--surface2); min-height: 200px; }
@@ -142,59 +161,67 @@
         .other-chat .chat-container { display: flex; flex-direction: column; height: 100%; }
         .other-chat .chat-messages { flex: 1; overflow-y: auto; padding: 12px 16px; }
         .other-chat .chat-input-wrap { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--surface2); }
-        .other-chat .chat-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+        .other-chat .chat-input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius:8px;
             padding: 8px 12px; color: var(--text); font-size: 14px; font-family: inherit; resize: none; outline: none; }
-        .other-chat .chat-input:focus { border-color: var(--info); }
-        .other-chat .chat-send { background: var(--info); color: #fff; border: none; border-radius: 8px;
+        .other-chat .chat-input:focus { border-color:#1E56D6; }
+        .other-chat .chat-send { background: var(--info); color: #fff; border: none; border-radius:8px;
             padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; }
-        .other-chat .chat-send:hover { background: #388bfd; }
+        .other-chat .chat-send:hover { background: #2468F2; }
         .other-chat .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
-        .other-chat .chat-msg { margin-bottom: 10px; padding: 8px 12px; border-radius: 10px;
+        .other-chat .chat-msg { margin-bottom: 10px; padding: 8px 12px; border-radius:12px;
             max-width: 90%; font-size: 14px; line-height: 1.6; }
         .other-chat .chat-msg.user { background: var(--info); color: var(--text); margin-left: auto; border-bottom-right-radius: 4px; }
         .other-chat .chat-msg.assistant { background: var(--surface); color: var(--text); border: 1px solid var(--surface2);
             margin-right: auto; border-bottom-left-radius: 4px; }
         .other-chat .chat-msg p { margin: 4px 0; }
-        .other-chat .chat-msg code { background: var(--surface2); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
-        .other-chat .chat-msg pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 8px 0; }
+        .other-chat .chat-msg code { background: var(--surface2); padding: 1px 6px; border-radius:4px; font-size: 13px; }
+        .other-chat .chat-msg pre { background: var(--bg); padding: 10px; border-radius:8px; overflow-x: auto; font-size: 12px; margin: 8px 0; }
         .other-chat .chat-msg ul, .other-chat .chat-msg ol { padding-left: 20px; margin: 4px 0; }
         .other-chat .chat-typing { color: var(--text2); font-size: 13px; padding: 6px 12px; }
 
         /* === Dynamic file tabs === */
         .file-tabs-sep { display: inline-block; width: 1px; height: 24px; background: var(--border); margin: 0 6px; align-self: center; flex-shrink: 0; }
-        .file-tab { display: inline-flex; align-items: center; gap: 4px; padding: 8px 10px 8px 14px; border-radius: 6px 6px 0 0; font-size: 13px; cursor: pointer; background: var(--surface2); color: var(--text2); border: 1px solid transparent; transition: all 0.15s; white-space: nowrap; max-width: 180px; flex-shrink: 0; }
-        .file-tab:hover { color: #c9d1d9; border-color: var(--border); }
-        .file-tab.active { background: var(--bg); color: var(--info); border-color: #1f6feb; border-bottom-color: var(--bg); font-weight: 600; }
+        .file-tab { display: inline-flex; align-items: center; gap: 4px; padding: 8px 10px 8px 14px; border-radius:8px 8px 0 0; font-size: 13px; cursor: pointer; background: var(--surface2); color: var(--text2); border: 1px solid transparent; transition: all 0.15s; white-space: nowrap; max-width: 180px; flex-shrink: 0; }
+        .file-tab:hover { color: #151B26; border-color: var(--border); }
+        .file-tab.active { background: var(--surface); color:#1E56D6; border-color:#1E56D6; border-bottom-color: var(--surface); font-weight: 600; }
         .file-tab .ft-name { overflow: hidden; text-overflow: ellipsis; font-family: "SF Mono", "Fira Code", monospace; font-size: 12px; }
-        .file-tab .ft-close { display: inline-block; width: 18px; height: 18px; line-height: 16px; text-align: center; border-radius: 3px; font-size: 12px; color: #484f58; cursor: pointer; flex-shrink: 0; }
-        .file-tab .ft-close:hover { color: var(--error); background: #490202; }
+        .file-tab .ft-close { display: inline-block; width: 18px; height: 18px; line-height: 16px; text-align: center; border-radius:4px; font-size: 12px; color: var(--text2); cursor: pointer; flex-shrink: 0; }
+        .file-tab .ft-close:hover { color:#B91C1C; background: #FEF2F2; }
         .file-tab.dirty .ft-name::after { content: ' ●'; color: var(--warn); font-size: 8px; }
         .tab-content.file-view { padding: 0; }
         .file-view-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--surface2); font-size: 13px; color: var(--text2); }
         .file-view-body { padding: 16px; overflow-y: auto; height: calc(100vh - 160px); }
         .file-view-body pre { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; color: var(--text); line-height: 1.5; margin: 0; }
-        .ai-tab-highlight { background: var(--info); color: #fff !important; border-color: var(--info); }
-        .ai-tab-highlight.active { background: var(--bg); color: var(--info) !important; }
+        .ai-tab-highlight { background: var(--info); color: #fff !important; border-color:#1E56D6; }
+        .ai-tab-highlight.active { background: var(--bg); color:#1E56D6 !important; }
         .tab-content.no-pad { padding: 0; }
-        .deep-tab.active { background: var(--bg); color: #bc8cff; border-color: #8957e5; border-bottom-color: var(--bg); font-weight: 600; }
-        .deep-tab:not(.active):hover { color: #bc8cff; border-color: #8957e5; }
+        .deep-tab.active { background: var(--bg); color:#7C3AED; border-color:#7C3AED; border-bottom-color: var(--bg); font-weight: 600; }
+        .deep-tab:not(.active):hover { color:#7C3AED; border-color:#7C3AED; }
 
     
   /* ── A档（2026-10-12）IDG：判读三件套徽章 —— 加法式新增，不影响既有样式 ── */
-  .jj-chip{display:inline-block;margin:0 4px 0 0;padding:1px 7px;border-radius:9px;font-size:11.5px;
+  .jj-chip{display:inline-block;margin:0 4px 0 0;padding:1px 7px;border-radius:8px;font-size:11.5px;
            line-height:17px;white-space:nowrap;border:1px solid transparent}
-  .jj-evidence{color:#79c0ff;background:rgba(56,139,253,.12);border-color:rgba(56,139,253,.35)}
-  .jj-conf-high{color:#3fb950;background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.35)}
-  .jj-conf-mid{color:#d29922;background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.35)}
-  .jj-conf-low{color:#f85149;background:rgba(248,81,73,.12);border-color:rgba(248,81,73,.35)}
-  .jj-unknown{color:#8b949e;background:rgba(139,148,158,.12);border-color:rgba(139,148,158,.3)}
-  .jj-coverage{display:block;margin-top:8px;padding:5px 9px;border-left:3px solid #8957e5;
-               background:rgba(137,87,229,.08);color:#c9a9ff;font-size:12px;border-radius:0 6px 6px 0}
-.jj-conf-na{color:#6e7681;background:rgba(110,118,129,.12);border-color:rgba(110,118,129,.3)}
-.jj-evidence-none{color:#6e7681;background:rgba(110,118,129,.10);border-color:rgba(110,118,129,.28)}
-.jj-reason{font-size:11.5px;color:#7d8590;margin-right:6px;white-space:normal}
-.jj-unknown{color:#9aa4b0}
+  .jj-evidence{color:#1E56D6;background:#EEF4FE;border-color:rgba(36,104,242,.35)}
+  .jj-conf-high{color:#047857;background:rgba(5,150,105,.12);border-color:rgba(5,150,105,.35)}
+  .jj-conf-mid{color:#B45309;background:rgba(180,83,9,.12);border-color:rgba(180,83,9,.35)}
+  .jj-conf-low{color:#B91C1C;background:rgba(220,38,38,.12);border-color:rgba(220,38,38,.35)}
+  .jj-unknown{color:#5C5F66;background:rgba(92,95,102,.12);border-color:rgba(92,95,102,.3)}
+  .jj-coverage{display:block;margin-top:8px;padding:5px 9px;border-left:3px solid #AF61FF;
+               background:#F6EFFF;color:#7C3AED;font-size:12px;border-radius:0 8px 8px 0}
+.jj-conf-na{color:var(--text2);background:rgba(156,163,175,.12);border-color:rgba(156,163,175,.3)}
+.jj-evidence-none{color:var(--text2);background:rgba(156,163,175,.10);border-color:rgba(156,163,175,.28)}
+.jj-reason{font-size:11.5px;color:#5C5F66;margin-right:6px;white-space:normal}
+.jj-unknown{color:#5C5F66}
 .jj-chip{margin-right:6px}
+
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#DCE0E6;border-radius:8px;border:2px solid transparent;background-clip:content-box}
+  ::selection{background:#D6E4FF;color:#0F172A}
+
+  /* 表单控件字体继承（消除 Arial 混入） */
+  button,input,select,textarea{font-family:inherit}
 </style>
 
 </head>
@@ -206,7 +233,7 @@
                  功能重复；需要上传新包时回工作台再点 IDG 即可） -->
             <div class="sidebar-head">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
-                    <a href="/dashboard" style="color:var(--info);text-decoration:none;font-size:13px;" title="返回工作台">← 返回主界面</a>
+                    <a href="/dashboard" style="color:#1E56D6;text-decoration:none;font-size:13px;" title="返回工作台">← 返回主界面</a>
                     <a href="#" onclick="logoutIdg();return false;" style="color:var(--text2);text-decoration:none;font-size:13px;margin-left:10px;" title="清空登录状态并回到登录页">🚪 退出登录</a>
                 </div>
                 <h3 style="margin-bottom:0;">📁 诊断文件 <span style="font-size:11px;color:var(--text2);" id="job-id-display"></span></h3>
@@ -387,7 +414,7 @@
             .then(r => r.json())
             .then(buildTree)
             .catch(err => {
-                document.getElementById('file-tree').innerHTML = '<p style="color:var(--error)">加载失败</p>';
+                document.getElementById('file-tree').innerHTML = '<p style="color:#B91C1C">加载失败</p>';
             });
         function buildTree(data) {
             const el = document.getElementById('file-tree');
@@ -552,7 +579,7 @@
         function renderSummary(data) {
             const el = document.getElementById('tab-content');
             const sev = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)', normal:'var(--info)'};
-            const sevBg = {critical:'#490202', warning:'#3d1e00', ok:'#0d3320', normal:'#0d2b4e'};
+            const sevBg = {critical:'#FEF2F2', warning:'#FFFBEB', ok:'#ECFDF5', normal:'#EEF4FE'};
             const sevBorder = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)', normal:'var(--info)'};
             const icons = {critical:'🔴', warning:'🟡', ok:'🟢', normal:'🔵'};
             const s = sev[data.severity] || 'var(--info)';
@@ -612,7 +639,7 @@
             if (disks.length > 0) {
                 html += `<div class="card"><h3>💿 磁盘 (${disks.length} 个)</h3>`;
                 for (const d of disks) {
-                    html += '<div style="background:var(--bg);padding:12px;border-radius:6px;margin-bottom:8px;">';
+                    html += '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:8px;">';
                     html += `<strong>${esc(d.model || d.vendor || '未知磁盘')}</strong>`;
                     if (d.capacity) html += `<span style="color:var(--text2);font-size:12px;margin-left:8px;">${esc(d.capacity)}</span>`;
                     if (d.rpm) html += `<span style="color:var(--text2);font-size:12px;margin-left:8px;">${esc(d.rpm)}</span>`;
@@ -629,11 +656,11 @@
             if (nics.length > 0) {
                 html += `<div class="card"><h3>🌐 网卡 (${nics.length} 个)</h3>`;
                 for (const n of nics) {
-                    html += '<div style="background:var(--bg);padding:10px;border-radius:6px;margin-bottom:6px;font-size:13px;">';
+                    html += '<div style="background:var(--bg);padding:10px;border-radius:8px;margin-bottom:6px;font-size:13px;">';
                     html += `<strong>${esc(n.name)}</strong>`;
                     html += `<span style="color:var(--text2);margin-left:8px;">${esc(n.status)}</span>`;
                     if (n.ips && n.ips.length > 0) {
-                        html += `<div style="color:var(--info);font-size:12px;margin-top:2px;">${n.ips.map(ip => esc(ip)).join(', ')}</div>`;
+                        html += `<div style="color:#1E56D6;font-size:12px;margin-top:2px;">${n.ips.map(ip => esc(ip)).join(', ')}</div>`;
                     }
                     html += '</div>';
                 }
@@ -662,7 +689,7 @@
             let html = '';
             // ═══ Severity Banner ═══
             const icons = {critical:'🔴', warning:'🟡', ok:'🟢', normal:'🔵'};
-            const sevBg = {critical:'#490202', warning:'#3d1e00', ok:'#0d3320', normal:'#0d2b4e'};
+            const sevBg = {critical:'#FEF2F2', warning:'#FFFBEB', ok:'#ECFDF5', normal:'#EEF4FE'};
             const sevBorder = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)', normal:'var(--info)'};
             const sevColor = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)', normal:'var(--info)'};
             const s = data.severity || 'normal';
@@ -703,7 +730,7 @@
                 html += `<div class="card"><h3>⚡ 意外关机/断电事件 (${shutdowns.length} 次)</h3>`;
                 html += '<div class="event-list">';
                 for (const ev of shutdowns.slice(0, 50)) {
-                    const cls = ev.id === 41 ? 'color:var(--error);font-weight:bold;' : 'color:var(--warn);';
+                    const cls = ev.id === 41 ? 'color:#B91C1C;font-weight:bold;' : 'color:var(--warn);';
                     html += `<div class="event-item" style="${cls}">
                         <strong>Event ${ev.id}</strong> | ${fmtTime(ev.time)} | ${escHtml(ev.source||'')} | ${escHtml(ev.description||'')}
                     </div>`;
@@ -717,7 +744,7 @@
                 html += `<p style="color:var(--text2);font-size:13px;margin-bottom:12px;">以下事件显示在崩溃/断电前 10 分钟内有服务安装或更新记录（Event 7045 / 19）</p>`;
                 for (const item of correlated) {
                     const crash = item.crash;
-                    html += `<div style="background:var(--bg);border-radius:6px;padding:12px;margin-bottom:8px;">`;
+                    html += `<div style="background:var(--bg);border-radius:8px;padding:12px;margin-bottom:8px;">`;
                     html += `<div style="margin-bottom:8px;"><span class="badge badge-critical">崩溃</span> <strong>Event ${crash.id}</strong> | ${fmtTime(crash.time)} | ${escHtml(crash.description||'')}`;
                     if (crash.service_name) html += ` — ${escHtml(crash.service_name)}`;
                     html += '</div>';
@@ -800,9 +827,9 @@
                 html += '<div class="event-list">';
                 for (const ev of allRestart.slice(0, 150)) {
                     let style = '';
-                    if (ev.id === 41 || ev.id === 1001) style = 'color:var(--error);font-weight:bold;';
+                    if (ev.id === 41 || ev.id === 1001) style = 'color:#B91C1C;font-weight:bold;';
                     else if (ev.id === 6008) style = 'color:var(--warn);';
-                    else if (ev.id === 1074) style = 'color:var(--info);';
+                    else if (ev.id === 1074) style = 'color:#1E56D6;';
                     else if (ev.id === 7045 || ev.id === 19) style = 'color:var(--warn);';
                     html += `<div class="event-item" style="${style}">
                         <strong>Event ${ev.id}</strong> | ${fmtTime(ev.time)} | ${escHtml(ev.source||'')} | ${escHtml(ev.description||'')}
@@ -850,8 +877,8 @@
                 html += '</p>';
                 if (info.bugcheck) {
                     const bc = info.bugcheck;
-                    html += `<div style="background:#1a121d;border:1px solid #3d1e00;border-radius:6px;padding:10px;margin-top:8px;">`;
-                    html += `<strong style="color:var(--error);">🔴 Bug Check: ${bc.code}</strong>`;
+                    html += `<div style="background:#F6EFFF;border:1px solid #FFFBEB;border-radius:8px;padding:10px;margin-top:8px;">`;
+                    html += `<strong style="color:#B91C1C;">🔴 Bug Check: ${bc.code}</strong>`;
                     html += `<span style="color:var(--text);margin-left:8px;">${esc(bc.name)}</span>`;
                     html += `<p style="color:var(--warn);font-size:13px;margin-top:4px;">📖 ${esc(bc.description)}</p>`;
                     if (info.bugcheck_params && info.bugcheck_params.length > 0) {
@@ -888,7 +915,7 @@
                 <p style="margin:0;font-size:13px;color:var(--text2);">
                     💡 如需查询 SIO 事件代码的官方完整说明，请访问
                     <a href="https://www.thinkworkstationsoftware.com/codes" target="_blank" rel="noopener"
-                       style="color:var(--info);">thinkworkstationsoftware.com/codes</a>
+                       style="color:#1E56D6;">thinkworkstationsoftware.com/codes</a>
                 </p>
             </div>`;
             // Issues
@@ -1093,8 +1120,8 @@
                 document.getElementById('modal-meta').textContent = meta;
                 let html = '';
                 if (info.bugcheck) {
-                    html += '<div style="background:#1a121d;border:1px solid #3d1e00;border-radius:6px;padding:12px;margin-bottom:12px;">';
-                    html += `<strong style="color:var(--error);font-size:18px;">🔴 Bug Check: ${escHtml(info.bugcheck.code)}</strong>`;
+                    html += '<div style="background:#F6EFFF;border:1px solid #FFFBEB;border-radius:8px;padding:12px;margin-bottom:12px;">';
+                    html += `<strong style="color:#B91C1C;font-size:18px;">🔴 Bug Check: ${escHtml(info.bugcheck.code)}</strong>`;
                     html += `<div style="color:var(--text);font-size:15px;margin-top:4px;">${escHtml(info.bugcheck.name)}</div>`;
                     html += `<p style="color:var(--warn);font-size:13px;margin-top:6px;">📖 ${escHtml(info.bugcheck.description)}</p>`;
                     if (info.bugcheck_params && info.bugcheck_params.length > 0) {
@@ -1174,7 +1201,7 @@
         }
         function renderLinuxKernel(data) {
             const el = document.getElementById('tab-content');
-            const sevBg = {critical:'#490202', warning:'#3d1e00', ok:'#0d3320'};
+            const sevBg = {critical:'#FEF2F2', warning:'#FFFBEB', ok:'#ECFDF5'};
             const sevBd = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)'};
             let html = `<div class="alert" style="background:${sevBg[data.severity]};border:2px solid ${sevBd[data.severity]}">`;
             html += `<h3>🔧 ${data.title}</h3><p style="color:var(--text2);font-size:13px;">${data.summary || ''}</p></div>`;
@@ -1199,7 +1226,7 @@
             let html = '<div class="grid-2" style="margin-bottom:16px;">';
             const s = data.stats || {};
             for (const [l, n] of [['服务失败', s.service_failures], ['认证失败', s.auth_failures], ['磁盘错误', s.disk_errors], ['网络错误', s.network_errors]])
-                html += `<div class="stat-box"><div class="number" style="color:var(--info);font-size:24px;">${n||0}</div><div class="label">${l}</div></div>`;
+                html += `<div class="stat-box"><div class="number" style="color:#1E56D6;font-size:24px;">${n||0}</div><div class="label">${l}</div></div>`;
             html += '</div>';
             if (data.findings && data.findings.length) {
                 html += '<div class="card"><h3>⚠️ 发现</h3><ul>';
@@ -1210,7 +1237,7 @@
         }
         function renderLinuxSummary(data) {
             const el = document.getElementById('tab-content');
-            const sevBg = {critical:'#490202', warning:'#3d1e00', ok:'#0d3320'};
+            const sevBg = {critical:'#FEF2F2', warning:'#FFFBEB', ok:'#ECFDF5'};
             const sevBd = {critical:'var(--error)', warning:'var(--warn)', ok:'var(--success)'};
             const icons = {critical:'🔴', warning:'🟡', ok:'🟢'};
             let html = `<div class="alert" style="background:${sevBg[data.severity]};border:2px solid ${sevBd[data.severity]};color:${sevBd[data.severity]}">`;
@@ -1375,7 +1402,7 @@ function chipifyHtml(html) {
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.error) {
-                        body.innerHTML = '<p style="color:var(--error);">' + esc(data.error) + '</p>';
+                        body.innerHTML = '<p style="color:#B91C1C;">' + esc(data.error) + '</p>';
                     } else {
                         var content = data.content || '';
                         var isHtml = /\.(html|htm)$/i.test(name);
@@ -1388,7 +1415,7 @@ function chipifyHtml(html) {
                     }
                 })
                 .catch(function(err) {
-                    body.innerHTML = '<p style="color:var(--error);">加载失败: ' + err.message + '</p>';
+                    body.innerHTML = '<p style="color:#B91C1C;">加载失败: ' + err.message + '</p>';
                 });
         }
         function openDumpInViewer(path, name) {
@@ -1400,13 +1427,13 @@ function chipifyHtml(html) {
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     if (data.error) {
-                        body.innerHTML = '<p style="color:var(--error);">' + esc(data.error) + '</p>';
+                        body.innerHTML = '<p style="color:#B91C1C;">' + esc(data.error) + '</p>';
                     } else {
                         body.innerHTML = '<pre>' + esc(data.content || '无数据') + '</pre>';
                     }
                 })
                 .catch(function(err) {
-                    body.innerHTML = '<p style="color:var(--error);">加载失败: ' + err.message + '</p>';
+                    body.innerHTML = '<p style="color:#B91C1C;">加载失败: ' + err.message + '</p>';
                 });
         }
         // ═══ BMC/Other chat: global send function (accessible from inline handlers) ═══

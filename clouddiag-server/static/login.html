@@ -3,118 +3,331 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>登录 — 云端 AI 远程运维助手</title>
+<title>Nexpert · 登录</title>
 <style>
-  :root { --bg: #0d1117; --surface: #161b22; --text: #e6edf3; --text2: #8b949e; --info: #58a6ff; --border: #30363d; }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#0b1a2e; color:#fff; min-height:100vh; display:flex; }
-  /* ===== 左侧宣传区（自动轮播）===== */
-  .left { flex:1.2; background:linear-gradient(160deg,#0b1a2e 0%,#10233d 45%,#0e3a5f 100%); display:flex; flex-direction:column; padding:48px 56px; position:relative; overflow:hidden; }
-  .left::before { content:""; position:absolute; width:500px; height:500px; border-radius:50%; background:radial-gradient(circle,rgba(56,189,248,.15),transparent 60%); top:-120px; right:-120px; }
-  .left::after { content:""; position:absolute; width:350px; height:350px; border-radius:50%; background:radial-gradient(circle,rgba(96,165,250,.12),transparent 60%); bottom:-80px; left:-80px; }
-  .brand { display:flex; align-items:center; gap:12px; font-size:20px; font-weight:700; margin-bottom:80px; position:relative; z-index:1; }
-  .brand .logo { width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,#38bdf8,#2563eb); display:flex; align-items:center; justify-content:center; font-size:18px; }
-  .hero { position:relative; z-index:1; min-height:170px; }
-  .slide { position:absolute; top:0; left:0; opacity:0; transform:translateY(12px); transition:opacity .6s ease, transform .6s ease; pointer-events:none; }
-  .slide.active { opacity:1; transform:translateY(0); }
-  .slide h2 { font-size:30px; font-weight:600; margin-bottom:12px; line-height:1.4; }
-  .slide p { font-size:16px; color:#93a9c7; line-height:1.8; max-width:430px; }
-  .slide-dots { display:flex; gap:8px; margin-top:150px; position:relative; z-index:1; }
-  .dot { width:28px; height:4px; border-radius:2px; background:rgba(255,255,255,.2); cursor:pointer; transition:background .3s; }
-  .dot.active { background:#38bdf8; }
-  .left footer { margin-top:auto; position:relative; z-index:1; font-size:12px; color:#5b7292; }
-  /* ===== 右侧登录区 ===== */
-  .right { width:440px; min-width:440px; background:#0e1c30; display:flex; flex-direction:column; padding:32px 40px; position:relative; }
-  .login-box { margin:auto 0; }
-  .login-title { display:flex; align-items:center; gap:12px; margin-bottom:4px; }
-  .login-title .logo { width:44px; height:44px; border-radius:12px; background:linear-gradient(135deg,#38bdf8,#2563eb); display:flex; align-items:center; justify-content:center; font-size:22px; }
-  .login-title .name { font-size:20px; font-weight:700; }
-  .login-sub { font-size:13px; color:#7d94b3; margin:4px 0 28px 56px; }
-  .field { margin-bottom:18px; }
-  .field label { display:block; font-size:13px; color:#93a9c7; margin-bottom:6px; }
-  .field input { width:100%; padding:12px 14px; background:#0b1a2e; border:1px solid #243b57; border-radius:8px; color:#fff; font-size:14px; outline:none; }
-  .field input:focus { border-color:#38bdf8; }
-  .btn-login { width:100%; padding:13px; background:linear-gradient(135deg,#38bdf8,#2563eb); border:none; border-radius:8px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; }
-  .btn-login:hover { opacity:.9; }
-  .btn-login:disabled { opacity:.5; cursor:not-allowed; }
-  .btn-guest { width:100%; padding:11px; margin-top:8px; background:transparent; border:1px solid #243b57; border-radius:8px; color:#93a9c7; font-size:13px; cursor:pointer; }
-  .btn-guest:hover { border-color:#38bdf8; color:#38bdf8; }
-  .links { display:flex; justify-content:space-between; margin-top:16px; font-size:13px; }
-  .links a { color:#7d94b3; text-decoration:none; cursor:pointer; }
-  .links a:hover { color:#38bdf8; }
-  .error { display:none; background:rgba(248,81,73,.12); border:1px solid rgba(248,81,73,.4); color:#f87171; font-size:13px; padding:8px 10px; border-radius:6px; margin-bottom:14px; }
-  .foot { margin-top:18px; font-size:12px; color:#5b7292; text-align:center; line-height:1.8; }
-  .hotline { margin-top:auto; font-size:12px; color:#5b7292; text-align:center; padding-top:24px; }
+  /* ============================================================
+     联想擎天设计语言 · Design Tokens（原生项目按 token 直接取值）
+     白底为纸、品牌蓝为信号；极光渐变仅限登录页这一"门面"场景
+     ============================================================ */
+  :root {
+    /* ===== 联想擎天设计令牌（全站统一 · 单一来源）===== */
+    --primary:#2468F2; --primary-hover:#1E56D6; --primary-soft:#EEF4FE; --primary-line:#C9D9FB;
+    --ai:#AF61FF; --ai-soft:#F6EFFF; --info-soft:#EEF4FE; --info-line:#C9D9FB; --ai-soft:#F6EFFF; --success-soft:#ECFDF5; --warn-soft:#FFFBEB; --warn-line:rgba(180,83,9,.3); --error-soft:#FEF2F2; --error-line:#FECACA;
+    --info:#2468F2; --success:#059669; --success-text:#047857; --success-fill:#047857; --ai-fill:#7C3AED; --ai-text:#7C3AED; --error-text:#DC2626; --warning:#B45309; --error:#DC2626; --purple:#AF61FF; --accent:#AF61FF;
+    --bg:#F9F9F9; --surface:#FFFFFF; --surface2:#F2F3F5; --container:#F9F9F9;
+    --text:#151B26; --text-strong:#0F172A; --text2:#5C5F66; --text3:#9CA3AF; --placeholder:#C9CDD4;
+    --border:#E8E9EB; --line:#F2F3F5;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:20px;
+    --shadow-card:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.03);
+    --shadow-pop:0 4px 24px rgba(0,0,0,.08);
+    --shadow-sheet:0 12px 20px rgba(0,0,0,.05);
+    --font-sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",-apple-system,system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;
+    --ease:150ms ease-out;
+    /* 旧命名别名（既有引用不断） */
+    --background:var(--bg); --text-body:var(--text); --text-title:var(--text-strong);
+    --text-2:var(--text2); --text-3:var(--text3); --accent-bg:var(--primary-soft); --heading:var(--text-strong);
+    --danger:var(--error); --warn:var(--warning); --radius-input:var(--radius-sm); --radius-btn:var(--radius-md); --radius-card:var(--radius-lg);
+    --danger-bg:#FEF2F2;
+    --danger-border:#FECACA;
+    --aurora-1:#3F73FF;
+    --aurora-2:#E3C6FF;
+    --aurora-3:#5C61FF;
+    --aurora-4:#776AFF;
+    --aurora-5:#85F1FF;
+    --grid-line:rgba(211, 192, 255, .1);
+    --title-grad-1:#4271FF;
+    --title-grad-2:#AF61FF;
+    --title-grad-3:#000000;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px; line-height: 1.6;
+    color: var(--text-body);
+    background: var(--background);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== 背景：极光色块 + 白色柔光 + 网格（文字区域保持通透可读）===== */
+  .bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: var(--background); }
+  .bg .blob { position: absolute; border-radius:50%; filter: blur(74px); }
+  .bg .b1 { width: 560px; height: 560px; background: var(--aurora-1); opacity: .30; top: -230px; left: -190px; }
+  .bg .b2 { width: 470px; height: 470px; background: var(--aurora-2); opacity: .34; top: -170px; right: -150px; }
+  .bg .b3 { width: 520px; height: 520px; background: var(--aurora-3); opacity: .18; bottom: -270px; left: 14%; }
+  .bg .b4 { width: 380px; height: 380px; background: var(--aurora-5); opacity: .22; bottom: -200px; right: 6%; }
+  .bg .veil {
+    position: absolute; inset: 0;
+    background: radial-gradient(118% 80% at 30% 46%,
+      rgba(255, 255, 255, .80) 0%, rgba(255, 255, 255, .44) 52%, rgba(255, 255, 255, .16) 100%);
+  }
+  .bg::after {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(var(--grid-line) 1.2px, transparent 1.2px),
+      linear-gradient(90deg, var(--grid-line) 1.2px, transparent 1.2px);
+    background-size: 56px 56px;
+  }
+
+  /* ===== 顶部导航条（68px · 半透明 + 背景模糊）===== */
+  .topbar {
+    position: relative; z-index: 3; height: 68px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 40px;
+    background: rgba(255, 255, 255, .66);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; font-size: 16px; font-weight: 600; color: var(--text-title); letter-spacing: .2px; }
+  .logo-mark {
+    width: 38px; height: 38px; border-radius:12px; flex: none;
+    background: linear-gradient(135deg, #4A86FF 0%, #2468F2 100%);
+    box-shadow: 0 2px 10px rgba(36, 104, 242, .35);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .topbar-note { font-size: 12px; color:var(--text2); }
+
+  /* ===== 主体：左侧品牌区 + 右侧登录卡片 ===== */
+  .stage {
+    position: relative; z-index: 2;
+    max-width: 1320px; margin: 0 auto;
+    min-height: calc(100vh - 68px);            /* 顶栏之外撑满一屏 */
+    padding: clamp(22px, 4.4vh, 58px) 40px clamp(18px, 3.4vh, 44px);
+    display: flex; gap: 64px; align-items: center;   /* 垂直居中，窗口变化自适应 */
+  }
+  .brand-side { flex: 1; min-width: 0; }
+
+  /* ---- 上：固定品牌块（不参与轮播，视线锚点）---- */
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 15px; border-radius:999px;
+    background: rgba(255, 255, 255, .62);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, .85);
+    box-shadow: var(--shadow-card);
+    color:#1E56D6; font-size: 13px; font-weight: 500;
+  }
+  .hero-title {
+    margin-top: clamp(12px, 2.2vh, 20px); font-size: clamp(38px, 7.4vh, 62px); font-weight: 700; line-height: 1.05; letter-spacing: -.5px;
+    background: linear-gradient(95deg, var(--title-grad-1) 0%, var(--title-grad-2) 54%, var(--title-grad-3) 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+  .hero-en { margin-top: clamp(8px, 1.2vh, 10px); font-size: 16px; font-weight: 500; color: var(--text-2); }
+  .hero-cn { margin-top: 6px; font-size: 21px; font-weight: 600; color: var(--text-title); letter-spacing: .2px; }
+
+  /* ---- 下：轮播区（品牌块下方独立一块）---- */
+  .rotator { margin-top: clamp(16px, 3.2vh, 32px); max-width: 560px; }
+  .rotator .slides { display: grid; }
+  .rotator .slide {
+    grid-area: 1 / 1;
+    opacity: 0; transform: translateY(6px); pointer-events: none;
+    transition: opacity 420ms ease-out, transform 420ms ease-out;
+  }
+  .rotator .slide.active { opacity: 1; transform: none; pointer-events: auto; }
+
+  .panel {
+    min-height: clamp(112px, 19vh, 166px);
+    padding: clamp(14px, 2.4vh, 22px) clamp(16px, 2.6vh, 24px);
+    background: rgba(255, 255, 255, .74);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, .9);
+    border-radius:20px; box-shadow: var(--shadow-card);
+  }
+  .slogan {
+    padding-left: 15px; border-left: 2px solid var(--primary);
+    color: var(--text-body); font-size: clamp(15px, 2.05vh, 18px); line-height: 1.95;
+  }
+  .cdr { margin-top: clamp(10px, 1.6vh, 16px); font-size: 12.5px; font-weight: 600; letter-spacing: .16em; color:#1E56D6; }
+  .panel .lead { font-size: 15px; font-weight: 600; color: var(--text-title); }
+  .panel p + p { margin-top: 6px; }
+  .panel p { font-size: 13px; color: var(--text-2); }
+  .panel .shift { margin-top: 8px; color: var(--text-body); }
+
+  .rotator-bar { display: flex; align-items: center; justify-content: space-between; margin-top: clamp(10px, 1.6vh, 14px); }
+  .dots { display: flex; gap: 8px; }
+  .dot {
+    width: 28px; height: 4px; padding: 0; border: none; border-radius:4px;
+    background: rgba(15, 23, 42, .14); cursor: pointer;
+    transition: background var(--ease), width var(--ease);
+  }
+  .dot.active { width: 40px; background: var(--primary); }
+  .counter { font-size: 12px; color:var(--text2); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+
+  /* ===== 右侧登录卡片（460px · 白底 · 20px 圆角）===== */
+  .login-card {
+    width: 460px; min-width: 460px;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius:var(--radius-card);
+    box-shadow: var(--shadow-card);
+    padding: clamp(26px, 5vh, 48px) clamp(26px, 3vw, 44px);
+  }
+  .card-title { display: flex; align-items: center; gap: 11px; }
+  .card-title .name { font-size: 20px; font-weight: 600; color: var(--text-title); }
+  .card-sub { margin-top: 8px; font-size: 12px; color:var(--text2); }
+
+  .error {
+    display: none; margin-top: 20px; padding: 10px 12px;
+    background: var(--danger-bg); border: 1px solid var(--danger-border);
+    border-radius:var(--radius-input); color:#B91C1C; font-size: 13px;
+  }
+
+  .field { margin-top: clamp(13px, 2.1vh, 20px); }
+  .field label { display: block; margin-bottom: 8px; font-size: 13px; color: var(--text-2); }
+  .field input {
+    width: 100%; height: 48px; padding: 0 14px;
+    border: 1px solid var(--border); border-radius:var(--radius-input);
+    background: var(--background); color: var(--text-body);
+    font-size: 14px; font-family: inherit; outline: none;
+    transition: border-color var(--ease), box-shadow var(--ease);
+  }
+  .field input::placeholder { color: var(--placeholder); }
+  .field input:focus { border-color:#1E56D6; box-shadow: 0 0 0 3px #EEF4FE; }
+
+  .btn-login {
+    width: 100%; height: 48px; margin-top: clamp(16px, 2.8vh, 26px);
+    border: none; border-radius:var(--radius-btn);
+    background: var(--primary); color: #fff;
+    font-size: 15px; font-weight: 600; font-family: inherit; cursor: pointer;
+    transition: background var(--ease);
+  }
+  .btn-login:hover { background: var(--primary-hover); }
+  .btn-login:disabled { opacity: .55; cursor: not-allowed; }
+
+  .btn-guest {
+    width: 100%; height: 44px; margin-top: 10px;
+    background: var(--background); border: 1px solid var(--border);
+    border-radius:var(--radius-btn); color: var(--text-2);
+    font-size: 13px; font-family: inherit; cursor: pointer;
+    transition: border-color var(--ease), color var(--ease);
+  }
+  .btn-guest:hover { border-color:#1E56D6; color:#1E56D6; }
+
+  .links { display: flex; justify-content: space-between; margin-top: 16px; font-size: 13px; }
+  .links a { color: var(--text-2); text-decoration: none; cursor: pointer; transition: color var(--ease); }
+  .links a:hover { color:#1E56D6; }
+
+
+  @media (max-width: 1080px) {
+    .stage { flex-direction: column; gap: 34px; padding: 34px 24px; }
+    .login-card { width: 100%; min-width: 0; padding: 32px 24px; }
+    .hero-title { font-size: 46px; }
+    .topbar { padding: 0 24px; }
+    .rotator { max-width: none; }
+    .panel { min-height: 0; }
+    .stage { min-height: 0; padding: 30px 24px 40px; }
+  }
+
+  /* 表单控件字体继承（消除 Arial 混入） */
+  button,input,select,textarea{font-family:inherit}
 </style>
 </head>
 <body>
 
-<!-- 左侧宣传区（自动轮播）-->
-<div class="left">
-  <div class="brand"><div class="logo">🤖</div>云端 AI 远程运维助手</div>
-  <div class="hero">
-    <div class="slide active">
-      <h2>智能服务升级<br>赋能远程诊断</h2>
-      <p>云端 AI 诊断 Windows / Linux 电脑问题，远程接入客户机，硬件工具全覆盖。</p>
-    </div>
-    <div class="slide">
-      <h2>一键连接<br>跨网络直达</h2>
-      <p>443 与 8443 双通道自动降级，公司网络/防火墙拦截也能稳定连接客户机。</p>
-    </div>
-    <div class="slide">
-      <h2>专业工具矩阵<br>标准化诊断</h2>
-      <p>SIO / SMART / RAID / 蓝屏分析 / 系统日志——标准化工具链执行，诊断结论基于官方知识库与实测数据，报告严谨可追溯。</p>
-    </div>
-  </div>
-  <div class="slide-dots">
-    <div class="dot active" onclick="goSlide(0)"></div>
-    <div class="dot" onclick="goSlide(1)"></div>
-    <div class="dot" onclick="goSlide(2)"></div>
-  </div>
-  <footer>© 2026 CloudDiag · 售后内部系统</footer>
+<!-- 背景：极光 + 柔光 + 网格 -->
+<div class="bg" aria-hidden="true">
+  <span class="blob b1"></span><span class="blob b2"></span>
+  <span class="blob b3"></span><span class="blob b4"></span>
+  <span class="veil"></span>
 </div>
 
-<!-- 右侧登录区 -->
-<div class="right">
-  <div class="login-box">
-    <div class="login-title"><div class="logo">🤖</div><div class="name">云端 AI 远程运维助手</div></div>
-    <div class="login-sub">Cloud AI Remote Diagnostics</div>
+<!-- 顶部导航条 -->
+<header class="topbar">
+  <div class="brand">
+    <span class="logo-mark" aria-hidden="true">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <ellipse cx="12" cy="12" rx="10" ry="4.2" stroke="#fff" stroke-width="1.4" transform="rotate(-32 12 12)"/>
+        <ellipse cx="12" cy="12" rx="10" ry="4.2" stroke="#fff" stroke-opacity="0.45" stroke-width="1.4" transform="rotate(32 12 12)"/>
+        <circle cx="12" cy="12" r="2.6" fill="#fff"/>
+        <circle cx="21.2" cy="6.6" r="1.7" fill="#fff"/>
+      </svg>
+    </span>
+    <span>Nexpert</span>
+  </div>
+  <span class="topbar-note">售后技术支持 · 内部系统</span>
+</header>
+
+<main class="stage">
+  <!-- ============ 左侧 ============ -->
+  <section class="brand-side">
+    <!-- 上：固定品牌块（不轮播） -->
+    <span class="pill">永不离线的数字专家</span>
+    <h1 class="hero-title">Nexpert</h1>
+    <p class="hero-en">Your Next-Generation AI Expert for Device Recovery</p>
+    <p class="hero-cn">连接设备，理解故障，自主执行修复。</p>
+
+    <!-- 下：轮播区 -->
+    <div class="rotator">
+      <div class="slides">
+        <div class="slide active" aria-hidden="false">
+          <div class="panel">
+            <p class="slogan">
+              像资深工程师一样分析问题，<br>
+              像现场专家一样执行操作，<br>
+              像自动化系统一样持续工作。
+            </p>
+            <p class="cdr">Connect. Diagnose. Recover.</p>
+          </div>
+        </div>
+
+        <div class="slide" aria-hidden="true">
+          <div class="panel">
+            <p class="lead">From AI Assistant to AI Expert.</p>
+            <p>大多数 AI 只能回答问题。</p>
+            <p>Nexpert 不仅理解问题，更能连接设备、执行操作并解决问题。</p>
+            <p class="shift">通过 Agent 技术与设备桥接能力，Nexpert 将 AI 从“建议者”升级为“解决者”。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rotator-bar">
+        <div class="dots">
+          <button class="dot active" type="button" aria-label="第 1 屏" onclick="goSlide(0)"></button>
+          <button class="dot" type="button" aria-label="第 2 屏" onclick="goSlide(1)"></button>
+        </div>
+        <span class="counter" id="rot-counter">01 / 02</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 右侧：登录卡片 ============ -->
+  <section class="login-card">
+    <div class="card-title">
+      <span class="logo-mark" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <ellipse cx="12" cy="12" rx="10" ry="4.2" stroke="#fff" stroke-width="1.4" transform="rotate(-32 12 12)"/>
+          <ellipse cx="12" cy="12" rx="10" ry="4.2" stroke="#fff" stroke-opacity="0.45" stroke-width="1.4" transform="rotate(32 12 12)"/>
+          <circle cx="12" cy="12" r="2.6" fill="#fff"/>
+          <circle cx="21.2" cy="6.6" r="1.7" fill="#fff"/>
+        </svg>
+      </span>
+      <span class="name">Nexpert</span>
+    </div>
+    <div class="card-sub">面向联想设备的 AI 技术专家平台</div>
 
     <div class="error" id="error-box"></div>
 
-    <div class="field"><label>账号</label>
+    <div class="field">
+      <label for="username">账号</label>
       <input id="username" type="text" placeholder="请输入工号" autocomplete="username" autofocus>
     </div>
-    <div class="field"><label>密码</label>
+    <div class="field">
+      <label for="password">密码</label>
       <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password">
     </div>
-    <button class="btn-login" id="login-btn" onclick="doLogin()">Login</button>
-    <button class="btn-guest" onclick="guestLogin()" title="免密进入——仅可使用 IDG 日志分析（1 小时会话）">👤 游客进入</button>
-    <div class="links"><a onclick="alert('请联系管理员重置密码')">Forgot password</a><a onclick="alert('请联系管理员开通账号')">Activate account</a></div>
-
-    <div class="foot">如需账号，请联系管理员开通</div>
-  </div>
-  <div class="hotline">内部 IT 支持</div>
-</div>
+    <button class="btn-login" id="login-btn" onclick="doLogin()">登录</button>
+    <button class="btn-guest" onclick="guestLogin()" title="免密进入——仅可使用 IDG 日志分析（1 小时会话）">游客进入</button>
+    <div class="links">
+      <a onclick="alert('请联系管理员重置密码')">忘记密码</a>
+      <a onclick="alert('请联系管理员开通账号')">开通账号</a>
+    </div>
+  </section>
+</main>
 
 <script>
-let slideIdx = 0;
-let slideTimer = null;
-
-// ===== 左侧轮播（自动 4s 切换 + 圆点点击）=====
-function goSlide(i) {
-  slideIdx = i;
-  const slides = document.querySelectorAll('.slide');
-  const dots = document.querySelectorAll('.dot');
-  slides.forEach((s, k) => s.classList.toggle('active', k === i));
-  dots.forEach((d, k) => d.classList.toggle('active', k === i));
-}
-function nextSlide() {
-  const total = document.querySelectorAll('.slide').length;
-  goSlide((slideIdx + 1) % total);
-}
-slideTimer = setInterval(nextSlide, 4000);
-
 function showError(msg) {
   const eb = document.getElementById('error-box');
   eb.textContent = msg;
@@ -138,14 +351,14 @@ async function doLogin() {
     const data = await resp.json();
     if (!resp.ok) {
       showError(data.error || '登录失败');
-      btn.disabled = false; btn.textContent = 'Login';
+      btn.disabled = false; btn.textContent = '登录';
       return;
     }
     localStorage.setItem('cab_role', data.role || '');
     location.href = '/dashboard?role=' + (data.role || '');
   } catch (e) {
     showError('网络错误: ' + e.message);
-    btn.disabled = false; btn.textContent = 'Login';
+    btn.disabled = false; btn.textContent = '登录';
   }
 }
 
@@ -161,6 +374,37 @@ async function guestLogin() {
 
 document.getElementById('username').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('password').focus(); });
 document.getElementById('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+// ===== 轮播区：5s 自动切换 · 悬停暂停 · 圆点可点（上方品牌块固定不动）=====
+const slides = Array.from(document.querySelectorAll('.rotator .slide'));
+const dots = Array.from(document.querySelectorAll('.dot'));
+const counter = document.getElementById('rot-counter');
+let slideIdx = 0, slideTimer = null, hovering = false;
+
+function goSlide(i) {
+  slideIdx = (i + slides.length) % slides.length;
+  slides.forEach((s, k) => {
+    s.classList.toggle('active', k === slideIdx);
+    s.setAttribute('aria-hidden', k === slideIdx ? 'false' : 'true');
+  });
+  dots.forEach((d, k) => d.classList.toggle('active', k === slideIdx));
+  if (counter) {
+    const pad = (n) => String(n).padStart(2, '0');
+    counter.textContent = pad(slideIdx + 1) + ' / ' + pad(slides.length);
+  }
+}
+function stopAuto() { if (slideTimer) { clearInterval(slideTimer); slideTimer = null; } }
+function startAuto() {
+  stopAuto();
+  if (hovering) return;   // 悬停中不重启计时器
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  slideTimer = setInterval(() => goSlide(slideIdx + 1), 5000);
+}
+dots.forEach((d, k) => d.addEventListener('click', () => { goSlide(k); startAuto(); }));
+const rotator = document.querySelector('.rotator');
+rotator.addEventListener('mouseenter', () => { hovering = true; stopAuto(); });
+rotator.addEventListener('mouseleave', () => { hovering = false; startAuto(); });
+startAuto();
 
 // 已登录直接进工作台
 fetch('/api/auth/me').then(r => r.json()).then(d => {

@@ -33,9 +33,10 @@ func NewClient(cfg *Config) *Client {
 //
 // 2026-09-25 修复【无限重连】：区分"临时故障"与"服务端永久拒绝"。
 // 事故：房间闲置后服务端每次都以"房间已闲置/令牌失效"关闭连接，
-//       而这里无条件重连 → 客户端空转 1392 次（约 18.5 小时）、
-//       日志狂涨、用户只看到"一直连不上"却不知要重新获取连接。
-//       现在：识别永久性拒绝 → 打印明确指引并退出（不再重试）。
+//
+//	而这里无条件重连 → 客户端空转 1392 次（约 18.5 小时）、
+//	日志狂涨、用户只看到"一直连不上"却不知要重新获取连接。
+//	现在：识别永久性拒绝 → 打印明确指引并退出（不再重试）。
 func (c *Client) Run() {
 	backoff := 3 * time.Second
 	const maxBackoff = 30 * time.Second
@@ -53,12 +54,22 @@ func (c *Client) Run() {
 		// 重连多少次都不会成功，直接停并提示用户重新获取连接。
 		if isPermanentReject(err) {
 			c.cfg.Logger.Error("连接被服务器永久拒绝：%v", err)
-			c.cfg.Logger.Error("该房间已失效（闲置/过期/令牌无效）。")
+			c.cfg.Logger.Error("该房间已失效（闲置/已结束诊断/过期/令牌无效）。")
 			c.cfg.Logger.Error("请在浏览器打开诊断台，点击「连接你的电脑」重新获取一键连接命令后重试。")
 			c.cfg.Logger.Error("桥接器停止重连并退出。")
+			printCleanupHint(c.cfg)
 			return
 		}
-		c.cfg.Logger.Warn("连接断开 (第 %d 次): %v，%s 后重连…", attempt, err, backoff)
+		// 2026-10-15：连续失败达上限后主动停止（默认 10 次，-max-retries 可调）——
+		// 避免在客户机上无限空转重连（历史记录：1392 次 / 约 18.5 小时）。
+		if c.cfg.MaxRetries > 0 && attempt >= c.cfg.MaxRetries {
+			c.cfg.Logger.Error("已连续重连失败 %d 次（上限 %d），桥接器停止重连并退出。", attempt, c.cfg.MaxRetries)
+			c.cfg.Logger.Error("最后一次错误：%v", err)
+			c.cfg.Logger.Error("请检查本机能访问服务器后，回到浏览器诊断台点击「连接你的电脑」重新获取一键连接命令。")
+			printCleanupHint(c.cfg)
+			return
+		}
+		c.cfg.Logger.Warn("连接断开 (第 %d 次，上限 %d): %v，%s 后重连…", attempt, c.cfg.MaxRetries, err, backoff)
 		select {
 		case <-c.stop:
 			return
@@ -73,12 +84,20 @@ func (c *Client) Run() {
 	}
 }
 
+// printCleanupHint 打印"不再需要桥接器时如何清理"的指引。
+// 2026-10-15：客户此前反馈"不知道该怎么把桥接器删掉"——退出时主动给出可操作路径。
+func printCleanupHint(cfg *Config) {
+	cfg.Logger.Info("不再需要桥接器时：删除本程序文件，并删除目录 %s（内含 bridge.log 审计日志）。", AuditDir())
+	fmt.Println(" (Windows 也可在诊断台「连接你的电脑」面板下载卸载脚本 uninstall-windows.bat 一键清理)")
+}
+
 // isPermanentReject 判断错误是否为"服务端永久性拒绝"（重连无意义）
 //
 // 判定依据：
 //  1. HTTP 握手中被拒（如 401/403/404 —— 令牌无效或房间不存在）
 //  2. 服务端通过 close reason / error 消息给出的语义化拒绝，
-//     例如"房间已闲置""令牌失效""房间不存在"等。
+//     例如"房间已闲置""令牌失效""房间不存在""已结束诊断/归档"等；
+//  3. 服务端 error 帧带 fatal=true（机器可读，优先于关键词匹配）。
 func isPermanentReject(err error) bool {
 	if err == nil {
 		return false
@@ -93,6 +112,9 @@ func isPermanentReject(err error) bool {
 		// 中文
 		"房间已闲置", "已闲置", "房间不存在", "房间已过期", "已过期",
 		"令牌失效", "令牌无效", "重新获取一键连接", "请回到对话页", "请创建新房间",
+		// 2026-10-15：补齐"结束诊断/归档"类文案——此前缺失，
+		// 导致工程师点【结束诊断】后桥接器当成普通断线、无限重连（每 30s 一轮）。
+		"房间已结束诊断", "已结束诊断", "结束诊断", "归档", "房间已关闭", "会话已结束",
 		// 英文（服务端部分提示为英文，必须一并覆盖）
 		"Room not found", "room not found", "Room expired", "room expired",
 		"Create it from the dashboard", "bad token", "Bad token", "bad_token",
@@ -164,7 +186,13 @@ func (c *Client) connectAndServe() error {
 		_ = conn.Close()
 	}()
 
-	c.cfg.Logger.Info("已连接房间 %s", c.cfg.RoomCode)
+	c.cfg.Logger.Info("已连接房间 %s（等待工程师操作）", c.cfg.RoomCode)
+	// 2026-10-15：客户机侧明确的三步指引——客户反馈"只连上了，不知道下一步做什么"。
+	fmt.Println(" ----------------------------------------------")
+	fmt.Println("  已连接成功。接下来由工程师在诊断台操作，本机无需其它动作。")
+	fmt.Println("  请保持本窗口开启（可最小化，但不要关闭）——关闭窗口即断开连接。")
+	fmt.Println("  如需主动断开：直接关闭本窗口即可。")
+	fmt.Println(" ----------------------------------------------")
 
 	// 立即上报身份
 	c.sendIdentify()
@@ -258,7 +286,17 @@ func (c *Client) dispatch(msg map[string]interface{}) error {
 
 	case "error":
 		content, _ := msg["content"].(string)
+		fatal, _ := msg["fatal"].(bool)
 		c.cfg.Logger.Info("server error: %v", msg["content"])
+		// 2026-10-15：服务端可用 fatal 字段显式标记"永久拒绝"（机器可读，不依赖文案）。
+		// 老服务端不发该字段 → 走下方关键词兜底，双向兼容（改文案不再弄坏行为）。
+		if fatal {
+			reason := content
+			if reason == "" {
+				reason = "服务端拒绝连接（fatal）"
+			}
+			return &permanentRejectError{Reason: reason}
+		}
 		// 2026-09-25：服务端用 error 消息告知"房间已闲置/令牌失效"等永久性拒绝。
 		// 这类情况重连永远不会成功——不能只打印日志后继续无脑重连，
 		// 否则客户端会空转上千次（实测 1392 次 / 约 18.5 小时）。

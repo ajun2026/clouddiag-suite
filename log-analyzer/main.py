@@ -168,7 +168,7 @@ def _clean_name(s: str) -> str:
 
 # 2026-09-27 新增（P3-4）：健康检查端点——与 clouddiag-server 接口命名保持一致，
 # 便于统一监控与部署自检（deploy/doctor.sh 可做端到端断言）。
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 
 @app.get("/api/health")

@@ -23,7 +23,7 @@ import (
 )
 
 // Version 桥接器版本号（构建时可用 -ldflags 覆盖）
-var Version = "1.0.9"
+var Version = "1.1.1"
 
 // ClientInfo 上报给服务器的本机身份信息
 type ClientInfo struct {
@@ -63,6 +63,7 @@ func main() {
 	var serverURL, roomCode, token string
 	var elevate, elevated, noElevate bool
 	var interactiveFlag bool
+	var maxRetries int
 	flag.StringVar(&serverURL, "server", "ws://localhost:8000", "服务器地址 (ws:// 或 wss://)")
 	flag.StringVar(&roomCode, "room", "", "房间码（必填）")
 	flag.StringVar(&token, "token", "", "连接令牌（一键连接下发）")
@@ -70,6 +71,7 @@ func main() {
 	flag.BoolVar(&noElevate, "no-elevate", false, "禁止自动提权（特殊情况用，默认双击自动提权）")
 	flag.BoolVar(&elevated, "elevated", false, "内部标志：已处于提权后的进程")
 	flag.BoolVar(&interactiveFlag, "interactive", false, "交互式输入房间码（默认行为：打印用法后退出，不阻塞终端）")
+	flag.IntVar(&maxRetries, "max-retries", 10, "连续连接失败上限（达到后停止重连并退出；0=不限制）")
 	flag.Parse()
 	// 统一规范化服务器地址（交互输入与命令行参数都容错 http:// / 漏协议）
 	serverURL = normalizeServerURL(serverURL)
@@ -171,11 +173,12 @@ func main() {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
 	cfg := &Config{
-		ServerURL: serverURL,
-		RoomCode:  roomCode,
-		Token:     token,
-		Info:      info,
-		Logger:    logger,
+		ServerURL:  serverURL,
+		RoomCode:   roomCode,
+		Token:      token,
+		MaxRetries: maxRetries,
+		Info:       info,
+		Logger:     logger,
 	}
 
 	c := NewClient(cfg)

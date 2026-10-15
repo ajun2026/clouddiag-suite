@@ -6,14 +6,29 @@
 <title>工作台 — 云端 AI 远程运维助手</title>
 <style>
   :root {
-    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
-    --border: #30363d; --text: #e6edf3; --text2: #9da7b3;
-    --info: #58a6ff; --success: #3fb950; --warn: #d29922; --error: #f85149;
+    /* ===== 联想擎天设计令牌（全站统一 · 单一来源）===== */
+    --primary:#2468F2; --primary-hover:#1E56D6; --primary-soft:#EEF4FE; --primary-line:#C9D9FB;
+    --ai:#AF61FF; --ai-soft:#F6EFFF; --info-soft:#EEF4FE; --info-line:#C9D9FB; --ai-soft:#F6EFFF; --success-soft:#ECFDF5; --warn-soft:#FFFBEB; --warn-line:rgba(180,83,9,.3); --error-soft:#FEF2F2; --error-line:#FECACA;
+    --info:#2468F2; --success:#059669; --success-text:#047857; --success-fill:#047857; --ai-fill:#7C3AED; --ai-text:#7C3AED; --error-text:#DC2626; --warning:#B45309; --error:#DC2626; --purple:#AF61FF; --accent:#AF61FF;
+    --bg:#F9F9F9; --surface:#FFFFFF; --surface2:#F2F3F5; --container:#F9F9F9;
+    --text:#151B26; --text-strong:#0F172A; --text2:#5C5F66; --text3:#9CA3AF; --placeholder:#C9CDD4;
+    --border:#E8E9EB; --line:#F2F3F5;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:20px;
+    --shadow-card:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.03);
+    --shadow-pop:0 4px 24px rgba(0,0,0,.08);
+    --shadow-sheet:0 12px 20px rgba(0,0,0,.05);
+    --font-sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",-apple-system,system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;
+    --ease:150ms ease-out;
+    /* 旧命名别名（既有引用不断） */
+    --background:var(--bg); --text-body:var(--text); --text-title:var(--text-strong);
+    --text-2:var(--text2); --text-3:var(--text3); --accent-bg:var(--primary-soft); --heading:var(--text-strong);
+    --danger:var(--error); --warn:var(--warning); --radius-input:var(--radius-sm); --radius-btn:var(--radius-md); --radius-card:var(--radius-lg);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     background: var(--bg); height: 100vh; overflow: hidden;
-    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family:var(--font-sans);
     color: var(--text);
   }
   .app { display: flex; flex-direction: column; height: 100vh; }
@@ -25,20 +40,20 @@
   }
   .header .brand { display: flex; align-items: center; gap: 10px; }
   .header .logo {
-    width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--info), #7c4dff);
+    width: 32px; height: 32px; border-radius:8px; background: linear-gradient(135deg, #4A86FF 0%, #2468F2 100%); box-shadow:0 2px 10px rgba(36,104,242,.35);
     display: flex; align-items: center; justify-content: center; font-size: 15px; color: #fff; font-weight: 700;
   }
   .header .title { font-size: 16px; font-weight: 600; }
   .header .sub { font-size: 11px; color: var(--text2); }
   .header .user-box { display: flex; align-items: center; gap: 10px; }
   .user-tag {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius:20px;
     padding: 5px 14px; font-size: 13px; display: flex; align-items: center; gap: 6px;
   }
-  .user-tag .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .user-tag .dot { width: 8px; height: 8px; border-radius:50%; background: #047857; }
   .btn-sm {
     padding: 5px 12px; font-size: 12px; background: var(--surface2); color: var(--text2);
-    border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); border-radius:8px; cursor: pointer;
   }
   .btn-sm:hover { color: var(--text); border-color: var(--text2); }
 
@@ -54,7 +69,7 @@
   #sidebar-nav { flex: 1; overflow-y: auto; min-height: 0; margin: 6px -6px 6px 0; padding-right: 6px; }
   .sidebar-footer { flex-shrink: 0; }
   #sidebar-nav::-webkit-scrollbar { width: 4px; }
-  #sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  #sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius:4px; }
   #sidebar-nav::-webkit-scrollbar-track { background: transparent; }
   .sidebar.collapsed { width: 56px; min-width: 56px; }
   .sidebar.collapsed .nav-item { justify-content: center; padding: 11px 0; }
@@ -62,7 +77,7 @@
   .sidebar.collapsed .sidebar-footer { display: none; }
   .sidebar-toggle {
     position: absolute; top: 12px; right: -14px; width: 14px; height: 40px;
-    background: var(--border); color: var(--info); border-radius: 0 6px 6px 0; cursor: pointer;
+    background: var(--border); color:#1E56D6; border-radius:0 8px 8px 0; cursor: pointer;
     display: flex; align-items: center; justify-content: center; font-size: 9px; z-index: 20;
   }
   /* 游客模式首帧置灰（无闪烁）：非 IDG 导航全部禁用 */
@@ -71,17 +86,17 @@
   html.guest-mode .page:not(#page-idg) { display: none !important; }
   /* 游客模式:导航高亮首帧同步——首页不高亮、IDG 高亮(避免 DOMContentLoaded 后高亮跳动) */
   html.guest-mode #nav-home { background: transparent; color: var(--text2); border-left-color: transparent; font-weight: normal; }
-  html.guest-mode #nav-idg { background: var(--surface2); color: var(--info); border-left-color: var(--info); font-weight: 600; }
+  html.guest-mode #nav-idg { background: var(--surface2); color:#1E56D6; border-left-color:#1E56D6; font-weight: 600; }
   /* 游客模式:「连接客户机」field 专属,首帧即隐藏(否则 body 顶部 script 拿不到 DOM,选项闪现后消失) */
   html.guest-mode #nav-field-guide { display: none !important; }
   .nav-item {
     display: flex; align-items: center; gap: 10px; padding: 11px 12px; margin-bottom: 4px;
-    font-size: 14px; color: var(--text2); border-radius: 8px; cursor: pointer; user-select: none;
+    font-size: 14px; color: var(--text2); border-radius:8px; cursor: pointer; user-select: none;
     border-left: 3px solid transparent;
   }
   .nav-item.guest-disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
   .nav-item:hover { background: var(--surface2); color: var(--text); }
-  .nav-item.active { background: var(--surface2); color: var(--info); border-left-color: var(--info); font-weight: 600; }
+  .nav-item.active { background: var(--surface2); color:#1E56D6; border-left-color:#1E56D6; font-weight: 600; }
   .nav-divider { height: 1px; background: var(--border); margin: 10px 8px; }
   .sidebar-footer { padding: 8px 12px; font-size: 11px; color: var(--text2); }
   .admin-only { display: none !important; }
@@ -99,27 +114,27 @@
 
   /* ===== 卡片/表单 ===== */
   .panel {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius:12px;
     padding: 22px; max-width: 640px;
   }
   .field { margin-bottom: 14px; }
   .field label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 5px; }
   .field input, .field select {
     width: 100%; padding: 9px 11px; background: var(--surface2); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px; font-size: 14px; outline: none;
+    border: 1px solid var(--border); border-radius:8px; font-size: 14px; outline: none;
   }
-  .field input:focus, .field select:focus { border-color: var(--info); }
+  .field input:focus, .field select:focus { border-color:#1E56D6; }
   .btn-main {
     padding: 10px 22px; background: var(--info); color: #fff; border: none;
-    border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer;
+    border-radius:8px; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .btn-main:hover { filter: brightness(1.1); }
   .btn-main:disabled { opacity: .5; cursor: not-allowed; }
-  .btn-green { background: var(--success); }
+  .btn-green { background: #047857; }
   .btn-amber { background: var(--warn); }
   .btn-ghost {
     padding: 8px 16px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border);
-    border-radius: 6px; font-size: 13px; cursor: pointer;
+    border-radius:8px; font-size: 13px; cursor: pointer;
   }
   .btn-ghost:hover { color: var(--text); }
 
@@ -127,12 +142,12 @@
   .dl-row { display: flex; flex-direction: column; gap: 9px; }
   .dl-btn {
     display: block; text-align: center; padding: 10px; font-size: 14px; text-decoration: none;
-    background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius:8px;
   }
-  .dl-btn:hover { border-color: var(--info); color: var(--info); }
+  .dl-btn:hover { border-color:#1E56D6; color:#1E56D6; }
   .dl-cmd {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
-    padding: 9px 11px; font-size: 12px; color: var(--info); word-break: break-all;
+    background: var(--surface2); border: 1px solid var(--border); border-radius:8px;
+    padding: 9px 11px; font-size: 12px; color: #1E56D6; word-break: break-all;
     display: flex; justify-content: space-between; align-items: center; gap: 8px;
   }
   .dl-copy { color: var(--text2); cursor: pointer; flex-shrink: 0; font-size: 12px; }
@@ -141,21 +156,21 @@
 
   /* PowerShell 命令版步骤卡片（下载卡片内竖排单列，宽面板才用两列） */
   .dl-guide { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 10px; }
-  .dl-guide-head { font-size: 13px; font-weight: 700; color: var(--info); margin-bottom: 2px; grid-column: 1 / -1; }
+  .dl-guide-head { font-size: 13px; font-weight: 700; color:#1E56D6; margin-bottom: 2px; grid-column: 1 / -1; }
   .dl-step {
     background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.7;
+    border-radius:8px; padding: 10px 12px; font-size: 12px; line-height: 1.7;
   }
   .dl-step.wide { grid-column: 1 / -1; }
   .dl-step-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
   .dl-step-title .num {
     display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
-    text-align: center; background: var(--accent); color: #fff;
-    border-radius: 50%; font-size: 11px; font-weight: 700; margin-right: 6px;
+    text-align: center; background: #7C3AED; color: #fff;
+    border-radius:50%; font-size: 11px; font-weight: 700; margin-right: 6px;
   }
   .dl-cmd-block {
-    display: block; background: rgba(0,0,0,0.45); color: var(--info);
-    padding: 8px 10px; border-radius: 6px; font-family: monospace;
+    display: block; background: var(--surface2); border: 1px solid var(--border); color: #1E56D6;
+    padding: 8px 10px; border-radius:8px; font-family: monospace;
     font-size: 11px; white-space: pre-wrap; word-break: break-all; line-height: 1.5;
     margin: 4px 0;
   }
@@ -165,23 +180,23 @@
   /* ===== 下载桥接器卡片墙 ===== */
   .dl-steps { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 2px 0 16px; font-size: 12px; color: var(--text2); }
   .dl-steps .s { display: inline-flex; align-items: center; gap: 6px; }
-  .dl-steps .s .num { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; background: var(--info); color: #fff; border-radius: 50%; font-size: 11px; font-weight: 700; }
+  .dl-steps .s .num { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; background: var(--info); color: #fff; border-radius:50%; font-size: 11px; font-weight: 700; }
   .dl-steps .arrow { color: var(--border); }
   .dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: stretch; }
   .dl-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius:12px;
     padding: 18px 20px; display: flex; flex-direction: column;
     transition: box-shadow .15s ease, border-color .15s ease;
   }
-  .dl-card:hover { border-color: var(--info); box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  .dl-card:hover { border-color:#1E56D6; box-shadow: 0 2px 12px rgba(15,23,42,.08); }
   .dl-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
   .dl-card-icon { font-size: 22px; }
   .dl-card-title { font-size: 15px; font-weight: 600; flex: 1; }
   .dl-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; line-height: 1.6; }
   .dl-card-actions { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
   .dl-card-note { font-size: 11px; color: var(--text2); line-height: 1.6; }
-  .badge-rec { background: rgba(34,197,94,.12); color: var(--success); border: 1px solid rgba(34,197,94,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-  .dl-more summary { cursor: pointer; font-size: 12px; color: var(--info); user-select: none; }
+  .badge-rec { background: #ECFDF5; color:#047857; border: 1px solid rgba(5,150,105,.30); padding: 2px 8px; border-radius:12px; font-size: 11px; }
+  .dl-more summary { cursor: pointer; font-size: 12px; color:#1E56D6; user-select: none; }
   .dl-more[open] summary { margin-bottom: 8px; }
   .dl-facts { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text2); line-height: 1.7; }
   .dl-cmd-text { word-break: break-all; }
@@ -204,19 +219,19 @@
   .toolbar { display: flex; gap: 10px; margin-bottom: 14px; }
   .toolbar input {
     padding: 8px 12px; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; font-size: 13px; outline: none; width: 280px;
+    border-radius:8px; font-size: 13px; outline: none; width: 280px;
   }
-  .toolbar input:focus { border-color: var(--info); }
+  .toolbar input:focus { border-color:#1E56D6; }
   .count { font-size: 12px; color: var(--text2); align-self: center; }
-  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 10px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius:12px; overflow: hidden; }
   th, td { padding: 11px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
   th { background: var(--surface2); color: var(--text2); font-weight: 500; font-size: 12px; white-space: nowrap; }
-  tr:hover td { background: rgba(88,166,255,.04); }
+  tr:hover td { background: rgba(36,104,242,.04); }
   .mono { font-family: "Consolas", monospace; letter-spacing: 1px; }
-  .status { padding: 3px 10px; border-radius: 12px; font-size: 11px; white-space: nowrap; }
-  .status.on { background: rgba(63,185,80,.15); color: var(--success); }
-  .status.off { background: rgba(157,167,179,.12); color: var(--text2); }
-  .status.disabled { background: rgba(248,81,73,.12); color: var(--error); }
+  .status { padding: 3px 10px; border-radius:12px; font-size: 11px; white-space: nowrap; }
+  .status.on { background: #ECFDF5; color:#047857; }
+  .status.off { background: rgba(92,95,102,.10); color: var(--text2); }
+  .status.disabled { background: #FEF2F2; color:#B91C1C; }
   .empty { text-align: center; color: var(--text2); padding: 36px 0; font-size: 13px; }
   .row-actions { display: flex; gap: 6px; }
   .row-actions .btn-sm { padding: 3px 9px; font-size: 11px; }
@@ -232,7 +247,7 @@
   .chat-head.hidden { display: none; }
   .chat-head .page-title { margin-bottom: 0; display: none !important; }
   .chat-head .room-tag {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 20px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius:20px;
     padding: 4px 14px; font-size: 12px; color: var(--text2);
   }
   /* 对话 iframe 容器:无边框无圆角(与 IDG 一致,消除边框"嵌入感") */
@@ -241,23 +256,23 @@
   .chat-empty {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     color: var(--text2); font-size: 14px; gap: 8px;
-    border: 1px dashed var(--border); border-radius: 10px;
+    border: 1px dashed var(--border); border-radius:12px;
   }
   .chat-empty .big { font-size: 40px; }
 
   /* ===== 历史记录模态框 ===== */
   .modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 100;
+    display: none; position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 100;
     align-items: center; justify-content: center;
   }
   .modal-overlay.show { display: flex; }
   .modal-lg {
     width: min(760px, 92vw); height: min(82vh, 700px); background: var(--surface);
-    border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--border); border-radius:12px; display: flex; flex-direction: column; overflow: hidden;
   }
   .modal-lg-wide { width: min(880px, 94vw); }
   .modal-close {
-    background: none; border: none; color: var(--text2); font-size: 18px; cursor: pointer; padding: 2px 8px; border-radius: 6px;
+    background: none; border: none; color: var(--text2); font-size: 18px; cursor: pointer; padding: 2px 8px; border-radius:8px;
   }
   .modal-close:hover { background: var(--surface2); color: var(--text); }
   .modal-head {
@@ -271,21 +286,21 @@
   .h-msg .h-body { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.7; }
   .h-msg .h-time { font-size: 11px; color: var(--text2); margin-top: 3px; }
   .h-user { margin-left: auto; }
-  .h-user .h-body { background: rgba(88,166,255,.15); border: 1px solid rgba(88,166,255,.3); padding: 9px 12px; border-radius: 10px; }
+  .h-user .h-body { background: #EEF4FE; border: 1px solid rgba(36,104,242,.25); padding: 9px 12px; border-radius:12px; }
   .h-user .h-time { text-align: right; }
-  .h-ai .h-body { background: var(--surface2); border: 1px solid var(--border); padding: 9px 12px; border-radius: 10px; }
+  .h-ai .h-body { background: var(--surface2); border: 1px solid var(--border); padding: 9px 12px; border-radius:12px; }
   .h-system { margin: 8px auto; text-align: center; font-size: 12px; color: var(--text2); }
-  .h-error { margin: 8px auto; text-align: center; font-size: 12px; color: var(--error); }
-  .h-tool { margin: 8px 0 8px auto; max-width: 95%; background: rgba(210,153,34,.06); border: 1px dashed rgba(210,153,34,.35); border-radius: 8px; padding: 8px 10px; }
+  .h-error { margin: 8px auto; text-align: center; font-size: 12px; color:#B91C1C; }
+  .h-tool { margin: 8px 0 8px auto; max-width: 95%; background: #FFFBEB; border: 1px dashed rgba(180,83,9,.30); border-radius:8px; padding: 8px 10px; }
   .h-tool-name { font-size: 11px; color: var(--warn); font-family: "Consolas", monospace; }
   .h-tool pre { margin-top: 6px; font-size: 11px; color: var(--text2); white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow-y: auto; }
 
   /* ===== 提示 ===== */
-  .msg-box { display: none; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
-  .msg-box.err { display: block; background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.35); color: var(--error); }
-  .msg-box.ok { display: block; background: rgba(63,185,80,.1); border: 1px solid rgba(63,185,80,.35); color: var(--success); }
-  .msg-box.info { display: block; background: rgba(52,120,246,.1); border: 1px solid rgba(52,120,246,.35); color: var(--info); }
-  .msg-box.warn { display: block; background: rgba(255,165,0,.1); border: 1px solid rgba(255,165,0,.4); color: var(--warn); }
+  .msg-box { display: none; padding: 10px 12px; border-radius:8px; font-size: 13px; margin-bottom: 14px; }
+  .msg-box.err { display: block; background: #FEF2F2; border: 1px solid rgba(220,38,38,.30); color:#B91C1C; }
+  .msg-box.ok { display: block; background: #ECFDF5; border: 1px solid rgba(5,150,105,.30); color:#047857; }
+  .msg-box.info { display: block; background: #EEF4FE; border: 1px solid rgba(36,104,242,.30); color:#1E56D6; }
+  .msg-box.warn { display: block; background: #FFFBEB; border: 1px solid rgba(180,83,9,.30); color: var(--warn); }
 
   /* ===== 工具模式 ===== */
   .tool-grid {
@@ -295,12 +310,12 @@
     align-items: start;
   }
   .tool-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius:12px;
     padding: 18px 20px; display: flex; flex-direction: column;
     transition: box-shadow .15s ease, border-color .15s ease;
   }
-  .tool-card:hover { border-color: var(--info); box-shadow: 0 2px 12px rgba(0,0,0,.08); }
-  .tool-card.open { border-color: var(--info); }
+  .tool-card:hover { border-color:#1E56D6; box-shadow: 0 2px 12px rgba(15,23,42,.08); }
+  .tool-card.open { border-color:#1E56D6; }
   .tool-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
   .tool-card-title { font-size: 15px; font-weight: 600; flex: 1; }
   .tool-card-icon { font-size: 20px; }
@@ -312,45 +327,52 @@
   .tool-card.open .tool-card-body { display: block; }
   .tool-card-actions { margin: 12px 0; }
   .tool-card .msg-box { margin-bottom: 12px; }
-  .badge-write { background: rgba(248,81,73,.12); color: var(--error); border: 1px solid rgba(248,81,73,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-  .badge-read { background: rgba(52,120,246,.12); color: var(--info); border: 1px solid rgba(52,120,246,.35); padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-  .badge { padding: 2px 10px; border-radius: 10px; font-size: 11px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
-  .badge-ok { background: rgba(34,197,94,.12); color: var(--success); border-color: rgba(34,197,94,.35); }
-  .badge-warn { background: rgba(255,165,0,.12); color: var(--warn); border-color: rgba(255,165,0,.4); }
-  .oa3-result { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; background: var(--surface); }
+  .badge-write { background: #FEF2F2; color:#B91C1C; border: 1px solid rgba(220,38,38,.30); padding: 2px 8px; border-radius:12px; font-size: 11px; }
+  .badge-read { background: #EEF4FE; color:#1E56D6; border: 1px solid rgba(36,104,242,.30); padding: 2px 8px; border-radius:12px; font-size: 11px; }
+  .badge { padding: 2px 10px; border-radius:12px; font-size: 11px; background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+  .badge-ok { background: #ECFDF5; color:#047857; border-color: rgba(5,150,105,.30); }
+  .badge-warn { background: #FFFBEB; color: var(--warn); border-color: rgba(180,83,9,.30); }
+  .oa3-result { border: 1px solid var(--border); border-radius:8px; padding: 12px; margin-top: 10px; background: var(--surface); }
   .oa3-key-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .oa3-label { font-size: 13px; color: var(--text2); }
-  .oa3-key { font-size: 15px; font-weight: 600; letter-spacing: 1px; color: var(--success); word-break: break-all; }
+  .oa3-key { font-size: 15px; font-weight: 600; letter-spacing: 1px; color:#047857; word-break: break-all; }
   .oa3-meta { font-size: 12px; color: var(--text2); margin: 8px 0; }
-  .bios-info { font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-family: "Consolas", monospace; word-break: break-all; }
+  .bios-info { font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius:8px; padding: 10px 12px; margin-bottom: 12px; font-family: "Consolas", monospace; word-break: break-all; }
   .tool-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
   .field-hint { font-size: 11px; color: var(--text2); margin-top: 4px; }
-  .tool-warn { font-size: 12px; color: var(--warn); border: 1px solid rgba(255,165,0,.4); background: rgba(255,165,0,.08); padding: 8px 10px; border-radius: 6px; margin: 12px 0; }
+  .tool-warn { font-size: 12px; color: var(--warn); border: 1px solid rgba(180,83,9,.30); background: #FFFBEB; padding: 8px 10px; border-radius:8px; margin: 12px 0; }
   .tool-actions { margin: 12px 0; }
   .btn-danger { background: var(--error); color: #fff; }
   .btn-danger:hover { filter: brightness(1.1); }
-  .tool-steps { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface); margin-top: 12px; max-height: 320px; overflow-y: auto; }
+  .tool-steps { border: 1px solid var(--border); border-radius:8px; padding: 10px 12px; background: var(--surface); margin-top: 12px; max-height: 320px; overflow-y: auto; }
   .tool-step { font-size: 12px; color: var(--text2); font-family: "Consolas", monospace; padding: 3px 0; border-bottom: 1px dashed var(--border); white-space: pre-wrap; word-break: break-all; }
-  .tool-step-verify { color: var(--success); }
-  .tool-hint { font-size: 12px; color: var(--warn); margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(255,165,0,.4); background: rgba(255,165,0,.08); border-radius: 6px; }
+  .tool-step-verify { color:#047857; }
+  .tool-hint { font-size: 12px; color: var(--warn); margin-top: 8px; padding: 8px 10px; border: 1px solid rgba(180,83,9,.30); background: #FFFBEB; border-radius:8px; }
 
   /* ===== 首页 ===== */
-  .home-hero { padding: 28px 24px; border-radius: 12px; background: linear-gradient(135deg, rgba(52,120,246,.15), rgba(52,120,246,.04)); border: 1px solid rgba(52,120,246,.25); margin-bottom: 20px; }
+  .home-hero { padding: 28px 24px; border-radius:12px; background: linear-gradient(135deg, #EEF4FE, rgba(36,104,242,.04)); border: 1px solid rgba(36,104,242,.25); margin-bottom: 20px; }
   .home-title { font-size: 22px; font-weight: 700; }
   .home-sub { font-size: 13px; color: var(--text2); margin-top: 6px; }
   .home-section { margin-bottom: 20px; }
   .home-section-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
   .home-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-  .home-step { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
-  .step-num { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; background: var(--info); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .home-step { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius:12px; background: var(--surface); }
+  .step-num { width: 26px; height: 26px; min-width: 26px; border-radius:50%; background: var(--info); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
   .home-step b { font-size: 13px; }
   .step-desc { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5; }
   .toast {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 200;
     background: var(--surface2); color: var(--text); border: 1px solid var(--border);
-    padding: 10px 20px; border-radius: 8px; font-size: 13px; display: none; box-shadow: 0 6px 20px rgba(0,0,0,.4);
+    padding: 10px 20px; border-radius:8px; font-size: 13px; display: none; box-shadow: 0 6px 20px rgba(15,23,42,.15);
   }
   .toast.show { display: block; }
+
+  /* 擎天亮色补充 */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#DCE0E6;border-radius:8px;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#C9CDD4;background-clip:content-box}
+  ::selection{background:#D6E4FF;color:#0F172A}
 </style>
 <!-- 角色首帧样式注入点（field 极简界面：登录后第一帧即正确，无普通界面闪现） -->
 <style id="role-css"></style>
@@ -565,7 +587,7 @@
               <option value="linux">Linux</option>
             </select>
           </div>
-          <div class="field"><label>有效期</label><select id="f-validity" style="width:100%;padding:9px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;"><option value="30" selected>30 天</option><option value="15">15 天</option><option value="7">7 天</option><option value="0">永久</option></select><div style="font-size:12px;color:var(--text2);margin-top:4px;">过期后房间只读（历史保留），管理员可见全部记录</div></div>
+          <div class="field"><label>有效期</label><select id="f-validity" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;"><option value="30" selected>30 天</option><option value="15">15 天</option><option value="7">7 天</option><option value="0">永久</option></select><div style="font-size:12px;color:var(--text2);margin-top:4px;">过期后房间只读（历史保留），管理员可见全部记录</div></div>
           <button class="btn-main" id="create-btn" data-i18n="btn_create" onclick="createRoom()">创建房间</button>
         </div>
       </section>
@@ -583,7 +605,7 @@
       <section class="page" id="page-download">
         <div class="page-title"><span data-i18n="nav_download">下载桥接器</span></div>
         <div class="page-desc" data-i18n="dl_desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
-        <div style="margin:8px 0 14px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--info);border-radius:6px;font-size:13px;color:var(--info);">💡 创建房间后可在「诊断记录 → 📶 连接」或对话页获取<b>房间专属一键连接</b>（预填房间码，无需再输入）</div>
+        <div style="margin:8px 0 14px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--info);border-radius:8px;font-size:13px;color:#1E56D6;">💡 创建房间后可在「诊断记录 → 📶 连接」或对话页获取<b>房间专属一键连接</b>（预填房间码，无需再输入）</div>
         <div class="dl-steps">
           <span class="s"><span class="num">1</span><span data-i18n="dl_step1">安装桥接器</span></span>
           <span class="arrow">→</span>
@@ -685,7 +707,7 @@
       <section class="page" id="page-field-guide">
         <div class="page-title">📶 连接客户机</div>
         <div class="page-desc">创建或加入房间后，在此引导客户机连接服务器；客户机上线后按系统平台使用对应工具</div>
-        <div class="field-card" style="margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;">
+        <div class="field-card" style="margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
           <div class="field" style="margin-bottom:10px;">
             <label>当前房间</label>
             <div style="display:flex;gap:8px;align-items:center;">
@@ -706,7 +728,7 @@
             <button class="btn-main" id="field-guide-bat" onclick="fieldGuideBat()">⬇ 下载连接包</button>
           </div>
           <div id="field-guide-os-tip" style="margin-top:8px;font-size:12px;color:var(--text2);">复制的是 <b id="field-guide-os-label">Windows PowerShell</b> 命令——粘贴到客户机终端运行即可连接</div>
-          <div id="field-guide-status" style="margin-top:14px;padding:10px 12px;border-radius:8px;background:rgba(0,0,0,0.15);font-size:13px;line-height:1.8;">
+          <div id="field-guide-status" style="margin-top:14px;padding:10px 12px;border-radius:8px;background:var(--surface2);font-size:13px;line-height:1.8;">
             客户机状态: <b id="field-guide-bridge">--</b>
           </div>
           <div id="field-guide-tools" style="margin-top:10px;display:none;padding-top:10px;border-top:1px solid var(--border);">
@@ -1205,7 +1227,7 @@
         <div class="page-desc" data-i18n="fb_desc">把测试中发现的问题或建议告诉我们</div>
         <div class="panel">
           <div class="msg-box" id="fb-msg"></div>
-          <textarea id="fb-content" rows="5" data-i18n-placeholder="fb_placeholder" placeholder="请描述您遇到的问题或建议…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:12px;"></textarea>
+          <textarea id="fb-content" rows="5" data-i18n-placeholder="fb_placeholder" placeholder="请描述您遇到的问题或建议…" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;resize:vertical;margin-bottom:12px;"></textarea>
           <button class="btn-main" data-i18n="fb_submit" onclick="submitFeedback()">提交反馈</button>
         </div>
         <div class="panel">
@@ -1582,30 +1604,30 @@ function chooseInterface(room, sn, ticket, title) {
   if (old) old.remove();
   const box = document.createElement('div');
   box.id = 'iface-modal';
-  box.style.cssText = 'position:fixed;inset:0;background:rgba(1,4,9,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  box.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
   box.innerHTML =
-    '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:520px;width:100%;padding:26px 28px;">'
-    + '<div style="font-size:17px;font-weight:650;color:#e6edf3;margin-bottom:6px;">' + (title || '选择进入方式') + '</div>'
-    + '<div style="font-size:12.5px;color:#8b949e;margin-bottom:18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
-    + '房间 <b style="color:#e6edf3;font-family:Consolas,monospace;letter-spacing:1px;font-size:14px;">' + room + '</b>'
+    '<div style="background:#FFFFFF;border:1px solid #E8E9EB;border-radius:12px;max-width:520px;width:100%;padding:26px 28px;">'
+    + '<div style="font-size:17px;font-weight:650;color:#151B26;margin-bottom:6px;">' + (title || '选择进入方式') + '</div>'
+    + '<div style="font-size:12.5px;color:#5C5F66;margin-bottom:18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+    + '房间 <b style="color:#151B26;font-family:Consolas,monospace;letter-spacing:1px;font-size:14px;">' + room + '</b>'
     + '<button onclick="copyRoomCodeNew(\'' + room + '\')" id="iface-copy-btn" '
-    + 'style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">📋 复制房间码</button>'
+    + 'style="background:#F2F3F5;border:1px solid #E8E9EB;color:#5C5F66;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;">📋 复制房间码</button>'
     + (sn ? '<span>· SN ' + sn + '</span>' : '') + (ticket ? '<span>· 工单 ' + ticket + '</span>' : '') + '</div>'
 
     + '<div onclick="ifaceGo(\'/diag?room=' + room + (sn ? '&sn=' + encodeURIComponent(sn) : '') + (ticket ? '&ticket=' + encodeURIComponent(ticket) : '') + '\')" '
-    + 'style="cursor:pointer;border:1.5px solid #58a6ff;background:rgba(56,139,253,.08);border-radius:10px;padding:15px 18px;margin-bottom:12px;">'
-    + '<div style="font-size:14.5px;font-weight:650;color:#e6edf3;margin-bottom:4px;">🔍 诊断台（推荐）</div>'
-    + '<div style="font-size:12.5px;color:#8b949e;line-height:1.55;">左侧 <span class="diag-count">多</span> 项诊断工具 → 右侧结构化结果（采集项清单 / 观察 / 依据 / 缺失 / 初步判读）<br>每条判读结论标注依据、置信度与未知项，结果可追溯</div>'
+    + 'style="cursor:pointer;border:1.5px solid #2468F2;background:#EEF4FE;border-radius:12px;padding:15px 18px;margin-bottom:12px;">'
+    + '<div style="font-size:14.5px;font-weight:650;color:#151B26;margin-bottom:4px;">🔍 诊断台（推荐）</div>'
+    + '<div style="font-size:12.5px;color:#5C5F66;line-height:1.55;">左侧 <span class="diag-count">多</span> 项诊断工具 → 右侧结构化结果（采集项清单 / 观察 / 依据 / 缺失 / 初步判读）<br>每条判读结论标注依据、置信度与未知项，结果可追溯</div>'
     + '</div>'
 
     + '<div onclick="ifaceGo(\'/chat?room=' + room + '\')" '
-    + 'style="cursor:pointer;border:1px solid #30363d;background:#1c2128;border-radius:10px;padding:15px 18px;margin-bottom:18px;">'
-    + '<div style="font-size:14.5px;font-weight:650;color:#e6edf3;margin-bottom:4px;">💬 AI 对话界面</div>'
-    + '<div style="font-size:12.5px;color:#8b949e;line-height:1.55;">与 AI 自由对话，适合复杂问题排查与追问<br>保留原有全部能力（工具矩阵 / 一键连接 / 导出）</div>'
+    + 'style="cursor:pointer;border:1px solid #E8E9EB;background:#F9F9F9;border-radius:12px;padding:15px 18px;margin-bottom:18px;">'
+    + '<div style="font-size:14.5px;font-weight:650;color:#151B26;margin-bottom:4px;">💬 AI 对话界面</div>'
+    + '<div style="font-size:12.5px;color:#5C5F66;line-height:1.55;">与 AI 自由对话，适合复杂问题排查与追问<br>保留原有全部能力（工具矩阵 / 一键连接 / 导出）</div>'
     + '</div>'
 
     + '<div style="text-align:right;"><button onclick="document.getElementById(\'iface-modal\').remove()" '
-    + 'style="background:#21262d;border:1px solid #30363d;color:#8b949e;border-radius:7px;padding:7px 16px;font-size:13px;cursor:pointer;">稍后再说</button></div>'
+    + 'style="background:#F2F3F5;border:1px solid #E8E9EB;color:#5C5F66;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">稍后再说</button></div>'
     + '</div>';
   document.body.appendChild(box);
   fillDiagCount();   // P0：卡片渲染后回填真实项数（服务端清单条数）
@@ -1857,14 +1879,14 @@ function aiLoad() {
       html += `<tr>
         <td style="font-weight:600;">${p.name || p.id}</td>
         <td style="color:var(--text2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.base_url}">${p.base_url}</td>
-        <td style="color:var(--info);">${p.model}</td>
+        <td style="color:#1E56D6;">${p.model}</td>
         <td style="color:var(--text2);font-family:monospace;font-size:12px;">${p.api_key_masked || '-'}</td>
         <td>${badge}</td>
         <td style="white-space:nowrap;">
           ${isActive ? '' : `<button class="btn-main" onclick="aiActivate('${p.id}','${p.name || ''}')" style="padding:4px 12px;font-size:12px;margin-right:6px;">切换生效</button>`}
           <button class="btn-ghost" onclick="aiTest('${p.id}')" style="padding:4px 10px;font-size:12px;margin-right:4px;">测试</button>
           <button class="btn-ghost" onclick="aiEdit('${p.id}')" style="padding:4px 10px;font-size:12px;margin-right:4px;">编辑</button>
-          <button class="btn-ghost" onclick="aiDelete('${p.id}','${p.name || ''}')" style="padding:4px 10px;font-size:12px;color:var(--error);border-color:var(--error);">删除</button>
+          <button class="btn-ghost" onclick="aiDelete('${p.id}','${p.name || ''}')" style="padding:4px 10px;font-size:12px;color:#B91C1C;border-color:#B91C1C;">删除</button>
         </td></tr>`;
     });
     tbody.innerHTML = html;
@@ -2035,7 +2057,7 @@ function renderRooms() {
     // 状态：房间状态优先（归档/闲置），否则连接状态
     let stHtml;
     if (r.status === 'archived') stHtml = '<span class="status off">已归档</span>';
-    else if (r.status === 'idle') stHtml = '<span class="status off" style="color:#888;">已闲置</span>';
+    else if (r.status === 'idle') stHtml = '<span class="status off" style="color:#5C5F66;">已闲置</span>';
     else if (r.bridge_online) stHtml = '<span class="status on">连接中</span>';
     else stHtml = '<span class="status off">已断开</span>';
     return '<tr>'
@@ -2060,8 +2082,8 @@ function renderRooms() {
 // 有效期显示：剩余天数（黄=快过期，红=已过期，灰=永久）
 function validityBadge(daysLeft) {
   if (daysLeft === null || daysLeft === undefined) return '<span style="color:var(--text2);">永久</span>';
-  if (daysLeft < 0) return '<span style="color:#e74c3c;font-weight:600;">已过期</span>';
-  if (daysLeft <= 3) return '<span style="color:#e0a800;font-weight:600;">剩 ' + daysLeft + ' 天</span>';
+  if (daysLeft < 0) return '<span style="color:#B91C1C;font-weight:600;">已过期</span>';
+  if (daysLeft <= 3) return '<span style="color:#B45309;font-weight:600;">剩 ' + daysLeft + ' 天</span>';
   return '<span style="color:var(--text2);">剩 ' + daysLeft + ' 天</span>';
 }
 
@@ -2409,7 +2431,7 @@ async function tslogFetch(uploadToIdg) {
       _clearTw();
       msg.textContent = '✅ 采集完成（已打包到客户机本地）';
       msg.className = 'msg-box';
-      box.innerHTML = '<pre style="white-space:pre-wrap;background:#0b1220;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;color:#cbd5e1;margin-top:10px;">' + (data.output || '').replace(/</g, '&lt;') + '</pre>';
+      box.innerHTML = '<pre style="white-space:pre-wrap;background:#F2F3F5;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;color:#C9CDD4;margin-top:10px;">' + (data.output || '').replace(/</g, '&lt;') + '</pre>';
       btn.disabled = false; if (btn2) btn2.disabled = false;
       return;
     }
@@ -2447,9 +2469,9 @@ async function tslogFetch(uploadToIdg) {
       _clearTw();
       msg.textContent = '✅ 已上传到 IDG 日志分析';
       msg.className = 'msg-box';
-      box.innerHTML = '<div style="margin-top:10px;padding:12px;background:#0b1220;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
+      box.innerHTML = '<div style="margin-top:10px;padding:12px;background:#F2F3F5;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
         '📤 日志包已上传 IDG 并完成分析<br><br>' +
-        '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#58a6ff;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
+        '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#1E56D6;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
     }
     btn.disabled = false; if (btn2) btn2.disabled = false;
   } catch (e) {
@@ -3475,9 +3497,9 @@ async function linuxLogPack(uploadToIdg) {
       document.getElementById('linux-logpack-info').textContent = '';
       document.getElementById('linux-logpack-result').style.display = 'block';
       document.getElementById('linux-logpack-result').innerHTML =
-        '<div style="margin-top:10px;padding:12px;background:#0b1220;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
+        '<div style="margin-top:10px;padding:12px;background:#F2F3F5;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
         '📤 日志包已上传 IDG 并完成分析<br><br>' +
-        '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#58a6ff;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
+        '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#1E56D6;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
     }
     btn.disabled = false; if (btn2) btn2.disabled = false;
   } catch (e) {

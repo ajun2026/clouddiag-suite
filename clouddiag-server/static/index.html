@@ -6,16 +6,29 @@
 <title>云端 AI 远程运维助手</title>
 <style>
   :root {
-    /* 对齐整体(GitHub 暗色系):与 dashboard/IDG 统一 */
-    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
-    --accent: #f778ba; --text: #e6edf3; --text2: #8b949e;
-    --border: #30363d; --success: #3fb950; --warn: #d29922;
-    --error: #f85149; --info: #58a6ff;
+    /* ===== 联想擎天设计令牌（全站统一 · 单一来源）===== */
+    --primary:#2468F2; --primary-hover:#1E56D6; --primary-soft:#EEF4FE; --primary-line:#C9D9FB;
+    --ai:#AF61FF; --ai-soft:#F6EFFF; --info-soft:#EEF4FE; --info-line:#C9D9FB; --ai-soft:#F6EFFF; --success-soft:#ECFDF5; --warn-soft:#FFFBEB; --warn-line:rgba(180,83,9,.3); --error-soft:#FEF2F2; --error-line:#FECACA;
+    --info:#2468F2; --success:#059669; --success-text:#047857; --success-fill:#047857; --ai-fill:#7C3AED; --ai-text:#7C3AED; --error-text:#DC2626; --warning:#B45309; --error:#DC2626; --purple:#AF61FF; --accent:#AF61FF;
+    --bg:#F9F9F9; --surface:#FFFFFF; --surface2:#F2F3F5; --container:#F9F9F9;
+    --text:#151B26; --text-strong:#0F172A; --text2:#5C5F66; --text3:#9CA3AF; --placeholder:#C9CDD4;
+    --border:#E8E9EB; --line:#F2F3F5;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:20px;
+    --shadow-card:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.03);
+    --shadow-pop:0 4px 24px rgba(0,0,0,.08);
+    --shadow-sheet:0 12px 20px rgba(0,0,0,.05);
+    --font-sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",-apple-system,system-ui,sans-serif;
+    --font-mono:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;
+    --ease:150ms ease-out;
+    /* 旧命名别名（既有引用不断） */
+    --background:var(--bg); --text-body:var(--text); --text-title:var(--text-strong);
+    --text-2:var(--text2); --text-3:var(--text3); --accent-bg:var(--primary-soft); --heading:var(--text-strong);
+    --danger:var(--error); --warn:var(--warning); --radius-input:var(--radius-sm); --radius-btn:var(--radius-md); --radius-card:var(--radius-lg);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-family:var(--font-sans);
     background: var(--bg); color: var(--text);
     height: 100vh;
   }
@@ -36,27 +49,27 @@
   #header .title { font-size: 16px; font-weight: 600; }
   #status-dot {
     display: inline-block; width: 10px; height: 10px;
-    border-radius: 50%; margin-right: 6px;
+    border-radius:50%; margin-right: 6px;
   }
-  #status-dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  #status-dot.online { background: #047857; box-shadow: 0 0 6px var(--success); }
   #status-dot.offline { background: var(--error); }
   #status-dot.connecting { background: var(--warn); animation: pulse 1s infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
   #status-text { font-size: 13px; color: var(--text2); }
 
   #room-display {
-    font-family: monospace; font-size: 14px; color: var(--info);
-    background: var(--bg); padding: 4px 12px; border-radius: 6px; letter-spacing: 2px;
+    font-family: monospace; font-size: 14px; color:#1E56D6;
+    background: var(--bg); padding: 4px 12px; border-radius:8px; letter-spacing: 2px;
   }
 
 
   /* Auto-approve toggle */
   #auto-approve-btn {
-    font-size: 11px; padding: 4px 10px; border-radius: 20px; align-self: center;
+    font-size: 11px; padding: 4px 10px; border-radius:20px; align-self: center;
     border: 1px solid var(--border); background: var(--bg); color: var(--text2); cursor: pointer;
     white-space: nowrap; flex-shrink: 0; display: none;
   }
-  #auto-approve-btn.enabled { background: rgba(210,153,34,0.15); color: var(--warn); border-color: var(--warn); }
+  #auto-approve-btn.enabled { background: rgba(180,83,9,0.12); color: var(--warn); border-color: var(--warn); }
 
   /* ====== Messages ====== */
   #messages {
@@ -65,13 +78,13 @@
   }
 
   .msg {
-    max-width: 78%; padding: 10px 14px; border-radius: 12px;
+    max-width: 78%; padding: 10px 14px; border-radius:12px;
     line-height: 1.6; font-size: 14px; word-break: break-word;
     display: flex; align-items: flex-start; gap: 8px;
   }
   .msg .msg-body { min-width: 0; flex: 1; }
   .msg .msg-time { font-size: 11px; opacity: 0.65; flex-shrink: 0; margin-top: 3px; white-space: nowrap; }
-  .msg.user { align-self: flex-end; background: #1f6feb; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.user { align-self: flex-end; background: #2468F2; color: #fff; border-bottom-right-radius: 4px; }
   .msg.user .msg-time { order: 2; }
   .msg.ai {
     align-self: flex-start; background: var(--surface2);
@@ -81,28 +94,28 @@
   .msg.ai .msg-time { order: 0; }
   .msg.ai h1, .msg.ai h2, .msg.ai h3 { margin: 8px 0 4px; font-size: 15px; }
   .msg.ai ul, .msg.ai ol { padding-left: 20px; }
-  .msg.ai code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
-  .msg.ai pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
+  .msg.ai code { background: rgba(15,23,42,0.05); padding: 2px 6px; border-radius:4px; font-size: 12px; }
+  .msg.ai pre { background: rgba(15,23,42,0.05); padding: 10px; border-radius:8px; overflow-x: auto; font-size: 12px; }
   .msg.ai strong { color: var(--warn); }
 
   .msg.system { align-self: center; font-size: 12px; color: var(--text2); background: transparent; padding: 4px 8px; display: block; }
   .msg.error {
     align-self: center; font-size: 13px;
-    background: rgba(248,81,73,0.15); border: 1px solid rgba(248,81,73,0.3); color: var(--error);
+    background: #FEF2F2; border: 1px solid rgba(220,38,38,0.30); color:#B91C1C;
     display: block;
   }
 
   /* Tool card */
   .msg.tool {
     align-self: flex-start; width: 100%; max-width: 100%;
-    font-size: 13px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+    font-size: 13px; border-radius:8px; background: var(--bg); border: 1px solid var(--border);
   }
   .tool-header {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 12px; cursor: pointer; user-select: none;
   }
   .tool-header .icon { font-size: 16px; }
-  .tool-header .name { font-weight: 600; color: var(--info); }
+  .tool-header .name { font-weight: 600; color:#1E56D6; }
   .tool-header .status { font-size: 12px; margin-left: auto; }
   .tool-body {
     padding: 8px 12px 12px; border-top: 1px solid var(--border);
@@ -111,45 +124,45 @@
   .tool-body.open { display: block; }
   .tool-body pre {
     font-size: 11px; max-height: 300px; overflow-y: auto; white-space: pre-wrap;
-    background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; margin: 0;
+    background: rgba(15,23,42,0.05); padding: 8px; border-radius:8px; margin: 0;
   }
 
   .tool-status.running { color: var(--warn); }
-  .tool-status.done { color: var(--success); }
-  .tool-status.error { color: var(--error); }
-  .tool-status.denied { color: var(--error); }
+  .tool-status.done { color:#047857; }
+  .tool-status.error { color:#B91C1C; }
+  .tool-status.denied { color:#B91C1C; }
 
   /* Tier badge */
-  .tier-badge { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
-  .tier-badge.t2 { background: rgba(210,153,34,0.2); color: var(--warn); }
-  .tier-badge.t3 { background: rgba(248,81,73,0.2); color: var(--error); }
+  .tier-badge { padding: 1px 6px; border-radius:4px; font-size: 10px; font-weight: 600; }
+  .tier-badge.t2 { background: rgba(180,83,9,0.14); color: var(--warn); }
+  .tier-badge.t3 { background: rgba(220,38,38,0.2); color:#B91C1C; }
 
   /* ====== Approval Dialog ====== */
   #approval-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    position: fixed; inset: 0; background: rgba(15,23,42,0.45);
     display: none; justify-content: center; align-items: center; z-index: 9999;
   }
   #approval-dialog {
-    background: var(--surface); border: 1px solid var(--info); border-radius: 14px;
+    background: var(--surface); border: 1px solid var(--info); border-radius:12px;
     padding: 24px; width: 420px; max-width: 95vw;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+    box-shadow: 0 4px 24px rgba(0,0,0,.08);
   }
   #approval-dialog h3 { margin-bottom: 8px; color: var(--text); font-size: 18px; }
   #approval-dialog .human-desc {
     font-size: 15px; font-weight: 600; color: var(--text);
     background: var(--bg); border: 1px solid var(--border);
-    padding: 12px 14px; border-radius: 8px; margin: 10px 0 6px;
+    padding: 12px 14px; border-radius:8px; margin: 10px 0 6px;
   }
   #approval-dialog .detail-toggle {
-    background: none; border: none; color: var(--info); font-size: 12px;
+    background: none; border: none; color:#1E56D6; font-size: 12px;
     cursor: pointer; padding: 4px 0; margin-top: 4px;
   }
   #approval-dialog .tool-info {
-    background: var(--bg); padding: 12px; border-radius: 8px; margin: 8px 0;
+    background: var(--bg); padding: 12px; border-radius:8px; margin: 8px 0;
     font-size: 13px; display: none;
   }
   #approval-dialog .tool-info code {
-    background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 11px;
+    background: rgba(15,23,42,0.05); padding: 2px 6px; border-radius:4px; font-size: 11px;
   }
   #approval-dialog .args-display {
     font-size: 11px; color: var(--text2); word-break: break-all; max-height: 120px; overflow-y: auto;
@@ -157,7 +170,7 @@
   #approval-dialog .timer { font-size: 13px; color: var(--text2); margin: 10px 0; }
   #approval-dialog .btn-row { display: flex; gap: 10px; margin-top: 12px; }
   #approval-dialog button {
-    flex: 1; padding: 12px; border: none; border-radius: 8px;
+    flex: 1; padding: 12px; border: none; border-radius:8px;
     font-size: 15px; font-weight: 600; cursor: pointer;
   }
   #approval-dialog .btn-deny { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
@@ -166,7 +179,7 @@
   #approval-dialog .btn-approve:hover { opacity: 0.85; }
   #approval-dialog .deny-reason {
     width: 100%; padding: 8px; margin-top: 8px; border: 1px solid var(--border);
-    border-radius: 6px; background: var(--bg); color: var(--text); font-size: 12px; outline: none;
+    border-radius:8px; background: var(--bg); color: var(--text); font-size: 12px; outline: none;
     display: none;
   }
 
@@ -177,17 +190,17 @@
   }
   #input-box {
     flex: 1; padding: 10px 14px; border: 1px solid var(--border);
-    border-radius: 24px; background: var(--bg); color: var(--text);
+    border-radius:20px; background: var(--bg); color: var(--text);
     font-size: 14px; outline: none; resize: none;
     min-height: 42px; max-height: 120px; font-family: inherit;
   }
-  #input-box:focus { border-color: var(--info); }
+  #input-box:focus { border-color:#1E56D6; }
   .qa-btn {
     padding: 5px 12px; font-size: 12px; background: var(--surface2);
-    color: var(--text2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text2); border: 1px solid var(--border); border-radius:8px;
     cursor: pointer;
   }
-  .qa-btn:hover:not(:disabled) { border-color: var(--info); color: var(--info); }
+  .qa-btn:hover:not(:disabled) { border-color:#1E56D6; color:#1E56D6; }
   .qa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   /* 快捷功能按钮分组:组内 flex 紧凑排列,组间留白 */
   .qa-group { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -198,33 +211,33 @@
   .qa-toggle { border-style: dashed; opacity: .85; }
   /* 导出菜单项 */
   .em-item { padding: 8px 12px; font-size: 12px; cursor: pointer; color: var(--text); }
-  .em-item:hover { background: var(--surface); color: var(--info); }
+  .em-item:hover { background: var(--surface); color:#1E56D6; }
   /* 启动项面板 */
   .startup-panel {
     margin: 8px 14px; padding: 12px 14px; background: var(--surface2);
-    border: 1px solid var(--border); border-radius: 10px; font-size: 13px;
+    border: 1px solid var(--border); border-radius:12px; font-size: 13px;
   }
   .startup-panel h4 { margin: 0 0 8px; font-size: 14px; }
   .startup-item {
     display: flex; align-items: center; gap: 8px; padding: 6px 8px;
-    border-radius: 6px; cursor: pointer;
+    border-radius:8px; cursor: pointer;
   }
-  .startup-item:hover { background: rgba(88,166,255,0.08); }
+  .startup-item:hover { background: #EEF4FE; }
   .startup-item.disabled { opacity: 0.55; cursor: not-allowed; }
-  .startup-item input { accent-color: var(--info); }
+  .startup-item input { accent-color:#1E56D6; }
   .st-name { font-weight: 600; min-width: 140px; }
   .st-desc { color: var(--text2); flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .st-path { display: block; color: var(--text2); font-size: 11px; opacity: 0.65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .st-pub { color: var(--text2); font-size: 11px; opacity: 0.75; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
-  .st-cat { font-size: 11px; padding: 1px 7px; border-radius: 8px; white-space: nowrap; }
-  .st-cat.necessary { background: rgba(46,204,113,0.15); color: #2ecc71; }
-  .st-cat.common { background: rgba(224,168,0,0.15); color: #e0a800; }
-  .st-cat.advisory { background: rgba(231,76,60,0.15); color: #e74c3c; }
-  .st-cat.suspicious { background: rgba(155,89,182,0.15); color: #9b59b6; }
+  .st-cat { font-size: 11px; padding: 1px 7px; border-radius:8px; white-space: nowrap; }
+  .st-cat.necessary { background: #ECFDF5; color: #047857; }
+  .st-cat.common { background: #FFFBEB; color: #B45309; }
+  .st-cat.advisory { background: #FEF2F2; color: #B91C1C; }
+  .st-cat.suspicious { background: #F6EFFF; color: #7C3AED; }
   .startup-actions { display: flex; gap: 10px; margin-top: 10px; align-items: center; }
   #send-btn {
-    padding: 10px 24px; border: none; border-radius: 24px;
-    background: var(--accent); color: #fff; font-size: 14px;
+    padding: 10px 24px; border: none; border-radius:20px;
+    background: #7C3AED; color: #fff; font-size: 14px;
     font-weight: 600; cursor: pointer; transition: opacity 0.2s;
   }
   #send-btn:hover { opacity: 0.85; }
@@ -235,72 +248,72 @@
   #connect-dialog { position: relative; }
   .dialog-close {
     position: absolute; top: 14px; right: 14px;
-    width: 30px; height: 30px; border-radius: 50%;
+    width: 30px; height: 30px; border-radius:50%;
     background: var(--bg); border: 1px solid var(--border);
     color: var(--text2); font-size: 16px; line-height: 1;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     transition: all 0.15s;
   }
-  .dialog-close:hover { color: var(--error); border-color: var(--error); background: rgba(248,81,73,0.12); }
+  .dialog-close:hover { color:#B91C1C; border-color:#B91C1C; background: #FEF2F2; }
 
   /* ====== Download Section ====== */
   .dl-section { margin-top: 14px; text-align: left; }
-  .dl-title { font-size: 13px; font-weight: 600; color: var(--info); margin: 12px 0 6px; }
+  .dl-title { font-size: 13px; font-weight: 600; color:#1E56D6; margin: 12px 0 6px; }
   .dl-btn {
     display: block; text-align: center; padding: 10px;
-    background: var(--surface2); color: var(--info);
-    border-radius: 8px; text-decoration: none; font-size: 13px;
+    background: var(--surface2); color:#1E56D6;
+    border-radius:8px; text-decoration: none; font-size: 13px;
     font-weight: 600; border: 1px solid var(--border);
   }
-  .dl-btn:hover { border-color: var(--info); }
+  .dl-btn:hover { border-color:#1E56D6; }
   .dl-arch-row { display: flex; gap: 6px; }
   .dl-arch-btn {
     flex: 1; text-align: center; padding: 8px 4px;
     background: var(--bg); color: var(--text2);
-    border-radius: 6px; text-decoration: none; font-size: 12px;
+    border-radius:8px; text-decoration: none; font-size: 12px;
     font-weight: 600; border: 1px solid var(--border);
   }
-  .dl-arch-btn:hover { border-color: var(--info); color: var(--info); }
+  .dl-arch-btn:hover { border-color:#1E56D6; color:#1E56D6; }
   .dl-cmd {
     background: var(--bg); border: 1px solid var(--border);
-    border-radius: 6px; padding: 8px 10px; font-size: 11px;
+    border-radius:8px; padding: 8px 10px; font-size: 11px;
     font-family: monospace; color: var(--text2); margin: 8px 0;
     word-break: break-all;
   }
-  .dl-copy { float: right; font-size: 11px; color: var(--info); cursor: pointer; margin-left: 8px; }
+  .dl-copy { float: right; font-size: 11px; color:#1E56D6; cursor: pointer; margin-left: 8px; }
   .dl-copy:hover { text-decoration: underline; }
   .dl-toggle {
-    display: block; font-size: 12px; color: var(--info);
+    display: block; font-size: 12px; color:#1E56D6;
     cursor: pointer; text-decoration: underline; margin-top: 6px;
   }
   .dl-help {
     margin-top: 8px; font-size: 12px; color: var(--text2);
     line-height: 1.7; background: var(--bg);
-    border: 1px solid var(--border); border-radius: 8px;
+    border: 1px solid var(--border); border-radius:8px;
     padding: 12px; display: none;
   }
-  .dl-help code { background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+  .dl-help code { background: rgba(15,23,42,0.05); padding: 1px 5px; border-radius:4px; font-size: 11px; }
   .dl-help table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 11px; }
   .dl-help th, .dl-help td { border: 1px solid var(--border); padding: 4px 6px; text-align: left; }
-  .dl-help th { background: var(--surface2); color: var(--info); }
+  .dl-help th { background: var(--surface2); color:#1E56D6; }
   /* Linux guide: step cards (2-column on wide dialog) */
   .dl-guide { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-  .dl-guide-head { font-size: 13px; font-weight: 700; color: var(--info); margin-bottom: 2px; grid-column: 1 / -1; }
+  .dl-guide-head { font-size: 13px; font-weight: 700; color:#1E56D6; margin-bottom: 2px; grid-column: 1 / -1; }
   .dl-step {
     background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 10px 12px;
+    border-radius:8px; padding: 10px 12px;
   }
   .dl-step.wide { grid-column: 1 / -1; }
   .dl-guide-foot { grid-column: 1 / -1; }
   .dl-step-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
   .dl-step-title .num {
     display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
-    text-align: center; background: var(--accent); color: #fff;
-    border-radius: 50%; font-size: 11px; font-weight: 700; margin-right: 6px;
+    text-align: center; background: #7C3AED; color: #fff;
+    border-radius:50%; font-size: 11px; font-weight: 700; margin-right: 6px;
   }
   .dl-cmd-block {
-    display: block; background: rgba(0,0,0,0.45); color: var(--info);
-    padding: 8px 10px; border-radius: 6px; font-family: monospace;
+    display: block; background: rgba(15,23,42,0.06); color:#1E56D6;
+    padding: 8px 10px; border-radius:8px; font-family: monospace;
     font-size: 11px; white-space: pre-wrap; word-break: break-all; line-height: 1.5;
     margin: 4px 0;
   }
@@ -333,9 +346,9 @@
   .dl-tab {
     flex: 1; padding: 8px; text-align: center; font-size: 13px; font-weight: 600;
     background: var(--bg); color: var(--text2); border: 1px solid var(--border);
-    border-radius: 8px; cursor: pointer;
+    border-radius:8px; cursor: pointer;
   }
-  .dl-tab.active { background: var(--surface2); color: var(--info); border-color: var(--info); }
+  .dl-tab.active { background: var(--surface2); color:#1E56D6; border-color:#1E56D6; }
   .dl-tab-panel { display: none; }
   .dl-tab-panel.active { display: block; }
   .dl-note { font-size: 11px; color: var(--text2); line-height: 1.6; margin-top: 8px; }
@@ -343,23 +356,33 @@
   /* ====== Scrollbar ====== */
   #messages::-webkit-scrollbar { width: 6px; }
   #messages::-webkit-scrollbar-track { background: transparent; }
-  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius:4px; }
 
   /* ── A档（2026-10-12）：判读三件套徽章 —— 加法式新增，不影响既有样式 ── */
-  .jj-chip{display:inline-block;margin:0 4px 0 0;padding:1px 7px;border-radius:9px;font-size:11.5px;
+  .jj-chip{display:inline-block;margin:0 4px 0 0;padding:1px 7px;border-radius:8px;font-size:11.5px;
            line-height:17px;white-space:nowrap;border:1px solid transparent}
-  .jj-evidence{color:#79c0ff;background:rgba(56,139,253,.12);border-color:rgba(56,139,253,.35)}
-  .jj-conf-high{color:#3fb950;background:rgba(63,185,80,.12);border-color:rgba(63,185,80,.35)}
-  .jj-conf-mid{color:#d29922;background:rgba(210,153,34,.12);border-color:rgba(210,153,34,.35)}
-  .jj-conf-low{color:#f85149;background:rgba(248,81,73,.12);border-color:rgba(248,81,73,.35)}
-  .jj-unknown{color:#8b949e;background:rgba(139,148,158,.12);border-color:rgba(139,148,158,.3)}
-  .jj-coverage{display:block;margin-top:8px;padding:5px 9px;border-left:3px solid #8957e5;
-               background:rgba(137,87,229,.08);color:#c9a9ff;font-size:12px;border-radius:0 6px 6px 0}
-.jj-conf-na{color:#6e7681;background:rgba(110,118,129,.12);border-color:rgba(110,118,129,.3)}
-.jj-evidence-none{color:#6e7681;background:rgba(110,118,129,.10);border-color:rgba(110,118,129,.28)}
-.jj-reason{font-size:11.5px;color:#7d8590;margin-right:6px;white-space:normal}
-.jj-unknown{color:#9aa4b0}
+  .jj-evidence{color:#1E56D6;background:#EEF4FE;border-color:rgba(36,104,242,.35)}
+  .jj-conf-high{color:#047857;background:rgba(5,150,105,.12);border-color:rgba(5,150,105,.35)}
+  .jj-conf-mid{color:#B45309;background:rgba(180,83,9,.12);border-color:rgba(180,83,9,.35)}
+  .jj-conf-low{color:#B91C1C;background:rgba(220,38,38,.12);border-color:rgba(220,38,38,.35)}
+  .jj-unknown{color:#5C5F66;background:rgba(92,95,102,.12);border-color:rgba(92,95,102,.3)}
+  .jj-coverage{display:block;margin-top:8px;padding:5px 9px;border-left:3px solid #AF61FF;
+               background:#F6EFFF;color:#7C3AED;font-size:12px;border-radius:0 8px 8px 0}
+.jj-conf-na{color:var(--text2);background:rgba(156,163,175,.12);border-color:rgba(156,163,175,.3)}
+.jj-evidence-none{color:var(--text2);background:rgba(156,163,175,.10);border-color:rgba(156,163,175,.28)}
+.jj-reason{font-size:11.5px;color:#5C5F66;margin-right:6px;white-space:normal}
+.jj-unknown{color:#5C5F66}
 .jj-chip{margin-right:6px}
+
+  /* 擎天亮色补充：滚动条 / 选中 */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#DCE0E6;border-radius:8px;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#C9CDD4;background-clip:content-box}
+  ::selection{background:#D6E4FF;color:#0F172A}
+
+  /* 表单控件字体继承（消除 Arial 混入） */
+  button,input,select,textarea{font-family:inherit}
 </style>
 
 </head>
@@ -371,35 +394,35 @@
       <span id="status-dot" class="connecting" style="flex-shrink:0;"></span>
       <span id="status-text" data-i18n="status_connecting" style="font-size:12px;flex-shrink:0;">正在连接...</span>
       <span id="room-info-compact" style="display:none;align-items:center;gap:10px;font-size:12px;color:var(--text2);margin-left:6px;padding-left:10px;border-left:1px solid var(--border);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;">
-        <span>📋 房间 <b id="ri-code" style="color:var(--info);letter-spacing:1px;"></b></span>
+        <span>📋 房间 <b id="ri-code" style="color:#1E56D6;letter-spacing:1px;"></b></span>
         <span>SN: <span id="ri-sn"></span></span>
         <span>工单: <span id="ri-ticket"></span></span>
         <span id="ri-validity">--</span>
-        <span id="ri-status" style="color:var(--info);"></span>
+        <span id="ri-status" style="color:#1E56D6;"></span>
       </span>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-      <button id="connect-toggle" onclick="toggleConnectPanel()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;" title="展开/收起一键连接命令">📶 连接你的电脑 ▾</button>
+      <button id="connect-toggle" onclick="toggleConnectPanel()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:#1E56D6;border:1px solid var(--info);border-radius:4px;cursor:pointer;" title="展开/收起一键连接命令">📶 连接你的电脑 ▾</button>
       <!-- 2026-09-26 新增：回诊断台入口。原来只能点浏览器返回箭头，属单向导航死角 -->
-      <button id="back-diag-btn" onclick="backToDiag()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;" title="返回诊断台（快捷诊断工具）">📊 回诊断台</button>
+      <button id="back-diag-btn" onclick="backToDiag()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:#1E56D6;border:1px solid var(--info);border-radius:4px;cursor:pointer;" title="返回诊断台（快捷诊断工具）">📊 回诊断台</button>
       <!-- 2026-09-26 新增：回工作台。主界面有 IDG 日志分析 / Win·Lin 工具 / 诊断记录等入口 -->
       <button id="back-dash-btn" onclick="backToDashboard()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;" title="返回工作台（日志分析 / 工具 / 诊断记录）">🏠 工作台</button>
-      <button id="room-close-btn" onclick="closeRoom()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--error);border:1px solid var(--error);border-radius:4px;cursor:pointer;">⛔ 结束诊断</button>
+      <button id="room-close-btn" onclick="closeRoom()" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:#B91C1C;border:1px solid var(--error);border-radius:4px;cursor:pointer;">⛔ 结束诊断</button>
       <div style="position:relative;display:inline-block;">
         <button id="export-btn" onclick="toggleExportMenu(event)" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;cursor:pointer;display:none;" title="导出对话 / 生成报告">📄 导出 ▾</button>
-        <div id="export-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--surface2);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.4);z-index:100;min-width:150px;overflow:hidden;">
+        <div id="export-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--surface2);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.4);z-index:100;min-width:150px;overflow:hidden;">
           <div class="em-item" onclick="doExportChat(event)" title="导出完整对话记录(含 AI 分析)">💬 导出完整对话</div>
           <div class="em-item" onclick="doExportReport(event)" title="生成诊断观察报告(仅执行记录与采集数据,不含 AI 分析)">📊 生成诊断报告</div>
         </div>
       </div>
-      <button id="reconnect-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;display:none;" data-i18n="reconnect_btn">重新连接</button>
+      <button id="reconnect-btn" style="padding:4px 10px;font-size:12px;background:var(--surface2);color:#1E56D6;border:1px solid var(--info);border-radius:4px;cursor:pointer;display:none;" data-i18n="reconnect_btn">重新连接</button>
       <div id="room-display" style="display:none;"></div>
     </div>
   </div>
 
   <div id="connect-panel" style="display:none;padding:12px 14px;background:var(--surface2);border-bottom:1px solid var(--border);font-size:13px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <span style="font-size:13px;font-weight:600;color:var(--info);">🔗 一键连接命令</span>
+      <span style="font-size:13px;font-weight:600;color:#1E56D6;">🔗 一键连接命令</span>
       <span style="font-size:11px;color:var(--text2);">点击上方「📶 收起连接」可折叠本面板</span>
     </div>
     <div style="display:flex;gap:6px;margin-bottom:10px;">
@@ -408,21 +431,29 @@
       <button class="cp-tab" data-tab="linux" onclick="cpTab('linux')" style="padding:4px 12px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer;">Linux</button>
     </div>
     <div style="position:relative;">
-      <pre id="cp-content" style="white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 80px 10px 10px;margin:0;font-size:12px;color:var(--text);overflow-x:auto;"></pre>
-      <button id="cp-copy" onclick="cpCopy()" style="position:absolute;top:8px;right:8px;padding:3px 10px;font-size:12px;background:var(--surface);color:var(--info);border:1px solid var(--info);border-radius:4px;cursor:pointer;">📋 复制</button>
+      <pre id="cp-content" style="white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 80px 10px 10px;margin:0;font-size:12px;color:var(--text);overflow-x:auto;"></pre>
+      <button id="cp-copy" onclick="cpCopy()" style="position:absolute;top:8px;right:8px;padding:3px 10px;font-size:12px;background:var(--surface);color:#1E56D6;border:1px solid var(--info);border-radius:4px;cursor:pointer;">📋 复制</button>
     </div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
       <a id="cp-dl-btn" href="#" download style="display:none;padding:12px 28px;font-size:14px;font-weight:600;background:var(--info);color:#fff;border-radius:8px;text-decoration:none;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25);">⬇️ 下载 一键连接.bat</a>
       <span id="cp-dl-note" style="font-size:12px;color:var(--text2);display:none;">双击下载的 .bat → 自动下载桥接器并连接房间</span>
     </div>
     <div id="cp-meta" style="margin-top:8px;font-size:12px;color:var(--text2);"></div>
-    <div style="margin-top:4px;font-size:12px;color:#e0a800;">⚠️ 本连接含房间凭证，请勿转发</div>
+    <div style="margin-top:4px;font-size:12px;color:#B45309;">⚠️ 本连接含房间凭证，请勿转发</div>
+    <!-- 2026-10-15 新增（加法式）：客户机提示 + 清理/卸载入口 -->
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11.5px;color:var(--text2);line-height:1.85;">
+      <div style="font-weight:650;color:var(--text);">🧹 诊断结束后如何清理（可选）</div>
+      <div>· Windows：下载 <a href="/static/uninstall-windows.bat" style="color:#1E56D6;">uninstall-windows.bat</a> 并双击运行（停止进程 + 删除程序文件与审计日志，不碰系统其它内容）。</div>
+      <div>· Linux：<code style="color:var(--text);">curl -sL <span class="uninstall-linux-url">…</span> | sudo bash</code></div>
+      <div style="color:var(--text2);margin-top:4px;">客户机提示：出现「Windows 已保护你的电脑」→「更多信息」→「仍要运行」；连接成功后请保持桥接器窗口开启（可最小化），关闭窗口即断开。</div>
+    </div>
+    <script>(function(){document.querySelectorAll('.uninstall-linux-url').forEach(function(e){e.textContent=location.origin+'/static/uninstall-linux.sh';});})();</script>
   </div>
 
   <div id="messages"></div>
 
   <!-- 上门工程师（field）：连接功能可用，无对话权限提示条 -->
-  <div id="field-tip" style="display:none;padding:8px 14px;background:rgba(224,168,0,0.12);color:#e0a800;font-size:12px;border-bottom:1px solid var(--border);">
+  <div id="field-tip" style="display:none;padding:8px 14px;background:#FFFBEB;color:#B45309;font-size:12px;border-bottom:1px solid var(--border);">
     ⚠ 上门工程师账号：可使用「📶 连接你的电脑」与快捷工具；对话诊断由远程工程师处理（不可发送消息）
   </div>
 
@@ -446,8 +477,8 @@
 <!-- Connect Dialog -->
 
 <!-- 会话空闲提醒（30min 无操作 → 60s 倒计时 → 自动登出） -->
-<div id="idle-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);display:none;justify-content:center;align-items:center;z-index:9998;">
-  <div style="background:var(--surface);border:1px solid var(--info);border-radius:14px;padding:24px;width:380px;max-width:95vw;box-shadow:0 8px 40px rgba(0,0,0,0.35);">
+<div id="idle-overlay" style="position:fixed;inset:0;background:rgba(15,23,42,0.45);display:none;justify-content:center;align-items:center;z-index:9998;">
+  <div style="background:var(--surface);border:1px solid var(--info);border-radius:12px;padding:24px;width:380px;max-width:95vw;box-shadow:0 4px 24px rgba(0,0,0,.08);">
     <h3 style="margin:0 0 8px;color:var(--text);font-size:18px;">⏰ 会话空闲提醒</h3>
     <p style="font-size:13px;color:var(--text2);margin:0 0 16px;">页面已空闲 30 分钟，<b id="idle-count" style="color:var(--warn);">60</b> 秒后自动退出登录</p>
     <div style="display:flex;gap:10px;">
@@ -462,11 +493,11 @@
   <div id="approval-dialog">
     <h3 id="approval-title" data-i18n="approval_title">操作确认</h3>
     <p id="approval-desc" style="font-size:13px;color:var(--text2);" data-i18n="approval_desc">助手想执行以下操作：</p>
-    <p style="font-size:12px;color:var(--success);margin:0 0 6px;">✅ 允许后，本次任务后续操作将不再询问（自动放行）</p>
+    <p style="font-size:12px;color:#047857;margin:0 0 6px;">✅ 允许后，本次任务后续操作将不再询问（自动放行）</p>
     <div class="human-desc" id="approval-human"></div>
     <button class="detail-toggle" id="approval-toggle-detail" onclick="toggleApprovalDetail()">▸ 查看命令详情</button>
     <div class="tool-info" id="approval-detail">
-      <strong id="approval-tool" style="color:var(--info);"></strong>
+      <strong id="approval-tool" style="color:#1E56D6;"></strong>
       <div class="args-display" id="approval-args" style="margin-top: 8px;"></div>
     </div>
     <p class="timer" id="approval-timer"></p>
@@ -714,7 +745,7 @@ function updateBridgeStatus(connected) {
   updateAutoApproveBtnState();
   // 一键连接信息栏的桥接器状态
   const ri = document.getElementById('ri-bridge');
-  if (ri) { ri.innerHTML = connected ? '<span style="color:#2ecc71;">● 在线</span>' : '<span style="color:#888;">● 离线</span>'; }
+  if (ri) { ri.innerHTML = connected ? '<span style="color:#047857;">● 在线</span>' : '<span style="color:#5C5F66;">● 离线</span>'; }
   updateQuickActions();  // 快捷功能按钮随桥接器连接状态启停
 }
 
@@ -840,17 +871,17 @@ async function loadRoomConnect(room) {
     if (riVal) {
       const dl = d.days_left;
       if (dl === null || dl === undefined) riVal.innerHTML = '<span style="color:var(--text2);">永久</span>';
-      else if (dl < 0) riVal.innerHTML = '<span style="color:#e74c3c;font-weight:600;">已过期</span>';
-      else if (dl <= 3) riVal.innerHTML = '<span style="color:#e0a800;font-weight:600;">剩 ' + dl + ' 天</span>';
+      else if (dl < 0) riVal.innerHTML = '<span style="color:#B91C1C;font-weight:600;">已过期</span>';
+      else if (dl <= 3) riVal.innerHTML = '<span style="color:#B45309;font-weight:600;">剩 ' + dl + ' 天</span>';
       else riVal.innerHTML = '<span style="color:var(--text2);">剩 ' + dl + ' 天</span>';
     }
     // 房间状态显示（room_connect 返回 status）
     const riStatus = document.getElementById('ri-status');
     if (riStatus) {
       const st = d.status || 'active';
-      if (st === 'idle') { riStatus.innerHTML = '<span style="color:#888;">已闲置（可恢复）</span>'; }
-      else if (st === 'archived') { riStatus.innerHTML = '<span style="color:#e74c3c;font-weight:600;">已归档（只读）</span>'; }
-      else { riStatus.innerHTML = '<span style="color:#2ecc71;">诊断中</span>'; }
+      if (st === 'idle') { riStatus.innerHTML = '<span style="color:#5C5F66;">已闲置（可恢复）</span>'; }
+      else if (st === 'archived') { riStatus.innerHTML = '<span style="color:#B91C1C;font-weight:600;">已归档（只读）</span>'; }
+      else { riStatus.innerHTML = '<span style="color:#047857;">诊断中</span>'; }
       // 归档房间：只读（禁用发送）
       const sendBtn = document.getElementById('send-btn');
       const inputBox = document.getElementById('input-box');
@@ -1149,7 +1180,7 @@ function renderStartupPanel(items) {
   panel.innerHTML = '<h4>🔌 开机自启动项（共 ' + items.length + ' 项）</h4>'
     + rows
     + '<div class="startup-actions">'
-    + '<button class="qa-btn" style="background:var(--accent);color:#fff;border:none;font-weight:600;" onclick="confirmStartupClose()">✔ 关闭所选</button>'
+    + '<button class="qa-btn" style="background:#7C3AED;color:#fff;border:none;font-weight:600;" onclick="confirmStartupClose()">✔ 关闭所选</button>'
     + '<button class="qa-btn" onclick="clearStartupSel()">全不选</button>'
     + '<span style="font-size:12px;color:var(--text2);" id="st-count">已选 0 项</span>'
     + '<span style="font-size:11px;color:var(--text2);margin-left:auto;">🔴 建议关闭项已预勾选 · 🟢 系统必需不可关闭</span>'
@@ -1389,12 +1420,12 @@ function renderDiagnosis(md) {
       html += renderManifest(val);
       i++;  // 跳过内容
     } else if (key === '初步判读' && val !== undefined) {
-      html += '<div style="margin:10px 0 4px;font-weight:600;font-size:13px;color:#bc8cff;">🧭 初步判读（方向提示，非结论）</div>';
-      html += '<div style="margin-bottom:6px;padding:10px 14px;background:rgba(188,140,255,.07);border-left:3px solid #bc8cff;border-radius:0 8px 8px 0;color:#d8b9ff;">' + renderMarkdown(val.trim()) + '</div>';
+      html += '<div style="margin:10px 0 4px;font-weight:600;font-size:13px;color:#7C3AED;">🧭 初步判读（方向提示，非结论）</div>';
+      html += '<div style="margin-bottom:6px;padding:10px 14px;background:#F6EFFF;border-left:3px solid #AF61FF;border-radius:0 8px 8px 0;color:#7C3AED;">' + renderMarkdown(val.trim()) + '</div>';
       i++;
     } else if ((key === '观察' || key === '依据' || key === '缺失') && val !== undefined) {
       var label = { '观察': '📊 观察', '依据': '🔗 依据', '缺失': '⚠️ 缺失' }[key];
-      html += '<div style="margin:10px 0 4px;font-weight:600;font-size:13px;color:#8b949e;">' + label + '</div>';
+      html += '<div style="margin:10px 0 4px;font-weight:600;font-size:13px;color:#5C5F66;">' + label + '</div>';
       html += '<div style="margin-bottom:6px;">' + renderMarkdown(val.trim()) + '</div>';
       i++;
     } else if (key.trim()) {
@@ -1411,21 +1442,21 @@ function renderManifest(text) {
   lines.forEach(function (l) {
     var clean = l.replace(/^[-*•]\s*/, '').replace(/`/g, '');
     // 判定顺序：先看「—— 成功/不适用」这类显式状态词（在破折号后），再兜底关键词
-    var color = '#8b949e', icon = '•';
+    var color = '#5C5F66', icon = '•';
     var tail = clean.split(/[—-]{1,2}/).pop() || clean;   // 取状态描述部分（"—— 成功，近 90 天 3 次"）
-    if (/不适用|无此硬件|台式机|没有.*硬件/i.test(tail)) { color = '#8b949e'; icon = '⚪'; }
-    else if (/失败|超时|无法|读取不到/i.test(tail)) { color = '#f85149'; icon = '❌'; }
-    else if (/成功|完成|已获取|正常|ok\b/i.test(tail)) { color = '#3fb950'; icon = '✅'; }
-    else if (/不适用|N\/A/i.test(clean)) { color = '#8b949e'; icon = '⚪'; }
-    else if (/失败|超时|无法/i.test(clean)) { color = '#f85149'; icon = '❌'; }
-    else if (/成功|完成|已获取/i.test(clean)) { color = '#3fb950'; icon = '✅'; }
+    if (/不适用|无此硬件|台式机|没有.*硬件/i.test(tail)) { color = '#5C5F66'; icon = '⚪'; }
+    else if (/失败|超时|无法|读取不到/i.test(tail)) { color = '#DC2626'; icon = '❌'; }
+    else if (/成功|完成|已获取|正常|ok\b/i.test(tail)) { color = '#059669'; icon = '✅'; }
+    else if (/不适用|N\/A/i.test(clean)) { color = '#5C5F66'; icon = '⚪'; }
+    else if (/失败|超时|无法/i.test(clean)) { color = '#DC2626'; icon = '❌'; }
+    else if (/成功|完成|已获取/i.test(clean)) { color = '#059669'; icon = '✅'; }
     rows += '<div style="display:flex;gap:8px;padding:3px 0;font-size:13px;align-items:flex-start;">'
       + '<span style="flex:0 0 auto;">' + icon + '</span>'
       + '<span style="color:' + color + ';">' + clean.replace(/</g, '&lt;') + '</span></div>';
   });
   if (!rows) return '';
-  return '<div style="margin:8px 0;padding:10px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;">'
-    + '<div style="font-size:12px;color:#8b949e;font-weight:600;margin-bottom:6px;">📋 采集项清单</div>'
+  return '<div style="margin:8px 0;padding:10px 12px;background:#F9F9F9;border:1px solid #E8E9EB;border-radius:8px;">'
+    + '<div style="font-size:12px;color:#5C5F66;font-weight:600;margin-bottom:6px;">📋 采集项清单</div>'
     + rows + '</div>';
 }
 
@@ -1600,7 +1631,7 @@ function renderQuickBar() {
   if (!items.length) {   // 清单未就绪/加载失败（2026-10-12 P1）：给出明确提示而不是空白
     bar.innerHTML = '<div class="qa-group"><span style="font-size:12px;color:var(--text2)">'
       + (quickDiagLoadFailed ? '⚠️ 诊断项清单加载失败 · ' : '⏳ 诊断项清单加载中… ')
-      + '<a href="javascript:loadQuickDiagnoses()" style="color:var(--accent)">'
+      + '<a href="javascript:loadQuickDiagnoses()" style="color:#7C3AED">'
       + (quickDiagLoadFailed ? '点击重试' : '刷新') + '</a></span></div>';
     return;
   }
@@ -1663,9 +1694,9 @@ async function runDriverFetch() {
     fams.sort();
     const tb = 'padding:4px;border-bottom:1px solid var(--border);';
     let html = '<div class="drv-result" style="font-size:13px;">';
-    html += '<h4 style="margin:4px 0 6px;">📥 联想官网驱动清单' + (data.cached ? ' <small style="color:var(--success);">(缓存)</small>' : '') + '</h4>';
+    html += '<h4 style="margin:4px 0 6px;">📥 联想官网驱动清单' + (data.cached ? ' <small style="color:#047857;">(缓存)</small>' : '') + '</h4>';
     html += '<p style="font-size:12px;color:var(--text2);margin:0 0 8px;">机型：<b>' + esc(data.machine.model || data.machine.mt) + '</b> | SN：' + esc(data.machine.sn) + ' | 共 <b>' + data.count + '</b> 项'
-      + (clientOs ? ' | 本机系统：<b style="color:var(--success);">' + esc(clientOs) + '</b>' : '')
+      + (clientOs ? ' | 本机系统：<b style="color:#047857;">' + esc(clientOs) + '</b>' : '')
       + (data.note ? '<br>📝 ' + esc(data.note) : '') + '</p>';
     html += '<div class="drv-wrap">';
     html += '<div style="font-size:12px;color:var(--text2);margin:0 0 6px;">适用系统：'
@@ -1674,7 +1705,7 @@ async function runDriverFetch() {
       + fams.map(f => '<option value="' + esc(f) + '"' + (f === clientOs ? ' selected' : '') + '>' + esc(f) + '</option>').join('')
       + '</select><span class="drv-cnt" style="margin-left:8px;"></span>'
       + (clientOs ? '<span style="margin-left:10px;">✅ 适配本机系统（' + esc(clientOs) + '）</span>' : '')
-      + '<span class="drv-msg" style="margin-left:10px;color:var(--info);"></span></div>';
+      + '<span class="drv-msg" style="margin-left:10px;color:#1E56D6;"></span></div>';
     const groups = {};
     (data.drivers || []).forEach(d => { (groups[d.category] = groups[d.category] || []).push(d); });
     for (const cat of Object.keys(groups)) {
@@ -1690,7 +1721,7 @@ async function runDriverFetch() {
           + '<td style="' + tb + '">' + esc(d.size) + '</td>'
           + '<td style="' + tb + 'font-size:11.5px;color:var(--text2);">' + esc((d.os_tags || []).join(' / ')) + '</td>'
           + '<td style="' + tb + '"><button type="button" class="drv-dl" onclick="drvDownload(this)" data-key="' + esc(searchKey) + '" data-name="' + esc(d.name_raw || d.name) + '" data-ver="' + esc(d.version || '') + '"'
-          + ' style="cursor:pointer;background:transparent;border:1px solid var(--border);color:var(--info);border-radius:4px;padding:2px 9px;font-size:12px;">下载</button></td>'
+          + ' style="cursor:pointer;background:transparent;border:1px solid var(--border);color:#1E56D6;border-radius:4px;padding:2px 9px;font-size:12px;">下载</button></td>'
           + '</tr>';
       });
       html += '</tbody></table>';
