@@ -6,9 +6,14 @@ Features: 49 tools, Tier 2/3 approval, SQLite chat history, admin dashboard
 import asyncio
 import uuid
 import base64
+import gzip
 import hashlib
 import hmac
 import json
+from urllib.parse import quote
+import io
+import zipfile
+import mimetypes
 import logging
 import os
 import re
@@ -58,7 +63,7 @@ run_logger.addHandler(console)
 # ============================================================
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "sk-your-api-key-here")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "deepseek-chat")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "deepseek-flash")
 
 # ============================================================
 # Hermes 通道配置（Hermes 为默认大脑；老 DeepSeek 通道保留兜底）
@@ -182,6 +187,24 @@ def init_db():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_feedbacks_user ON feedbacks(username, id)")
+    # 房间文件（2026-10-27：现场 ↔ 二线 双向文件通道）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS room_files (
+            id TEXT PRIMARY KEY,
+            room_code TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            stored_name TEXT NOT NULL,
+            size INTEGER DEFAULT 0,
+            mime TEXT DEFAULT '',
+            uploader TEXT DEFAULT '',
+            uploader_role TEXT DEFAULT '',
+            note TEXT DEFAULT '',
+            sha256 TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            deleted_at TEXT DEFAULT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_room_files_room ON room_files(room_code, created_at)")
     conn.commit()
     conn.close()
     seed_users()
@@ -1158,7 +1181,7 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -1278,8 +1301,25 @@ USER_SESSIONS: dict[str, dict] = {}   # token -> {username, role, exp}
 USER_SESSION_TTL = 2 * 3600              # 2 hours（滑动续期：活跃请求自动刷新）
 
 
+# 2026-10-19：内部令牌（只给服务端自己用：AI 只读工具调用走内部 HTTP，复用现有端点逻辑）
+INTERNAL_TOKENS: dict[str, dict] = {}   # token -> {username, role, exp}
+
+
+def _issue_internal_token(username: str, role: str, ttl: int = 300) -> str:
+    tk = secrets.token_hex(16)
+    INTERNAL_TOKENS[tk] = {"username": username, "role": role, "exp": time.time() + ttl}
+    return tk
+
+
 def _require_user(request: Request) -> Optional[dict]:
     """校验 user_token cookie，返回 {username, role} 或 None。滑动续期：每次校验通过刷新过期时间。"""
+    # 内部令牌（仅服务端进程内使用，用于 AI 工具调用）
+    itk = request.headers.get("x-internal-token", "")
+    if itk:
+        rec = INTERNAL_TOKENS.get(itk)
+        if rec and rec.get("exp", 0) > time.time():
+            return {"username": rec["username"], "role": rec["role"]}
+        return None
     token = request.cookies.get("user_token", "")
     sess = USER_SESSIONS.get(token)
     if not sess or sess.get("exp", 0) <= time.time():
@@ -1669,8 +1709,13 @@ async def admin_create_user(request: Request):
     password = body.get("password") or ""
     if not username:
         return JSONResponse({"error": "工号必填"}, status_code=400)
-    if role not in ("admin", "engineer"):
-        role = "engineer"
+    # 2026-10-20：四种账号级别
+    #   field = 渠道工程师（现场作业台）
+    #   cc    = CC 工程师（现场作业台，客服/呼叫中心）
+    #   expert= 二线工程师（二线作业台）
+    #   admin = 管理员（工作台）
+    if role not in ("field", "cc", "expert", "admin"):
+        role = "expert"
     if len(password) < 4:
         return JSONResponse({"error": "初始密码至少 4 位"}, status_code=400)
     if get_user(username):
@@ -1684,6 +1729,29 @@ async def admin_create_user(request: Request):
     conn.close()
     run_logger.info(f"[admin] {admin['username']} 创建账号 {username} ({role})")
     return {"ok": True, "username": username}
+
+
+@app.post("/api/admin/users/{username}/role")
+async def admin_set_role(request: Request, username: str):
+    """修改账号级别（field=渠道 / cc=CC / expert=二线 / admin=管理员）。只改 role，不动密码。"""
+    admin = _require_admin_user(request)
+    if not admin:
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    body = await _safe_json(request)
+    role = (body.get("role") or "").strip()
+    if role not in ("field", "cc", "expert", "admin"):
+        return JSONResponse({"error": "角色非法"}, status_code=400)
+    user = get_user(username)
+    if not user:
+        return JSONResponse({"error": "用户不存在"}, status_code=404)
+    if username == admin["username"] and role != "admin":
+        return JSONResponse({"error": "不能把自己的管理员权限降级"}, status_code=400)
+    conn = _db_connect()
+    conn.execute("UPDATE users SET role = ? WHERE username = ?", (role, username))
+    conn.commit()
+    conn.close()
+    run_logger.info(f"[admin] {admin['username']} 修改账号 {username} 角色为 {role}")
+    return {"ok": True, "username": username, "role": role}
 
 
 @app.post("/api/admin/users/{username}/toggle")
@@ -1723,6 +1791,252 @@ async def admin_reset_password(request: Request, username: str):
     conn.close()
     run_logger.info(f"[admin] {admin['username']} 重置账号 {username} 的密码")
     return {"ok": True, "username": username}
+
+
+AI_QA_SYSTEM = (
+    "你是联想售后现场诊断助手（Nexpert 现场作业台的 AI 协助）。\n"
+    "【说话规则】\n"
+    "1) 寒暄、身份、追问、抱怨（例如「在吗」「你是谁」「你咋变笨了」）→ 正常对话，一两句回，不要罗列证据、不要套诊断模板。\n"
+    "2) 问机器状态/故障/该查什么 → 先看已有证据；证据不够就直接用工具去采（见下），采完再说结论。\n"
+    "3) 只讲证据里有的和工具返回的，禁止编造读数；证据不够要说「证据不足」并说明缺什么。\n"
+    "4) 不下维修/换件结论，只给判读方向与下一步核查建议。\n"
+    "5) 中文，简洁，能用列表就用列表，别写长篇。\n"
+    "【工具能力】你可以调用只读采集工具（不会改动客户机）。需要数据时直接调用，不要只让用户自己去点。\n"
+    "【结论卡】只有当确实形成实质判读时，最后单独一行输出：\n"
+    "【结论卡】结论=<一句话>；置信度=<0-100>；依据=<要点>；缺失=<要点>"
+)
+
+# AI 可调用的只读工具（白名单，写操作/刷写一律不给）
+AI_READONLY_TOOLS = [
+    {"key": "sysinfo", "path": "/api/tools/sysinfo", "win": True, "linux": True,
+     "desc": "设备识别：机型/SN/系统版本/CPU/内存/磁盘型号容量"},
+    {"key": "smart", "path": "/api/tools/smart", "win": True, "linux": True,
+     "desc": "硬盘 SMART 健康与关键属性（05/C5/温度/通电时长）"},
+    {"key": "drivers_installed", "path": "/api/tools/drivers/list", "win": True, "linux": False,
+     "desc": "已安装驱动清单（名称/厂商/版本）"},
+    {"key": "winlogs", "path": "/api/tools/winlogs", "win": True, "linux": False,
+     "desc": "系统事件日志导出（返回文件清单与大小）"},
+    {"key": "dump", "path": "/api/tools/dump", "win": True, "linux": False,
+     "desc": "蓝屏转储文件清单（Minidump/MEMORY.DMP）"},
+    {"key": "dump_analyze", "path": "/api/tools/dump_analyze", "win": True, "linux": False,
+     "desc": "蓝屏分析：BugCheck 事件、dump 参数解析、知识库判读（较慢，约 1-2 分钟）"},
+    {"key": "bios", "path": "/api/tools/bios/read", "win": True, "linux": False,
+     "desc": "BIOS 版本、启动模式、安全启动状态"},
+    {"key": "sio_log", "path": "/api/tools/sio_log", "win": True, "linux": False,
+     "desc": "SIO 硬件诊断日志（仅工作站机型才有）", "workstation_only": True},
+    {"key": "linux_logpack", "path": "/api/tools/linux/logpack", "win": False, "linux": True,
+     "desc": "Linux 日志打包（清单回传）"},
+]
+
+
+_WS_MODEL_PAT = re.compile(r"(thinkstation|\bP\d{1,3}(\s*(tower|tiny|ultra|gen|g\d))?\b|\bP[X]\b)", re.I)
+
+
+def _is_workstation_model(model: str) -> bool:
+    """粗略判断是否工作站机型（决定是否把 SIO 日志给 AI 采集）。"""
+    return bool(_WS_MODEL_PAT.search(str(model or "")))
+
+
+def _ai_tool_specs(platform: str, model: str = ""):
+    """按平台挑可用工具 + 生成 OpenAI tools 定义。
+    2026-10-27：RAID 不做常规采集（已移出）；SIO 仅工作站机型才给。"""
+    plat = "linux" if platform == "linux" else "win"
+    _ws = _is_workstation_model(model)
+    avail = [x for x in AI_READONLY_TOOLS
+             if x.get(plat) and (not x.get("workstation_only") or _ws)]
+    names = ", ".join(f"{x['key']}={x['desc']}" for x in avail)
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "collect",
+            "description": "在客户机上执行一次只读采集并拿回真实数据。可用项：" + names,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool": {"type": "string", "enum": [x["key"] for x in avail],
+                             "description": "要执行的采集项 key"},
+                    "why": {"type": "string", "description": "为什么需要这次采集（一句话）"},
+                },
+                "required": ["tool"],
+            },
+        },
+    }]
+    return avail, tools
+
+
+async def _ai_run_tool(room_code: str, tool_key: str, internal_token: str, username: str) -> str:
+    """经内部 HTTP 调现有端点（复用真实采集逻辑），返回给模型的文本。"""
+    spec = next((x for x in AI_READONLY_TOOLS if x["key"] == tool_key), None)
+    if not spec:
+        return f"[工具不存在: {tool_key}]"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(650.0)) as client:
+            resp = await client.post(
+                f"http://127.0.0.1:{os.getenv('PORT', '8000')}{spec['path']}",
+                json={"room_code": room_code},
+                headers={"X-Internal-Token": internal_token},
+            )
+        try:
+            js = resp.json()
+        except Exception:
+            js = {"raw": resp.text[:1500]}
+        if resp.status_code != 200:
+            return f"[{tool_key} 采集失败 HTTP {resp.status_code}] {str(js)[:300]}"
+        out = js.get("log") or js.get("raw") or js.get("sysinfo") or js.get("table") or js.get("report") or js
+        txt = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+        txt = re.sub(r"\n{3,}", "\n\n", txt)
+        return txt[:4000]
+    except Exception as e:
+        return f"[{tool_key} 调用异常] {e}"
+
+
+def _ai_history(room_code: str, limit: int = 6) -> list:
+    """本房间最近几轮问答（多轮上下文）。跳过内部标记行与空回复。"""
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT role, content FROM messages WHERE room_code=? AND role IN ('user','ai') "
+            "ORDER BY id DESC LIMIT ?", (room_code, limit)).fetchall()
+        conn.close()
+    except Exception:
+        return []
+    hist = []
+    for r in reversed(rows):
+        c = (r["content"] or "").strip()
+        if not c or c.startswith("[现场AI问答]") or c.startswith("[二线"):
+            continue
+        hist.append({"role": "user" if r["role"] == "user" else "assistant", "content": c[:800]})
+    return hist
+
+
+@app.post("/api/ai_qa")
+async def ai_qa(request: Request):
+    """现场 AI 协助：多轮对话 + 只读工具能力（不给写操作、不给自由命令）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    question = (body.get("question") or "").strip()[:500]
+    if not room_code or not question:
+        return JSONResponse({"error": "缺少房间码或问题"}, status_code=400)
+
+    try:
+        conn = _db_connect()
+        row = conn.execute(
+            "SELECT sn, ticket_no, machine_model, engineer_username, status, os FROM rooms WHERE room_code=?",
+            (room_code,)).fetchone()
+        msgs = conn.execute(
+            "SELECT tool_name, content, created_at FROM messages "
+            "WHERE room_code=? AND role='tool' AND tool_name IS NOT NULL ORDER BY id DESC LIMIT 8",
+            (room_code,)).fetchall()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"[{room_code}] ai_qa query failed: {e}")
+        return JSONResponse({"error": "读取房间数据失败"}, status_code=500)
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+
+    def _clean(v):
+        v = (v or "").strip()
+        return "未上报" if v in ("", "000", "0", "-", "—") else v
+
+    room_obj = rooms.get(room_code)
+    platform = ((room_obj.machine or {}).get("platform") if room_obj else "") or (row["os"] or "windows")
+    platform = "linux" if "linux" in platform.lower() else "windows"
+
+    ev_lines = []
+    for m in msgs:
+        txt = re.sub(r"\s+", " ", (m["content"] or "")).strip()[:400]
+        ev_lines.append(f"- {m['tool_name']}（{(m['created_at'] or '')[11:16]}）：{txt}")
+    evidence = "\n".join(ev_lines) or "（本房间暂无采集证据）"
+
+    ctx = (f"【房间】{room_code} · SN {_clean(row['sn'])} · 机型 {_clean(row['machine_model'])}"
+           f" · 工单 {_clean(row['ticket_no'])} · 平台 {platform} · 状态 {row['status'] or 'active'}")
+    ctx += f"\n【已采集证据（最近 {len(msgs)} 条）】\n{evidence}"
+
+    avail, tools = _ai_tool_specs(platform, row["machine_model"])
+    messages = [{"role": "system", "content": AI_QA_SYSTEM}, * _ai_history(room_code),
+                {"role": "user", "content": ctx + "\n\n【我的问题】" + question}]
+
+    internal = _issue_internal_token(user["username"], user.get("role", "engineer"), ttl=900)
+    # 2026-10-27：单次提问采集上限 3 → 6（可用 .env 的 AI_MAX_TOOLS 覆盖）
+    try:
+        max_tools = max(1, min(12, int(os.getenv("AI_MAX_TOOLS", "6") or 6)))
+    except Exception:
+        max_tools = 6
+    max_rounds = max(3, max_tools)
+    used_tools, tool_round, pending_tools = [], 0, []
+    answer = ""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+            while tool_round < max_rounds:
+                tool_round += 1
+                resp = await asyncio.wait_for(client.post(
+                    f"{OPENAI_BASE_URL}/chat/completions",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                    json={"model": OPENAI_MODEL, "messages": messages,
+                          "tools": tools, "tool_choice": "auto"},
+                ), timeout=150.0)
+                resp.raise_for_status()
+                msg = resp.json()["choices"][0]["message"]
+                calls = msg.get("tool_calls") or []
+                if not calls:
+                    answer = (msg.get("content") or "").strip()
+                    break
+                messages.append({"role": "assistant", "content": msg.get("content") or "",
+                                 "tool_calls": calls})
+                for c in calls:
+                    if len(used_tools) >= max_tools:
+                        _tk = ""
+                        try:
+                            _tk = (json.loads(c["function"]["arguments"] or "{}") or {}).get("tool", "")
+                        except Exception:
+                            _tk = ""
+                        if _tk and _tk not in pending_tools:
+                            pending_tools.append(_tk)
+                        messages.append({"role": "tool", "tool_call_id": c.get("id", ""),
+                                         "content": "[本次采集已达上限，这一项暂未执行。"
+                                                    "回答时不要提「上限/限额」这类系统内部说法，"
+                                                    "只在末尾用一行写：还可继续采集：<项名>]"})
+                        continue
+                    try:
+                        args = json.loads(c["function"]["arguments"] or "{}")
+                    except Exception:
+                        args = {}
+                    tk = args.get("tool", "")
+                    run_logger.info(f"[{room_code}] ai_qa 调工具 {tk}（用户 {user['username']}）: {args.get('why','')[:60]}")
+                    result = await _ai_run_tool(room_code, tk, internal, user["username"])
+                    used_tools.append(tk)
+                    save_message(room_code, "tool", f"[AI 采集] {result[:500]}", f"AI-{tk}", 1)
+                    messages.append({"role": "tool", "tool_call_id": c.get("id", ""),
+                                     "content": result})
+            else:
+                answer = "（已达到采集次数上限，先给到这里；需要更多可以再问我）"
+    except Exception as e:
+        run_logger.error(f"[{room_code}] ai_qa failed: {e}")
+        INTERNAL_TOKENS.pop(internal, None)
+        return JSONResponse({"error": f"AI 调用失败：{e}"}, status_code=502)
+    finally:
+        INTERNAL_TOKENS.pop(internal, None)
+
+    try:
+        save_message(room_code, "user", question)
+        save_message(room_code, "ai", answer, "AI问答", 1)
+    except Exception:
+        pass
+    if used_tools:
+        try:
+            audit_add = ",".join(used_tools)
+            run_logger.info(f"[{room_code}] ai_qa 采集项: {audit_add}")
+        except Exception:
+            pass
+    return {"ok": True, "answer": answer, "model": OPENAI_MODEL,
+            "evidence_used": len(msgs), "tools_used": used_tools,
+            "max_tools": max_tools, "pending_tools": pending_tools}
 
 
 @app.post("/api/feedback")
@@ -1951,15 +2265,21 @@ def get_download_candidates(request: Request) -> list:
           → [主地址, 备用地址]
 
     返回示例：
-        ["http://192.168.1.100:8000"]
+        ["http://192.0.2.10:8000"]
         ["https://example.com", "https://example.com:8443"]
     """
     public_url = get_public_url(request).rstrip("/")
-    candidates = [public_url]
-    fb = get_fallback_url(public_url)
-    if fb:
-        candidates.append(fb)
-    return candidates
+    # 2026-10-19 修复：原来用 get_fallback_url（单值版），把 .env 里逗号分隔的
+    #   "https://host:8443,http://1.2.3.4:8000" 当成【一个】地址塞进候选，
+    #   结果降级时请求一个不存在的域名（实测 dial: lookup "host:8443,http" no such host），
+    #   等于所有下载/上传的多级降级长期失效。改用 build_url_chain（按逗号拆分）。
+    try:
+        chain = build_url_chain(public_url)
+    except Exception:
+        chain = [public_url]
+    if not chain:
+        chain = [public_url]
+    return chain
 
 
 def build_download_prefix_ps(candidates: list, url_path: str) -> str:
@@ -2074,8 +2394,14 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 @app.get("/")
 async def root(request: Request):
     """入口：未登录跳登录页，已登录跳工作台。"""
-    if not _require_user(request):
+    user = _require_user(request)
+    if not user:
         return RedirectResponse(url="/login")
+    role = (user.get("role") or "").lower()
+    if role in ("field", "cc"):
+        return RedirectResponse(url="/field")
+    if role == "expert":
+        return RedirectResponse(url="/expert")
     return RedirectResponse(url="/dashboard")
 
 
@@ -2091,6 +2417,153 @@ def _html_file(name: str, request: Request = None, no_cache: bool = True) -> HTM
     return HTMLResponse(f"<h1>Missing static/{name}</h1>")
 
 
+# ══════════════════════════════════════════════════════════════════
+# 常用网站导航（2026-10-20 新增 · 设计模块）
+#   数据存 data/links.json（本地磁盘，不入库）；管理员可增删改，
+#   所有角色可查看。页面只做跳转入口，不承载任何诊断数据。
+# ══════════════════════════════════════════════════════════════════
+LINKS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "links.json")
+
+LINK_DEFAULTS = {
+    "categories": ["AI 对话", "AI 编程", "AI 模型与工具"],
+    "links": [
+        {"id": "lnk0001", "category": "AI 对话", "name": "ChatGPT",
+         "desc": "OpenAI 通用对话助手，适合长文分析、代码解释", "url": "https://chat.openai.com", "hidden": False},
+        {"id": "lnk0002", "category": "AI 对话", "name": "Claude",
+         "desc": "Anthropic 对话助手，长文档阅读与总结较稳", "url": "https://claude.ai", "hidden": False},
+        {"id": "lnk0003", "category": "AI 对话", "name": "Gemini",
+         "desc": "Google 对话助手，可结合搜索结果作答", "url": "https://gemini.google.com", "hidden": False},
+        {"id": "lnk0004", "category": "AI 对话", "name": "DeepSeek",
+         "desc": "国产对话模型，中文表达与推理表现好", "url": "https://chat.deepseek.com", "hidden": False},
+        {"id": "lnk0005", "category": "AI 对话", "name": "Kimi",
+         "desc": "月之暗面对话助手，超长上下文文档处理", "url": "https://kimi.moonshot.cn", "hidden": False},
+        {"id": "lnk0006", "category": "AI 对话", "name": "通义千问",
+         "desc": "阿里对话助手，支持文档与图片理解", "url": "https://tongyi.aliyun.com", "hidden": False},
+        {"id": "lnk0007", "category": "AI 对话", "name": "豆包",
+         "desc": "字节对话助手，日常问答与文案润色", "url": "https://www.doubao.com", "hidden": False},
+        {"id": "lnk0008", "category": "AI 编程", "name": "GitHub Copilot",
+         "desc": "编辑器内代码补全与对话，支持 VS Code / JetBrains", "url": "https://github.com/features/copilot", "hidden": False},
+        {"id": "lnk0009", "category": "AI 编程", "name": "Cursor",
+         "desc": "AI 原生编辑器，整仓库理解与批量改代码", "url": "https://cursor.com", "hidden": False},
+        {"id": "lnk0010", "category": "AI 编程", "name": "通义灵码",
+         "desc": "阿里 AI 编码助手，国内网络直接可用", "url": "https://lingma.aliyun.com", "hidden": False},
+        {"id": "lnk0011", "category": "AI 模型与工具", "name": "Hugging Face",
+         "desc": "开源模型与数据集社区，查模型能力与许可证", "url": "https://huggingface.co", "hidden": False},
+        {"id": "lnk0012", "category": "AI 模型与工具", "name": "OpenRouter",
+         "desc": "多模型统一入口，一个 key 调各家模型", "url": "https://openrouter.ai", "hidden": False},
+        {"id": "lnk0013", "category": "AI 模型与工具", "name": "Ollama",
+         "desc": "本地跑开源模型，离线环境做验证", "url": "https://ollama.com", "hidden": False},
+        {"id": "lnk0014", "category": "AI 模型与工具", "name": "Perplexity",
+         "desc": "带来源引用的 AI 搜索，查资料出结论较快", "url": "https://www.perplexity.ai", "hidden": False},
+    ],
+}
+
+
+def _links_load() -> dict:
+    """读 data/links.json；缺失或损坏时用默认清单重建。"""
+    try:
+        if os.path.exists(LINKS_PATH):
+            with open(LINKS_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get("links"), list):
+                if not isinstance(data.get("categories"), list) or not data["categories"]:
+                    data["categories"] = list(LINK_DEFAULTS["categories"])
+                return data
+    except Exception:
+        pass
+    data = json.loads(json.dumps(LINK_DEFAULTS))
+    _links_save(data)
+    return data
+
+
+def _links_save(data: dict) -> None:
+    os.makedirs(os.path.dirname(LINKS_PATH), exist_ok=True)
+    tmp = LINKS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, LINKS_PATH)
+
+
+@app.get("/api/links")
+async def links_list(request: Request):
+    """常用网站清单（所有登录角色可读；管理员额外拿到隐藏项与编辑权）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    data = _links_load()
+    is_admin = (user.get("role") == "admin")
+    links = [l for l in data["links"] if is_admin or not l.get("hidden")]
+    return {"categories": data.get("categories", []), "links": links, "can_edit": is_admin}
+
+
+@app.post("/api/admin/links")
+async def admin_link_create(request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    body = await _safe_json(request)
+    name = (body.get("name") or "").strip()
+    url = (body.get("url") or "").strip()
+    if not name or not url:
+        return JSONResponse({"error": "名称与网址必填"}, status_code=400)
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return JSONResponse({"error": "网址需以 http:// 或 https:// 开头"}, status_code=400)
+    data = _links_load()
+    lid = "lnk" + secrets.token_hex(4)
+    data["links"].append({
+        "id": lid,
+        "category": (body.get("category") or data["categories"][0]).strip(),
+        "name": name,
+        "desc": (body.get("desc") or "").strip(),
+        "url": url,
+        "hidden": False,
+    })
+    _links_save(data)
+    return {"ok": True, "id": lid}
+
+
+@app.post("/api/admin/links/{lid}")
+async def admin_link_update(lid: str, request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    body = await _safe_json(request)
+    data = _links_load()
+    for l in data["links"]:
+        if l.get("id") != lid:
+            continue
+        if body.get("name") is not None:
+            l["name"] = (body.get("name") or "").strip()
+        if body.get("url") is not None:
+            url = (body.get("url") or "").strip()
+            if not (url.startswith("http://") or url.startswith("https://")):
+                return JSONResponse({"error": "网址需以 http:// 或 https:// 开头"}, status_code=400)
+            l["url"] = url
+        if body.get("desc") is not None:
+            l["desc"] = (body.get("desc") or "").strip()
+        if body.get("category") is not None:
+            l["category"] = (body.get("category") or "").strip()
+        if body.get("hidden") is not None:
+            l["hidden"] = bool(body.get("hidden"))
+        _links_save(data)
+        return {"ok": True}
+    return JSONResponse({"error": "未找到该网站"}, status_code=404)
+
+
+@app.delete("/api/admin/links/{lid}")
+async def admin_link_delete(lid: str, request: Request):
+    _u, err = _admin_required(request)
+    if err:
+        return err
+    data = _links_load()
+    before = len(data["links"])
+    data["links"] = [l for l in data["links"] if l.get("id") != lid]
+    if len(data["links"]) == before:
+        return JSONResponse({"error": "未找到该网站"}, status_code=404)
+    _links_save(data)
+    return {"ok": True}
+
+
 @app.get("/login")
 async def login_page(request: Request):
     return _html_file("login.html", request)
@@ -2101,15 +2574,17 @@ async def dashboard_page(request: Request):
     user = _require_user(request)
     if not user:
         return RedirectResponse(url="/login")
+    # 2026-10-22：渠道 / CC 工程师不再有工作台——直接送进现场作业台（含旧书签/外链）
+    if user.get("role") in ("field", "cc"):
+        return RedirectResponse(url="/field", status_code=303)
+    # 2026-10-28：二线工程师取消前置主页——旧书签/外链进 /dashboard 也直接送进二线作业台
+    if user.get("role") == "expert":
+        return RedirectResponse(url="/expert", status_code=303)
     resp = _html_file("dashboard.html", request)
-    # 上门工程师（field）：服务端裁剪掉不需要的块（首页/工单/密码/反馈/多余导航）
-    # ——HTML 里根本没有这些内容，杜绝"首帧闪现普通界面"
-    if user.get("role") == "field":
-        import re as _re
-        content = resp.body.decode("utf-8")
-        content = _re.sub(r"<!-- FIELD_HIDE_START -->.*?<!-- FIELD_HIDE_END -->", "", content, flags=_re.S)
-        # 注意：不能复用 resp.headers（Content-Length 是裁剪前的长度——会导致响应截断）
-        return HTMLResponse(content, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+    # 2026-10-20 调整：渠道工程师（field）现在也走「首页＝介绍 + 入口」，
+    #   所以不再裁剪 FIELD_HIDE 块（原来会把 page-home/修改密码/反馈整段删掉，
+    #   导致渠道工程师登录后看不到首页、导航也缺项）。
+    #   仅保留一句：不再对任何角色做服务端裁剪，页面内按角色用 JS 收敛。
     return resp
 
 
@@ -2127,6 +2602,756 @@ async def diag_page(request: Request):
     if not _require_user(request):
         return RedirectResponse(url="/login")
     return _html_file("diag.html", request)
+
+
+@app.get("/field")
+async def field_console(request: Request):
+    """现场作业台（Nexpert 作业框架 v0.3.5 · 演示版）。
+    只读展示用：与 /diag、/chat 并存，不改动既有流程；真接口在后续版本接入。"""
+    if not _require_user(request):
+        return RedirectResponse(url="/login")
+    return _html_file("console/field-console.html", request)
+
+
+@app.get("/expert")
+async def expert_console(request: Request):
+    """二线控制台：仅二线账号（expert）与管理员可访问，普通工程师/上门工程师跳回工作台。"""
+    user = _require_user(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if user.get("role") not in ("admin", "expert"):
+        return RedirectResponse(url="/dashboard?denied=expert")
+    return _html_file("console/expert-console.html", request)
+
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 产品资料库（2026-10-26 新增）
+#   · 页面 /library：左侧系列导航（工作站 / KT / CFC）+ 机型卡片 + 详情
+#   · 数据 data/library.json（data/ 已 gitignore，不入库）；首次启动自动生成骨架
+#   · 不含任何厂商品牌名，只用中性系列代号
+# ══════════════════════════════════════════════════════════════════════
+LIBRARY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "library.json")
+
+LIBRARY_DEFAULT = {
+    "categories": [
+        {"key": "ws", "name": "工作站",
+         "desc": "塔式 / 小型工作站机型资料",
+         "models": [
+             {"name": "塔式机型", "form": "塔式",
+              "desc": "标准塔式机身，扩展位与散热余量较大",
+              "specs": {"形态": "塔式", "处理器": "待补充", "内存": "待补充", "存储": "待补充"},
+              "highlights": ["资料待补充"], "notes": [], "docs": []},
+             {"name": "小型机型", "form": "小型",
+              "desc": "紧凑机身，适合工位空间受限场景",
+              "specs": {"形态": "小型", "处理器": "待补充", "内存": "待补充", "存储": "待补充"},
+              "highlights": ["资料待补充"], "notes": [], "docs": []},
+         ]},
+        {"key": "kt", "name": "KT",
+         "desc": "KT 系列机型资料",
+         "models": [
+             {"name": "塔式机型", "form": "塔式",
+              "desc": "KT 塔式机型",
+              "specs": {"形态": "塔式", "处理器": "待补充", "内存": "待补充", "存储": "待补充"},
+              "highlights": ["资料待补充"], "notes": [], "docs": []},
+         ]},
+        {"key": "cfc", "name": "CFC",
+         "desc": "CFC 系列机型资料",
+         "models": [
+             {"name": "塔式机型", "form": "塔式",
+              "desc": "CFC 塔式机型",
+              "specs": {"形态": "塔式", "处理器": "待补充", "内存": "待补充", "存储": "待补充"},
+              "highlights": ["资料待补充"], "notes": [], "docs": []},
+             {"name": "小型机型", "form": "小型",
+              "desc": "CFC 小型机型",
+              "specs": {"形态": "小型", "处理器": "待补充", "内存": "待补充", "存储": "待补充"},
+              "highlights": ["资料待补充"], "notes": [], "docs": []},
+         ]},
+    ]
+}
+
+
+def _library_load():
+    """读 data/library.json；不存在则按默认骨架生成。"""
+    try:
+        if not os.path.exists(LIBRARY_PATH):
+            os.makedirs(os.path.dirname(LIBRARY_PATH), exist_ok=True)
+            with open(LIBRARY_PATH, "w", encoding="utf-8") as f:
+                json.dump(LIBRARY_DEFAULT, f, ensure_ascii=False, indent=2)
+            run_logger.info("[library] 已生成默认骨架 data/library.json")
+            return LIBRARY_DEFAULT
+        with open(LIBRARY_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        run_logger.warning(f"[library] 读取失败：{e}")
+        return LIBRARY_DEFAULT
+
+
+@app.get("/library")
+async def library_page(request: Request):
+    """产品资料库页面（需登录）。"""
+    if not _require_user(request):
+        return RedirectResponse(url="/login")
+    return _html_file("console/library.html", request)
+
+
+@app.get("/api/library")
+async def api_library(request: Request):
+    """产品资料库数据（需登录）。"""
+    if not _require_user(request):
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    data = _library_load()
+    # 统计口径统一在这里给，前端不再自己算
+    cats = data.get("categories") or []
+    for c in cats:
+        c["count"] = len(c.get("models") or [])
+    return {"categories": cats, "total": sum(c["count"] for c in cats)}
+
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 作业项「初步结论」（2026-10-26 新增）
+#   逐步采集跑完后，按规则从各步真实输出里提取关键事实，给一句初步结论。
+#   规则不透支：只写输出里真有的东西；读不到就明确说"数据不足"。
+# ══════════════════════════════════════════════════════════════════════
+def _cnt(text, pat):
+    try:
+        return len(re.findall(pat, text or "", re.I))
+    except Exception:
+        return 0
+
+
+def _n_events(text):
+    """wevtutil /f:text 输出里的事件条数：优先数 Event[n]: 头，退而数「事件 ID」行。"""
+    if not text:
+        return 0
+    a = len(re.findall(r"Event\[\d+\]", text))
+    b = len(re.findall(r"事件 ID\s*[:：]", text))
+    return max(a, b)
+
+
+def _fail_step(outputs):
+    """统计明显失败（命令不存在 / 拒绝访问）的步骤数。"""
+    bad = 0
+    for v in (outputs or {}).values():
+        low = (v or "").lower()
+        if any(k in low for k in ("command not found", "不是内部或外部命令", "access is denied",
+                                  "拒绝访问", "无法识别", "no such file or directory")):
+            bad += 1
+    return bad
+
+
+def _conclude_bsod(o):
+    ev = o.get("190 天内蓝屏记录", "") or ""
+    dmp = o.get("Minidump 文件清单", "") or ""
+    whea = o.get("WHEA 硬件错误事件", "") or ""
+    kp41 = o.get("Kernel-Power 41 事件", "") or ""
+    mem = o.get("内存诊断记录", "") or ""
+    n_ev = _n_events(ev)
+    n_dmp = _cnt(dmp, r"\.dmp")
+    n_whea = _n_events(whea)
+    n_41 = _n_events(kp41)
+    # 错误码只取「检测错误」/BugCheck 后那一个，不把参数当码
+    codes = []
+    for pat in (r"检测错误\s*[:：]?\s*(0x[0-9a-fA-F]{6,16})", r"BugCheck\s*[:：]?\s*(0x[0-9a-fA-F]{6,16})"):
+        for c in re.findall(pat, ev):
+            if c.lower() not in [x.lower() for x in codes]:
+                codes.append(c)
+    codes = codes[:3]
+    facts = [{"k": "蓝屏记录", "v": (f"{n_ev} 条" if n_ev else "未检出")},
+             {"k": "转储文件", "v": (f"{n_dmp} 个" if n_dmp else "未检出")},
+             {"k": "硬件错误(WHEA)", "v": (f"{n_whea} 条" if n_whea else "未检出")},
+             {"k": "异常断电(41)", "v": (f"{n_41} 条" if n_41 else "未检出")}]
+    if codes:
+        facts.append({"k": "错误码", "v": "、".join(codes)})
+    if n_ev or n_dmp:
+        head = f"检出蓝屏痕迹：事件 {n_ev} 条、转储 {n_dmp} 个" + (f"，错误码 {'、'.join(codes)}" if codes else "")
+        return {"level": "warn", "headline": head, "facts": facts}
+    return {"level": "ok", "headline": "近期未检出蓝屏记录与转储文件", "facts": facts}
+
+
+def _conclude_disk(o):
+    pd = o.get("SMART 全量数据", "") or ""
+    sp = o.get("磁盘空间占用", "") or ""
+    ntfs = o.get("文件系统错误记录", "") or ""
+    rel = o.get("磁盘可靠性计数器", "") or ""
+    bad = _cnt(pd, r"Unhealthy|Warning|Degraded")
+    n_ntfs = _n_events(ntfs)
+    free = re.findall(r"\b([A-Z]:)\s+[\d.]+\s+([\d.]+)", sp)
+    min_free = None
+    if free:
+        try:
+            min_free = min(free, key=lambda x: float(x[1]))
+        except Exception:
+            min_free = None
+    wear = re.findall(r"Wear\s*[:=]\s*(\d+)", rel)
+    facts = [{"k": "磁盘健康", "v": ("异常 %d 块" % bad) if bad else "全部正常"},
+             {"k": "文件系统错误", "v": (f"{n_ntfs} 条" if n_ntfs else "未检出")}]
+    if min_free:
+        facts.append({"k": "可用空间最低", "v": f"{min_free[0]} 剩 {min_free[1]} GB"})
+    if wear:
+        facts.append({"k": "磨损度", "v": "、".join(wear[:3]) + " %"})
+    if bad or n_ntfs:
+        return {"level": "warn", "headline": "磁盘存在健康告警或文件系统错误记录，建议进一步核实",
+                "facts": facts}
+    return {"level": "ok", "headline": "磁盘健康状态正常，未检出文件系统错误", "facts": facts}
+
+
+def _conclude_thermal(o):
+    model = o.get("机器型号识别", "") or ""
+    temp = o.get("温度读数", "") or ""
+    fan = o.get("风扇与散热状态", "") or ""
+    thr = o.get("降频与温度事件", "") or ""
+    temps = [float(x) for x in re.findall(r"\b(\d{2,3}\.?\d?)\b", temp) if 20 <= float(x) <= 120]
+    tmax = max(temps) if temps else None
+    n_thr = _n_events(thr)
+    n_fan = _cnt(fan, r"OK|Normal|正常")
+    facts = [{"k": "温度读数", "v": (f"最高 {tmax:g} ℃" if tmax else "未取到")},
+             {"k": "降频事件", "v": (f"{n_thr} 条" if n_thr else "未检出")},
+             {"k": "风扇状态", "v": ("正常 %d 组" % n_fan) if n_fan else "未取到"}]
+    mdl = re.findall(r"Model\s*[:：]\s*(\S+)", model)
+    if mdl:
+        facts.insert(0, {"k": "机型", "v": mdl[0]})
+    if tmax is not None and tmax >= 90:
+        return {"level": "warn", "headline": f"检出高温，最高 {tmax:g} ℃，需关注散热", "facts": facts}
+    if n_thr:
+        return {"level": "warn", "headline": f"检出 {n_thr} 条降频/温度事件，建议检查散热与负载", "facts": facts}
+    if tmax is None:
+        return {"level": "nodata", "headline": "温度读数未取到（部分机型不开放 ACPI 温度接口）", "facts": facts}
+    return {"level": "ok", "headline": f"温度在正常范围，最高 {tmax:g} ℃", "facts": facts}
+
+
+def _conclude_reboot(o):
+    ev = o.get("异常关机与重启事件", "") or ""
+    boot = o.get("最近启动时间", "") or ""
+    n41 = len(re.findall(r"Event ID\s*[:：]\s*41\b|Event\[41\]", ev))
+    n6008 = len(re.findall(r"Event ID\s*[:：]\s*6008\b|Event\[6008\]", ev))
+    n1074 = len(re.findall(r"Event ID\s*[:：]\s*1074\b|Event\[1074\]", ev))
+    bt = re.findall(r"(\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2})", boot)
+    facts = [{"k": "异常断电(41)", "v": (f"{n41} 条" if n41 else "未检出")},
+             {"k": "意外关机(6008)", "v": (f"{n6008} 条" if n6008 else "未检出")},
+             {"k": "计划外重启(1074)", "v": (f"{n1074} 条" if n1074 else "未检出")}]
+    if bt:
+        facts.append({"k": "最近启动", "v": bt[0]})
+    if n41 or n6008:
+        return {"level": "warn", "headline": "检出异常关机记录，建议核实供电与内存", "facts": facts}
+    return {"level": "ok", "headline": "未检出异常关机记录", "facts": facts}
+
+
+def _conclude_startup(o):
+    reg = o.get("注册表启动项", "") or ""
+    bt = o.get("启动耗时（BootTime）", "") or ""
+    n = _cnt(reg, r"^(?!Name).+\s{2,}") or len([x for x in reg.splitlines() if x.strip()]) - 1
+    n = max(n, 0)
+    ms = re.findall(r"(\d{4,6})\s*(?:ms)?\b", bt)
+    facts = [{"k": "启动项", "v": f"{n} 项" if n else "未取到"}]
+    if ms:
+        facts.append({"k": "启动耗时", "v": f"{int(ms[0]) / 1000:.1f} 秒"})
+    if n > 12:
+        return {"level": "warn", "headline": f"启动项偏多（{n} 项），可能拖慢开机", "facts": facts}
+    return {"level": "ok", "headline": "启动项数量正常", "facts": facts}
+
+
+def _conclude_system(o):
+    osv = o.get("系统版本与补丁", "") or ""
+    act = o.get("激活状态", "") or ""
+    tpm = o.get("TPM / BitLocker 状态", "") or ""
+    err = o.get("系统严重错误日志", "") or ""
+    n_err = _n_events(err)
+    cap = re.findall(r"Caption\s*[:：]\s*(.+)", osv)
+    facts = [{"k": "系统", "v": (cap[0].strip()[:40] if cap else "未取到")},
+             {"k": "激活状态", "v": ("已激活" if re.search(r"LicenseStatus\s*[:：]\s*1\b|已激活", act)
+                                    else ("未激活" if act.strip() else "未取到"))},
+             {"k": "严重错误", "v": (f"{n_err} 条" if n_err else "未检出")}]
+    if "IsEnabled_InitialValue" in tpm:
+        facts.append({"k": "TPM", "v": "存在" if re.search(r"True", tpm) else "未启用"})
+    if n_err >= 5:
+        return {"level": "warn", "headline": f"检出 {n_err} 条系统严重错误，建议逐条核实", "facts": facts}
+    return {"level": "ok", "headline": "系统状态正常，未检出大量严重错误", "facts": facts}
+
+
+ACTION_CONCLUDERS = {
+    "bsod": _conclude_bsod,
+    "disk": _conclude_disk,
+    "thermal": _conclude_thermal,
+    "reboot": _conclude_reboot,
+    "startup": _conclude_startup,
+    "system": _conclude_system,
+}
+
+
+@app.post("/api/action/conclude")
+async def action_conclude(request: Request):
+    """根据逐步采集的真实输出，生成初步结论（规则提取，不调模型）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    action_key = str(body.get("action_key", ""))
+    outputs = body.get("outputs") or {}
+    if not isinstance(outputs, dict):
+        outputs = {}
+    bad = _fail_step(outputs)
+    fn = ACTION_CONCLUDERS.get(action_key)
+    if not fn:
+        return {"action_key": action_key, "level": "nodata",
+                "headline": "该作业项暂未配置初步结论规则，请看「执行结果」中的原始输出",
+                "facts": [], "failed_steps": bad}
+    try:
+        out = fn(outputs)
+    except Exception as e:
+        run_logger.warning(f"[conclude] {action_key} 规则异常：{e}")
+        out = {"level": "nodata", "headline": "结论生成失败，请看原始输出", "facts": []}
+    out["action_key"] = action_key
+    out["failed_steps"] = bad
+    out["steps"] = len(outputs)
+    if bad and bad >= max(1, len(outputs) // 2):
+        out["level"] = "nodata"
+        out["headline"] = f"{bad}/{len(outputs)} 步采集失败，数据不足，无法给出结论"
+    return out
+
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 整机档案（2026-10-27 骨架版）
+#   左栏固定区展示：保修信息 / 出厂配置 / 历史维修单，按 SN 查询。
+#   接口暂不对接——三项分别由 .env 配置，未配置即返回 configured=false，
+#   前端显示「未接入」，不影响其它功能。接入时只需按下面的契约返回 JSON。
+#
+#   契约（每项统一结构）：
+#     { "configured": true/false, "ok": true/false, "error": "…",
+#       "fetched_at": "2026-10-27 16:00:00", "cache": true/false,
+#       "summary": "一句话摘要（左栏直接显示）",
+#       "detail": { …自由结构，弹窗里按 key/value 渲染… } }
+# ══════════════════════════════════════════════════════════════════════
+PROFILE_SOURCES = {
+    "warranty": {
+        "url_env": "PROFILE_WARRANTY_URL",
+        "token_env": "PROFILE_WARRANTY_TOKEN",
+        "label": "保修信息",
+        "ttl": 86400,
+    },
+    "factory": {
+        "url_env": "PROFILE_CONFIG_URL",
+        "token_env": "PROFILE_CONFIG_TOKEN",
+        "label": "出厂配置",
+        "ttl": 86400,
+    },
+    "repair": {
+        "url_env": "PROFILE_REPAIR_URL",
+        "token_env": "PROFILE_REPAIR_TOKEN",
+        "label": "历史维修记录",
+        "ttl": 3600,
+    },
+}
+_PROFILE_CACHE = {}
+
+
+def _profile_empty(kind: str, sn: str, why: str = "") -> dict:
+    cfg = PROFILE_SOURCES[kind]
+    url = os.getenv(cfg["url_env"], "").strip()
+    out = {"configured": bool(url), "ok": False, "error": "", "fetched_at": "",
+           "cache": False, "summary": "", "detail": {}, "sn": sn,
+           "label": cfg["label"], "url_env": cfg["url_env"]}
+    if not sn:
+        out["summary"] = "未填 SN，无法查询"
+        return out
+    if not url:
+        out["summary"] = "未接入内部查询接口"
+        out["hint"] = f"在 .env 配置 {cfg['url_env']}（可选 token: {cfg['token_env']}）后自动生效"
+        return out
+    out["summary"] = why or "尚未查询"
+    return out
+
+
+async def _profile_fetch(kind: str, sn: str) -> dict:
+    """按契约向配置的接口取数据；未配置/失败都返回结构化结果，不抛异常。"""
+    cfg = PROFILE_SOURCES[kind]
+    url = os.getenv(cfg["url_env"], "").strip()
+    if not url:
+        return _profile_empty(kind, sn)
+    if not sn:
+        return _profile_empty(kind, sn)
+    ck = f"{kind}:{sn}"
+    hit = _PROFILE_CACHE.get(ck)
+    now = time.time()
+    if hit and now - hit["at"] < cfg["ttl"]:
+        d = dict(hit["data"])
+        d["cache"] = True
+        return d
+    token = os.getenv(cfg["token_env"], "").strip()
+    try:
+        headers = {"Accept": "application/json"}
+        if token:
+            headers["Authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+            resp = await client.get(url, params={"sn": sn}, headers=headers)
+        if resp.status_code >= 400:
+            return {**_profile_empty(kind, sn, f"接口返回 HTTP {resp.status_code}"), "ok": False,
+                    "configured": True, "error": f"HTTP {resp.status_code}"}
+        js = resp.json()
+        # 契约：{summary, detail} ；若对方返回原始结构，直接塞 detail，summary 由前端兜底
+        summary = str(js.get("summary") or "").strip()
+        detail = js.get("detail") if isinstance(js.get("detail"), dict) else js
+        out = {"configured": True, "ok": True, "error": "", "cache": False,
+               "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+               "summary": summary or "已获取", "detail": detail or {},
+               "sn": sn, "label": cfg["label"], "url_env": cfg["url_env"]}
+        _PROFILE_CACHE[ck] = {"at": now, "data": out}
+        return out
+    except Exception as e:
+        run_logger.warning(f"[profile] {kind} 查询失败：{e}")
+        return {**_profile_empty(kind, sn, f"查询失败：{e}"), "configured": True, "error": str(e)}
+
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 房间文件通道（2026-10-27）：现场 ↔ 二线 双向传文件
+#   · 分块上传（单文件 ≤500MB）→ commit 合并入库 → WS 广播 file_added
+#   · 下载/预览走鉴权路由，不放裸静态目录
+#   · 结单后文件标记 deleted_at，24 小时缓冲后自动清理磁盘
+# ══════════════════════════════════════════════════════════════════════
+ROOM_FILES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "room_files")
+ROOM_FILE_MAX = 500 * 1024 * 1024          # 单文件上限 500MB
+ROOM_FILE_TTL_AFTER_CLOSE = 24 * 3600      # 结单后保留 24 小时
+_ROOM_FILE_PARTS = {}                      # fid -> {"parts": [paths], "size": n}
+
+
+def _rf_dir(room_code: str) -> str:
+    d = os.path.join(ROOM_FILES_DIR, room_code.upper())
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _rf_perm(room_code: str, user: dict) -> tuple:
+    """返回 (allowed, role, reason)。现场=自己房间；二线=升级给自己的房间；admin 全通。"""
+    role = (user or {}).get("role", "")
+    uname = (user or {}).get("username", "")
+    if role == "admin":
+        return True, role, ""
+    room_code = room_code.upper()
+    if role in ("field", "cc"):
+        try:
+            conn = _db_connect()
+            row = conn.execute("SELECT engineer_username FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+            conn.close()
+        except Exception:
+            row = None
+        owner = (row["engineer_username"] if row else "") or ""
+        if owner and owner != uname:
+            return False, role, "无权访问该房间"
+        return True, role, ""
+    if role == "expert":
+        # 2026-10-28：二线现场流程是「拿房间号加入现成房间」，未必走过"升级二线"，
+        #   因此加入过（room_members）/ 本人创建 / 已升级给他，三者任一都放行。
+        try:
+            if can_access_room(user, room_code):
+                return True, role, ""
+        except Exception:
+            pass
+        return False, role, "该房间未升级给你，也未加入该房间"
+    return False, role, "无权限"
+
+
+def _rf_row_out(row) -> dict:
+    return {
+        "id": row["id"], "room_code": row["room_code"], "filename": row["filename"],
+        "size": row["size"], "mime": row["mime"], "uploader": row["uploader"],
+        "uploader_role": row["uploader_role"], "note": row["note"], "sha256": row["sha256"],
+        "created_at": row["created_at"], "deleted": bool(row["deleted_at"]),
+    }
+
+
+@app.post("/api/room/file/chunk")
+async def room_file_chunk(request: Request, file: UploadFile = File(...)):
+    """接收一个分块：query 带 room / fid / seq。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = str(request.query_params.get("room", "")).upper()
+    fid = str(request.query_params.get("fid", ""))
+    seq = int(request.query_params.get("seq", "0") or 0)
+    ok, role, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    if not fid:
+        return JSONResponse({"error": "缺少 fid"}, status_code=400)
+    data = await file.read()
+    if not data:
+        return JSONResponse({"error": "空分块"}, status_code=400)
+    d = _rf_dir(room_code)
+    part = os.path.join(d, f".{fid}.part{seq:05d}")
+    with open(part, "wb") as f:
+        f.write(data)
+    st = _ROOM_FILE_PARTS.setdefault(fid, {"parts": [], "size": 0, "room": room_code, "user": user["username"]})
+    st["parts"].append(part)
+    st["size"] += len(data)
+    if st["size"] > ROOM_FILE_MAX:
+        for x in st["parts"]:
+            try: os.remove(x)
+            except Exception: pass
+        _ROOM_FILE_PARTS.pop(fid, None)
+        return JSONResponse({"error": "超过单文件 500MB 上限"}, status_code=413)
+    return {"ok": True, "received": len(data), "accumulated": st["size"]}
+
+
+@app.post("/api/room/file/commit")
+async def room_file_commit(request: Request):
+    """合并分块 → 入库 → WS 广播。body: {room_code, fid, filename, note}"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    fid = str(body.get("fid", ""))
+    filename = re.sub(r"[\x00-\x1f/\\]", "_", str(body.get("filename", "") or "file"))[:160] or "file"
+    note = str(body.get("note", "") or "")[:300]
+    ok, role, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    st = _ROOM_FILE_PARTS.get(fid)
+    if not st or not st["parts"]:
+        return JSONResponse({"error": "没有找到上传分块"}, status_code=400)
+    rid = "f" + uuid.uuid4().hex[:12]
+    stored = rid + "_" + re.sub(r"[^\w.\-]+", "_", filename)[:120]
+    d = _rf_dir(room_code)
+    final = os.path.join(d, stored)
+    h = hashlib.sha256()
+    size = 0
+    try:
+        with open(final, "wb") as out:
+            for part in sorted(st["parts"]):
+                with open(part, "rb") as f:
+                    while True:
+                        chunk = f.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        h.update(chunk)
+                        size += len(chunk)
+        for part in st["parts"]:
+            try: os.remove(part)
+            except Exception: pass
+        _ROOM_FILE_PARTS.pop(fid, None)
+    except Exception as e:
+        run_logger.error(f"[{room_code}] room file commit 失败：{e}")
+        return JSONResponse({"error": f"合并失败: {e}"}, status_code=500)
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    conn = _db_connect()
+    conn.execute("""INSERT INTO room_files
+        (id, room_code, filename, stored_name, size, mime, uploader, uploader_role, note, sha256, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))""",
+                 (rid, room_code, filename, stored, size, mime, user["username"], role, note, h.hexdigest()))
+    conn.commit()
+    conn.close()
+    save_message(room_code, "status", f"文件已上传：{filename}（{size/1048576:.1f} MB，{user['username']}）", "room_file", 1)
+    # 广播给房间内的浏览器（对方立刻看到）
+    room = rooms.get(room_code)
+    if room and room.browser_ws:
+        try:
+            await room.browser_ws.send_json({"type": "file_added", "file": {
+                "id": rid, "filename": filename, "size": size,
+                "uploader": user["username"], "uploader_role": role}})
+        except Exception:
+            pass
+    run_logger.info(f"[{room_code}] 文件入库 {rid} {filename} {size}B by {user['username']}")
+    return {"ok": True, "id": rid, "filename": filename, "size": size,
+            "sha256": h.hexdigest(), "mime": mime}
+
+
+@app.get("/api/room/files")
+async def room_files_list(room_code: str = "", request: Request = None):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = str(room_code or "").upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    ok, role, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    conn = _db_connect()
+    rows = conn.execute(
+        "SELECT * FROM room_files WHERE room_code=? AND deleted_at IS NULL ORDER BY created_at DESC",
+        (room_code,)).fetchall()
+    conn.close()
+    return {"room_code": room_code, "files": [_rf_row_out(r) for r in rows], "role": role,
+            "max_size": ROOM_FILE_MAX}
+
+
+@app.get("/api/room/file/{file_id}")
+async def room_file_download(file_id: str, request: Request, inline: int = 0):
+    user = _require_user(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    conn = _db_connect()
+    row = conn.execute("SELECT * FROM room_files WHERE id=?", (file_id,)).fetchone()
+    conn.close()
+    if not row:
+        return JSONResponse({"error": "文件不存在"}, status_code=404)
+    ok, role, why = _rf_perm(row["room_code"], user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    path = os.path.join(ROOM_FILES_DIR, row["room_code"].upper(), row["stored_name"])
+    if not os.path.exists(path):
+        return JSONResponse({"error": "文件已被清理"}, status_code=410)
+    fn = row["filename"].replace('"', "")
+    disp = "inline" if inline else "attachment"
+    return FileResponse(path, media_type=row["mime"] or "application/octet-stream",
+                        headers={"Content-Disposition": f'{disp}; filename*=UTF-8\'\'{quote(fn)}'})
+
+
+@app.post("/api/room/file/{file_id}/delete")
+async def room_file_delete(file_id: str, request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    conn = _db_connect()
+    row = conn.execute("SELECT * FROM room_files WHERE id=?", (file_id,)).fetchone()
+    if not row:
+        conn.close()
+        return JSONResponse({"error": "文件不存在"}, status_code=404)
+    ok, role, why = _rf_perm(row["room_code"], user)
+    if not ok:
+        conn.close()
+        return JSONResponse({"error": why}, status_code=403)
+    if role != "admin" and row["uploader"] != user["username"]:
+        conn.close()
+        return JSONResponse({"error": "只能删除自己上传的文件"}, status_code=403)
+    conn.execute("UPDATE room_files SET deleted_at=datetime('now') WHERE id=?", (file_id,))
+    conn.commit()
+    conn.close()
+    path = os.path.join(ROOM_FILES_DIR, row["room_code"].upper(), row["stored_name"])
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as e:
+        run_logger.warning(f"[file] 删除磁盘失败 {path}: {e}")
+    save_message(row["room_code"], "status",
+                 f"文件已删除：{row['filename']}（{user['username']}）", "room_file", 1)
+    return {"ok": True}
+
+
+@app.get("/api/room/files/zip")
+async def room_files_zip(room_code: str = "", request: Request = None):
+    """把房间内全部文件打成一个 zip 下载（结单前/结单时用）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = str(room_code or "").upper()
+    ok, role, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    conn = _db_connect()
+    rows = conn.execute(
+        "SELECT * FROM room_files WHERE room_code=? AND deleted_at IS NULL ORDER BY created_at",
+        (room_code,)).fetchall()
+    conn.close()
+    if not rows:
+        return JSONResponse({"error": "该房间没有文件"}, status_code=404)
+    buf = io.BytesIO()
+    manifest = ["# 房间 %s 文件清单" % room_code, ""]
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for r in rows:
+            path = os.path.join(ROOM_FILES_DIR, room_code, r["stored_name"])
+            if os.path.exists(path):
+                z.write(path, arcname=r["filename"])
+            manifest.append("\t".join([r["filename"], f'{r["size"]/1048576:.2f} MB',
+                                       r["uploader"] or "", r["created_at"] or "", r["sha256"] or ""]))
+        z.writestr("文件清单.txt", "\n".join(manifest) + "\n")
+    buf.seek(0)
+    fname = f"room-{room_code}-files.zip"
+    return Response(content=buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+async def _room_files_purge_loop():
+    """结单后超过 24 小时的文件：删磁盘 + 标记。每小时扫一次。"""
+    while True:
+        try:
+            conn = _db_connect()
+            rows = conn.execute(
+                "SELECT * FROM room_files WHERE deleted_at IS NOT NULL").fetchall()
+            conn.close()
+            now = time.time()
+            for r in rows:
+                try:
+                    ts = datetime.strptime(r["deleted_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+                except Exception:
+                    continue
+                if now - ts < ROOM_FILE_TTL_AFTER_CLOSE:
+                    continue
+                path = os.path.join(ROOM_FILES_DIR, r["room_code"].upper(), r["stored_name"])
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+        except Exception as e:
+            run_logger.warning(f"[file] 清理任务异常：{e}")
+        await asyncio.sleep(3600)
+
+
+@app.post("/api/room/file/purge_on_close")
+async def room_file_purge_on_close(request: Request):
+    """结单时调用：把该房间所有文件标记为待清理（24 小时后删盘）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    room_code = str(body.get("room_code", "")).upper()
+    ok, role, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    conn = _db_connect()
+    n = conn.execute("SELECT COUNT(*) c FROM room_files WHERE room_code=? AND deleted_at IS NULL",
+                     (room_code,)).fetchone()["c"]
+    conn.execute("UPDATE room_files SET deleted_at=datetime('now') WHERE room_code=? AND deleted_at IS NULL",
+                 (room_code,))
+    conn.commit()
+    conn.close()
+    run_logger.info(f"[{room_code}] 结单：{n} 个文件进入 24 小时清理倒计时")
+    return {"ok": True, "marked": n, "ttl_hours": ROOM_FILE_TTL_AFTER_CLOSE // 3600}
+
+
+@app.get("/api/machine_profile")
+async def api_machine_profile(room_code: str = "", request: Request = None):
+    """整机档案：按房间的 SN 查保修 / 出厂配置 / 历史维修单（骨架版，接口可配）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    code = str(room_code or "").upper().strip()
+    sn = ""
+    if code:
+        room = rooms.get(code)
+        if room:
+            sn = getattr(room, "sn", "") or ""
+        if not sn:
+            try:
+                conn = _db_connect()
+                row = conn.execute("SELECT sn FROM rooms WHERE room_code=?", (code,)).fetchone()
+                conn.close()
+                sn = (row["sn"] if row else "") or ""
+            except Exception:
+                sn = ""
+    sn = str(sn or "").strip()
+    parts = {}
+    for kind in PROFILE_SOURCES:
+        try:
+            parts[kind] = await _profile_fetch(kind, sn)
+        except Exception as e:
+            parts[kind] = {**_profile_empty(kind, sn, f"异常：{e}"), "error": str(e)}
+    return {"sn": sn, "room_code": code, "sources": parts,
+            "any_configured": any(v.get("configured") for v in parts.values())}
 
 
 @app.get("/api/quick_diagnoses")
@@ -2474,8 +3699,12 @@ async def my_rooms(request: Request):
             "days_left": room_days_left(d.get("expires_at")),
             "status": d.get("status") or "active",
             "browser_online": browser_online,
-            "platform": (room.machine or {}).get("platform", "") if room else (d.get("os") or ""),
-            "status": "连接中" if bridge_online else "已断开",
+            # platform 用房间登记 os，桥接器上报后以实际上报为准
+            "os": d.get("os") or "",
+            "platform": ((room.machine or {}).get("platform") if room else "") or (d.get("os") or ""),
+            # 注意：这里原来又写了一次 "status"，把上面的真实状态（active/archived/escalated）覆盖成
+            # "连接中/已断开"，导致前端判断"已归档房间"永远失效。连接态单独用 connect_status 表达。
+            "connect_status": "连接中" if bridge_online else "已断开",
         })
     return {"rooms": result}
 
@@ -2520,6 +3749,32 @@ async def join_room(request: Request):
 # ============================================================
 # Chat history API
 # ============================================================
+def can_access_room(user: dict, room_code: str) -> bool:
+    """房间访问权：admin / 房间创建者 / 加入过（room_members）/ 升级给他（escalated_to）。
+    2026-10-20：二线可加入现成房间诊断，故加入者也能取连接信息（.bat / 命令）。"""
+    if not user:
+        return False
+    if user.get("role") == "admin":
+        return True
+    me = user.get("username", "")
+    try:
+        conn = _db_connect()
+        row = conn.execute(
+            "SELECT engineer_username, escalated_to FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
+        if not row:
+            conn.close()
+            return False
+        if (row["engineer_username"] or "") == me or (row["escalated_to"] or "") == me:
+            conn.close()
+            return True
+        m = conn.execute("SELECT 1 FROM room_members WHERE room_code = ? AND username = ?",
+                         (room_code, me)).fetchone()
+        conn.close()
+        return bool(m)
+    except Exception:
+        return False
+
+
 @app.get("/api/room_connect/{room_code}")
 async def room_connect(room_code: str, request: Request):
     """一键连接信息：返回该房间预填的三种连接方式 + 房间标记信息。
@@ -2538,7 +3793,7 @@ async def room_connect(room_code: str, request: Request):
         row = None
     if not row:
         return JSONResponse({"error": "房间不存在"}, status_code=404)
-    if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+    if not can_access_room(user, room_code):
         return JSONResponse({"error": "无权访问该房间"}, status_code=403)
 
     public_url = get_public_url(request)
@@ -2570,46 +3825,14 @@ async def room_connect(room_code: str, request: Request):
     # 2026-09-25 升级：加入【自动提权】（桥接器读 BIOS/驱动等需要管理员权限）。
     # 双击后若当前非管理员，脚本会用 UAC 自我提权重启；随后自动下载 exe 并带房间信息连接。
     # 客户全程只需：双击 → 点"是"（UAC）——无需手输房间码。
-    bat = (
-        "@echo off\r\n"
-        "chcp 65001 >nul\r\n"
-        "title 云端AI远程运维助手 - 一键连接\r\n"
-        "cd /d \"%~dp0\"\r\n"
-        # ── 自动提权 ──
-        "net session >nul 2>&1\r\n"
-        "if %errorlevel% neq 0 (\r\n"
-        "    echo 正在请求管理员权限（UAC 弹窗请选择「是」）...\r\n"
-        "    powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
-        "    exit /b\r\n"
-        ")\r\n"
-        "echo ==============================================\r\n"
-        "echo   云端AI远程运维助手 · 一键连接\r\n"
-        "echo ==============================================\r\n"
-        "echo   若出现「Windows 已保护你的电脑」提示：\r\n"
-        "echo     点「更多信息」→「仍要运行」即可。\r\n"
-        "echo.\r\n"
-        "echo [1/3] 正在检测网络...\r\n"
-        + _bat_url_cascade(_chain)
-        + "echo [1/3] 服务器: %SRV%\r\n"
-        "echo [2/3] 正在下载桥接器（约 5MB）...\r\n"
-        "curl -sL -o \"clouddiag-bridge-win64.exe\" \"%SRV%/static/clouddiag-bridge-win64.exe\"\r\n"
-        "if errorlevel 1 (\r\n"
-        "    echo 下载失败：请确认本机能访问服务器后重试。\r\n"
-        "    pause\r\n"
-        "    exit /b 1\r\n"
-        ")\r\n"
-        "echo [3/3] 正在连接房间 " + room_code + " ...\r\n"
-        "echo.\r\n"
-        "\"clouddiag-bridge-win64.exe\" -server %WSRV% -room " + room_code + " -token " + token + "\r\n"
-        "echo.\r\n"
-        "echo ==============================================\r\n"
-        "echo   连接已结束（诊断完成或连接断开）。\r\n"
-        "echo   如需彻底清理桥接器，请下载并运行卸载脚本：\r\n"
-        "echo     %SRV%/static/uninstall-windows.bat\r\n"
-        "echo   （也可在诊断台「连接你的电脑」面板中找到卸载入口）\r\n"
-        "echo ==============================================\r\n"
-        "pause\r\n"
-    )
+    # 2026-10-22：.bat 改为「只做提权 + 引导」，真正连接逻辑统一走 PowerShell 脚本
+    #   （即早期的一键命令：多地址探测 → 设 BRIDGE_SERVER/ROOM/TOKEN → iex 拉 bridge.ps1）。
+    #   好处：bat 不再依赖 curl 下 exe；PS 桥接器是无文件实现，杀软误报更少，也便于现场排查。
+    import base64 as _b64
+    _ps_inline = ps1_cmd                     # 与「PowerShell」页签里粘贴执行的是同一套命令
+    _ps_encoded = _b64.b64encode(_ps_inline.encode("utf-16-le")).decode("ascii")
+    bat_exe = _connect_bat_exe(room_code, token, _chain)
+    bat_ps = _connect_bat_ps(room_code, token, _chain)
     # 2026-10-13：多候选链（第一个可达的地址胜出；全不可达则用最后一个兜底）
     linux_cmd = (
         'U="' + _chain[-1] + '"; '
@@ -2629,9 +3852,16 @@ async def room_connect(room_code: str, request: Request):
         "expires_at": row["expires_at"] if "expires_at" in row.keys() else None,
         "days_left": room_days_left(row["expires_at"]) if "expires_at" in row.keys() else None,
         "status": row["status"] if "status" in row.keys() else "active",
+        # 2026-10-20：把桥接器在线状态并入连接信息——二线台/现场台都靠它刷新，
+        #   不再依赖浏览器 WS 是否已建立（此前二线台状态卡在「等待桥接器」就是缺这个）
+        "bridge": {
+            "connected": bool(rooms.get(room_code) and rooms[room_code].bridge_ws is not None),
+            "version": ((rooms.get(room_code).machine or {}).get("bridge_version") if rooms.get(room_code) else "") or "",
+        },
         "connect": {
             "powershell": ps1_cmd,
-            "windows_bat": bat,
+            "windows_bat": bat_exe,        # exe 版（默认）
+            "windows_bat_ps": bat_ps,      # PowerShell 版
             "linux": linux_cmd,
         },
         "downloads": {
@@ -2641,14 +3871,108 @@ async def room_connect(room_code: str, request: Request):
             # 2026-09-25 新增：Windows 一键连接 .bat（双击自动下载 exe 并带上房间码/令牌，
             # 客户无需手动输入房间码）。前端「一键连接」页签直接用这个地址。
             "bat": public_url + "/api/room_bat/" + room_code,
+            "bat_ps": public_url + "/api/room_bat_ps/" + room_code,
+            # 2026-10-22：与 PS 版 .bat 内容一致的 PowerShell 脚本（可直接下载执行/查看）
+            "connect_ps1": public_url + "/api/room_ps1/" + room_code,
         },
     }
 
 
-@app.get("/api/room_bat/{room_code}")
-async def room_bat(room_code: str, request: Request):
-    """Windows 一键连接 .bat：单个文件，双击后自动下载 exe 并连接房间。
-    仅房间所属工程师或管理员可获取。"""
+# ═══════════════════════════════════════════════════════════════════════
+# 两种 Windows 一键连接 .bat（2026-10-22 定稿：两版并存，由用户选）
+#   ① _connect_bat_exe —— 下载 exe 桥接器并运行（原版；支持 1MB 分块上传）
+#   ② _connect_bat_ps  —— 全程 PowerShell 桥接器（无 exe；老杀软环境更友好，
+#                          但上传为单次 POST，大日志包可能受链路影响）
+# 两者都自动 UAC 提权、自动探测可用服务器地址、自带房间码与令牌。
+# ═══════════════════════════════════════════════════════════════════════
+def _connect_bat_exe(room_code: str, token: str, chain: list) -> str:
+    return (
+        "@echo off\r\n"
+        # 2026-10-22：中文 Windows 默认代码页是 936；bat 内容用 GBK 下发，
+        #   这里显式切到 936，避免 cmd 按 UTF-8 解释 GBK 字节导致"乱码"。
+        "chcp 936 >nul\r\n"
+        "title Nexpert 一键连接\r\n"
+        "cd /d \"%~dp0\"\r\n"
+        # ── 自动提权 ──
+        "net session >nul 2>&1\r\n"
+        "if %errorlevel% neq 0 (\r\n"
+        "    echo 正在请求管理员权限（UAC 弹窗请选择「是」）...\r\n"
+        "    powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
+        "    exit /b\r\n"
+        ")\r\n"
+        "echo ==============================================\r\n"
+        "echo   Nexpert · 一键连接（exe 桥接器）\r\n"
+        "echo ==============================================\r\n"
+        "echo   若出现「Windows 已保护你的电脑」提示：\r\n"
+        "echo     点「更多信息」→「仍要运行」即可。\r\n"
+        "echo.\r\n"
+        "echo [1/3] 正在检测网络...\r\n"
+        + _bat_url_cascade(chain)
+        + "echo [1/3] 服务器: %SRV%\r\n"
+        "echo [2/3] 正在下载桥接器（约 5MB）...\r\n"
+        "curl -sL -o \"clouddiag-bridge-win64.exe\" \"%SRV%/static/clouddiag-bridge-win64.exe\"\r\n"
+        "if errorlevel 1 (\r\n"
+        "    echo 下载失败：请确认本机能访问服务器后重试。\r\n"
+        "    pause\r\n"
+        "    exit /b 1\r\n"
+        ")\r\n"
+        "echo [3/3] 正在连接房间 " + room_code + " ...\r\n"
+        "echo.\r\n"
+        "\"clouddiag-bridge-win64.exe\" -server %WSRV% -room " + room_code + " -token " + token + "\r\n"
+        "echo.\r\n"
+        "echo ==============================================\r\n"
+        "echo   连接已结束（诊断完成或连接断开）。\r\n"
+        "echo   如需彻底清理桥接器，请下载并运行卸载脚本：\r\n"
+        "echo     %SRV%/static/uninstall-windows.bat\r\n"
+        "echo ==============================================\r\n"
+        "pause\r\n"
+    )
+
+
+def _connect_bat_ps(room_code: str, token: str, chain: list) -> str:
+    import base64 as _b64
+    ps_cmd = (
+        '$us=@(' + ",".join('"' + u + '"' for u in chain) + '); $u=$null; '
+        + 'foreach($x in $us){ curl.exe -skf --max-time 5 "$x/api/health" -o NUL 2>$null; if ($LASTEXITCODE -eq 0) { $u=$x; break } }; '
+        + 'if (-not $u) { $u=$us[-1] }; '
+        + '$env:BRIDGE_SERVER=($u -replace "^http","ws"); $env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; '
+        + 'iex (iwr "$u/static/bridge.ps1" -UseBasicParsing).Content'
+    )
+    enc = _b64.b64encode(ps_cmd.encode("utf-16-le")).decode("ascii")
+    return (
+        "@echo off\r\n"
+        "chcp 936 >nul\r\n"
+        "title Nexpert 一键连接（PowerShell 桥接器）\r\n"
+        "cd /d \"%~dp0\"\r\n"
+        # ── 自动提权：PowerShell 桥接器读 BIOS/驱动等需要管理员权限 ──
+        "net session >nul 2>&1\r\n"
+        "if %errorlevel% neq 0 (\r\n"
+        "    echo 正在请求管理员权限（UAC 弹窗请选择「是」）...\r\n"
+        "    powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
+        "    exit /b\r\n"
+        ")\r\n"
+        "echo ==============================================\r\n"
+        "echo   Nexpert · 一键连接（PowerShell 桥接器）\r\n"
+        "echo ==============================================\r\n"
+        "echo   房间 " + room_code + "\r\n"
+        "echo   若出现「Windows 已保护你的电脑」提示：\r\n"
+        "echo     点「更多信息」→「仍要运行」即可。\r\n"
+        "echo.\r\n"
+        # ── 交给 PowerShell：探测地址 → 设房间/令牌 → 拉起 bridge.ps1 ──
+        "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand " + enc + "\r\n"
+        "echo.\r\n"
+        "echo ==============================================\r\n"
+        "echo   连接已结束（诊断完成或连接断开）。\r\n"
+        "echo   需要重新连接：再次双击本文件即可。\r\n"
+        "echo ==============================================\r\n"
+        "pause\r\n"
+    )
+
+
+@app.get("/api/room_bat_ps/{room_code}")
+async def room_bat_ps(room_code: str, request: Request):
+    """Windows 一键连接 .bat（PowerShell 版）：双击→UAC 提权→全程 PowerShell 桥接器连接，
+    不下载 exe。适合杀软拦截 exe 的环境；大日志包上传能力略弱于 exe 版。"""
     user = _require_user(request)
     if not user:
         return JSONResponse({"error": "未登录"}, status_code=401)
@@ -2661,7 +3985,80 @@ async def room_bat(room_code: str, request: Request):
         row = None
     if not row:
         return JSONResponse({"error": "房间不存在"}, status_code=404)
-    if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+    if not can_access_room(user, room_code):
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+    public_url = get_public_url(request)
+    chain = build_url_chain(public_url.rstrip("/")) or [public_url.rstrip("/")]
+    token = get_or_create_room_token(room_code)
+    bat = _connect_bat_ps(room_code, token, chain)
+    # 2026-10-22：以 GBK 字节下发，cmd 窗口中文不再乱码
+    return Response(content=bat.encode("gbk", "replace"), media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="connect-ps-{room_code}.bat"'})
+
+
+@app.get("/api/room_ps1/{room_code}")
+async def room_ps1(room_code: str, request: Request):
+    """Windows 一键连接 .ps1：与 .bat 内的 PowerShell 命令完全一致，
+    方便现场工程师查看/手工执行/排错（不依赖 exe，纯 PowerShell 桥接器）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT engineer_username FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    if not can_access_room(user, room_code):
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+
+    public_url = get_public_url(request)
+    chain = build_url_chain(public_url.rstrip("/")) or [public_url.rstrip("/")]
+    token = get_or_create_room_token(room_code)
+
+    urls = ",".join('"' + u + '"' for u in chain)
+    script = (
+        "# Nexpert 一键连接（PowerShell 桥接器）——房间 " + room_code + "\n"
+        "# 自动探测可用服务器地址 → 设置房间与令牌 → 加载 bridge.ps1 连接\n"
+        "$ErrorActionPreference = 'Continue'\n"
+        "$us = @(" + urls + ")\n"
+        "$u = $null\n"
+        "foreach ($x in $us) {\n"
+        "    try { curl.exe -skf --max-time 5 \"$x/api/health\" -o NUL 2>$null } catch { }\n"
+        "    if ($LASTEXITCODE -eq 0) { $u = $x; break }\n"
+        "}\n"
+        "if (-not $u) { $u = $us[-1] }\n"
+        "Write-Host \"[Nexpert] 服务器: $u\" -ForegroundColor Cyan\n"
+        "$env:BRIDGE_SERVER = ($u -replace \"^http\", \"ws\")\n"
+        "$env:BRIDGE_ROOM   = \"" + room_code + "\"\n"
+        "$env:BRIDGE_TOKEN  = \"" + token + "\"\n"
+        "Write-Host \"[Nexpert] 房间: $env:BRIDGE_ROOM · 正在加载桥接器…\" -ForegroundColor Cyan\n"
+        "iex (iwr \"$u/static/bridge.ps1\" -UseBasicParsing).Content\n"
+    )
+    return Response(content=script, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="nexpert-connect-{room_code}.ps1"'})
+
+
+@app.get("/api/room_bat/{room_code}")
+async def room_bat(room_code: str, request: Request):
+    """Windows 一键连接 .bat（exe 版）：双击→UAC 提权→下载 exe 桥接器并连接本房间。
+    仅房间所属工程师或管理员可获取。PowerShell 版见 /api/room_bat_ps/{room_code}。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT engineer_username FROM rooms WHERE room_code = ?", (room_code,)).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    if not can_access_room(user, room_code):
         return JSONResponse({"error": "无权访问该房间"}, status_code=403)
     public_url = get_public_url(request)
     ws_url = get_ws_url(request)
@@ -2681,47 +4078,21 @@ async def room_bat(room_code: str, request: Request):
 
     # 2026-09-25 升级：加入【自动提权】（桥接器读 BIOS/驱动等需管理员权限）。
     # 客户体验：下载 → 双击 → UAC 点"是" → 脚本自动提权重跑 → 下载 exe → 带房间信息连接。
-    bat = (
-        "@echo off\r\n"
-        "chcp 65001 >nul\r\n"
-        "title 云端AI远程运维助手 - 一键连接\r\n"
-        "cd /d \"%~dp0\"\r\n"
-        # ── 自动提权：非管理员时用 UAC 自我提权重启 ──
-        "net session >nul 2>&1\r\n"
-        "if %errorlevel% neq 0 (\r\n"
-        "    echo 正在请求管理员权限（UAC 弹窗请选择「是」）...\r\n"
-        "    powershell -NoProfile -Command \"Start-Process -FilePath '%~f0' -Verb RunAs\"\r\n"
-        "    exit /b\r\n"
-        ")\r\n"
-        "echo ==============================================\r\n"
-        "echo   云端AI远程运维助手 · 一键连接\r\n"
-        "echo ==============================================\r\n"
-        "echo   若出现「Windows 已保护你的电脑」提示：\r\n"
-        "echo     点「更多信息」→「仍要运行」即可。\r\n"
-        "echo.\r\n"
-        "echo [1/3] 正在检测网络...\r\n"
-        + _bat_url_cascade(_chain)
-        + "echo [1/3] 服务器: %SRV%\r\n"
-        "echo [2/3] 正在下载桥接器（约 5MB）...\r\n"
-        "curl -sL -o \"clouddiag-bridge-win64.exe\" \"%SRV%/static/clouddiag-bridge-win64.exe\"\r\n"
-        "if errorlevel 1 (\r\n"
-        "    echo 下载失败：请确认本机能访问服务器后重试。\r\n"
-        "    pause\r\n"
-        "    exit /b 1\r\n"
-        ")\r\n"
-        "echo [3/3] 正在连接房间 " + room_code + " ...\r\n"
-        "echo.\r\n"
-        "\"clouddiag-bridge-win64.exe\" -server %WSRV% -room " + room_code + " -token " + token + "\r\n"
-        "echo.\r\n"
-        "echo ==============================================\r\n"
-        "echo   连接已结束（诊断完成或连接断开）。\r\n"
-        "echo   如需彻底清理桥接器，请下载并运行卸载脚本：\r\n"
-        "echo     %SRV%/static/uninstall-windows.bat\r\n"
-        "echo   （也可在诊断台「连接你的电脑」面板中找到卸载入口）\r\n"
-        "echo ==============================================\r\n"
-        "pause\r\n"
+    # 2026-10-22：.bat 改为「只做提权 + 引导」，连接逻辑统一走 PowerShell 脚本
+    #   （早期一键命令那套：多地址探测 → 设 BRIDGE_SERVER/ROOM/TOKEN → iex 拉 bridge.ps1）
+    #   不再用 curl 下 exe；纯 PowerShell 桥接器无需落地文件，杀软误报更少。
+    import base64 as _b64
+    _ps_cmd = (
+        '$us=@(' + ",".join('"' + u + '"' for u in _chain) + '); $u=$null; '
+        + 'foreach($x in $us){ curl.exe -skf --max-time 5 "$x/api/health" -o NUL 2>$null; if ($LASTEXITCODE -eq 0) { $u=$x; break } }; '
+        + 'if (-not $u) { $u=$us[-1] }; '
+        + '$env:BRIDGE_SERVER=($u -replace "^http","ws"); $env:BRIDGE_ROOM="' + room_code + '"; $env:BRIDGE_TOKEN="' + token + '"; '
+        + 'iex (iwr "$u/static/bridge.ps1" -UseBasicParsing).Content'
     )
-    return Response(content=bat, media_type="text/plain; charset=utf-8",
+    _ps_encoded = _b64.b64encode(_ps_cmd.encode("utf-16-le")).decode("ascii")
+    bat = _connect_bat_exe(room_code, token, _chain)
+    # 2026-10-22：以 GBK 字节下发，cmd 窗口中文不再乱码
+    return Response(content=bat.encode("gbk", "replace"), media_type="application/octet-stream",
                     headers={"Content-Disposition": f'attachment; filename="connect-{room_code}.bat"'})
 
 
@@ -2743,7 +4114,36 @@ async def room_close(room_code: str, request: Request):
     if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
         return JSONResponse({"error": "无权操作该房间"}, status_code=403)
 
+    # 幂等：已归档且已有定稿 → 返回现有版本（定稿不可变、不重复生成）
+    try:
+        _c = _db_connect()
+        _r = _c.execute("SELECT status, report_path, report_version, closed_at FROM rooms WHERE room_code=?",
+                        (room_code,)).fetchone()
+        _c.close()
+        if _r and _r["report_path"] and os.path.exists(_r["report_path"]):
+            with open(_r["report_path"], "r", encoding="utf-8") as _f:
+                _txt = _f.read()
+            return {"ok": True, "status": _r["status"] or "archived", "already_closed": True,
+                    "report": {"version": _r["report_version"], "path": _r["report_path"],
+                               "file": os.path.basename(_r["report_path"]), "size": len(_txt),
+                               "sha256": hashlib.sha256(_txt.encode("utf-8")).hexdigest()[:12],
+                               "closed_at": _r["closed_at"]}}
+    except Exception as e:
+        run_logger.warning(f"[{room_code}] close idempotent check failed: {e}")
+
     set_room_status(room_code, "archived")
+    archive = archive_report(room_code)      # 结单即生成定稿并存档（之后不可变）
+    # 2026-10-27：结单后房间文件进入 24 小时清理倒计时（清单已进报告）
+    try:
+        _c2 = _db_connect()
+        _n = _c2.execute("SELECT COUNT(*) c FROM room_files WHERE room_code=? AND deleted_at IS NULL",
+                         (room_code,)).fetchone()["c"]
+        _c2.execute("UPDATE room_files SET deleted_at=datetime('now') "
+                    "WHERE room_code=? AND deleted_at IS NULL", (room_code,))
+        _c2.commit(); _c2.close()
+        run_logger.info(f"[{room_code}] 结单：{_n} 个文件进入 24h 清理倒计时")
+    except Exception as _e:
+        run_logger.warning(f"[{room_code}] 结单标记文件失败：{_e}")
     clear_room_token(room_code)
     room = rooms.get(room_code)
     if room:
@@ -2759,7 +4159,378 @@ async def room_close(room_code: str, request: Request):
                 pass
         room.bridge_ws = None
     run_logger.info(f"[{room_code}] room closed by {user['username']} (archived)")
-    return {"ok": True, "status": "archived"}
+    return {"ok": True, "status": "archived", "report": archive}
+
+
+REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+
+
+def build_observation_report(room_code: str):
+    """生成观察级报告文本（只列真实执行记录，不做 AI 推断）。返回 (txt, meta) 或 (None, None)。"""
+    try:
+        conn = _db_connect()
+        row = conn.execute(
+            "SELECT sn, ticket_no, machine_model, engineer_username, created_at, status FROM rooms WHERE room_code=?",
+            (room_code,)).fetchone()
+        msgs = conn.execute(
+            "SELECT role, tool_name, content, created_at FROM messages WHERE room_code=? ORDER BY id",
+            (room_code,)).fetchall()
+        conn.close()
+    except Exception:
+        return None, None
+    if not row:
+        return None, None
+    tool_msgs = [m for m in msgs if m["role"] == "tool" and m["tool_name"]]
+    user_msgs = [m for m in msgs if m["role"] == "user"]
+    ai_msgs = [m for m in msgs if m["role"] == "ai"]
+    lines = ["================= 诊断观察报告 =================",
+             f"房间: {room_code}",
+             f"SN: {row['sn'] or '-'} | 工单: {row['ticket_no'] or '-'} | 型号: {row['machine_model'] or '-'}",
+             f"工程师: {row['engineer_username'] or '-'} | 创建: {row['created_at'] or '-'}",
+             f"房间状态: {row['status'] or 'active'}",
+             "-------------------------------------------------",
+             "【执行记录】（按时间，观察级）"]
+    if tool_msgs:
+        for m in tool_msgs:
+            ts = (m["created_at"] or "")[11:16] if m["created_at"] else "--:--"
+            lines.append(f"[{ts}] 工具: {m['tool_name']}（输出 {len(m['content'] or '')} 字符）")
+    else:
+        lines.append("（无工具执行记录）")
+    lines += ["-------------------------------------------------", "【采集数据摘要】（每项截断 500 字符）"]
+    if tool_msgs:
+        for m in tool_msgs[:30]:
+            lines.append(f"--- {m['tool_name']} ---")
+            lines.append((m["content"] or "").strip()[:500])
+    else:
+        lines.append("（无）")
+    lines += ["-------------------------------------------------", "【统计】",
+              f"用户提问: {len(user_msgs)} 次", f"工具调用: {len(tool_msgs)} 次",
+              f"AI 回复: {len(ai_msgs)} 次", f"消息总数: {len(msgs)} 条",
+              "================= 报告结束 ================="]
+    return "\r\n".join(lines), {"room_code": room_code, "sn": row["sn"], "ticket_no": row["ticket_no"],
+                                 "machine_model": row["machine_model"], "engineer": row["engineer_username"],
+                                 "status": row["status"], "tool_count": len(tool_msgs), "msg_count": len(msgs)}
+
+
+def _room_files_manifest(room_code: str) -> str:
+    """房间文件清单（结单时写入报告，文件实体随后删除，清单与 SHA256 留档）"""
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT filename, size, uploader, uploader_role, note, sha256, created_at "
+            "FROM room_files WHERE room_code=? AND deleted_at IS NULL ORDER BY created_at",
+            (room_code,)).fetchall()
+        conn.close()
+    except Exception as e:
+        run_logger.warning(f"[{room_code}] 读取文件清单失败：{e}")
+        return ""
+    if not rows:
+        return ""
+    out = ["", "## 附件清单（共 %d 个，结单后服务器不再保留文件实体）" % len(rows), ""]
+    out.append("| # | 文件名 | 大小 | 上传方 | 上传人 | 时间 | SHA256(前16) |")
+    out.append("|---|---|---|---|---|---|---|")
+    for i, r in enumerate(rows, 1):
+        who = "二线" if (r["uploader_role"] or "") == "expert" else "现场"
+        _sz = r["size"] or 0
+        _szs = ("%.2f MB" % (_sz / 1048576.0)) if _sz >= 1048576 else ("%.0f KB" % (_sz / 1024.0) if _sz >= 1024 else "%d B" % _sz)
+        out.append("| %d | %s | %s | %s | %s | %s | %s |" % (
+            i, r["filename"], _szs, who,
+            r["uploader"] or "", r["created_at"] or "", (r["sha256"] or "")[:16]))
+    out.append("")
+    return "\n".join(out)
+
+
+def archive_report(room_code: str) -> dict:
+    """结单定稿：生成报告并落盘到 reports/{code}-v{n}.txt，返回归档信息。"""
+    txt, meta = build_observation_report(room_code)
+    if txt is not None:
+        try:
+            _man = _room_files_manifest(room_code)
+            if _man:
+                txt = txt.rstrip() + "\n" + _man
+        except Exception as _e:
+            run_logger.warning(f"[{room_code}] 附件清单写入失败：{_e}")
+    if txt is None:
+        return {}
+    try:
+        conn = _db_connect()
+        cur = conn.execute("SELECT report_version FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        ver = int((cur["report_version"] if cur and cur["report_version"] else 0)) + 1
+        os.makedirs(REPORTS_DIR, exist_ok=True)
+        fname = f"{room_code}-v{ver}.txt"
+        fpath = os.path.join(REPORTS_DIR, fname)
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(txt)
+        h = hashlib.sha256(txt.encode("utf-8")).hexdigest()[:12]
+        conn.execute("UPDATE rooms SET report_path=?, report_version=?, closed_at=datetime('now') WHERE room_code=?",
+                     (fpath, ver, room_code))
+        conn.commit()
+        conn.close()
+        run_logger.info(f"[{room_code}] report archived v{ver} -> {fname} (sha256:{h})")
+        return {"version": ver, "file": fname, "path": fpath, "sha256": h, "size": len(txt), "meta": meta}
+    except Exception as e:
+        run_logger.error(f"[{room_code}] archive_report failed: {e}")
+        return {}
+
+
+@app.post("/api/room_escalate/{room_code}")
+async def room_escalate(room_code: str, request: Request):
+    """升级二线：记录接管人（escalated_to）与时间，状态置 escalated。仅房间主人/管理员。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT engineer_username, status FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        if not row:
+            conn.close()
+            return JSONResponse({"error": "房间不存在"}, status_code=404)
+        if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+            conn.close()
+            return JSONResponse({"error": "无权操作该房间"}, status_code=403)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        expert = (body.get("expert") or "").strip() or user["username"]
+        conn.execute(
+            "UPDATE rooms SET status='escalated', escalated_to=?, escalated_at=datetime('now') WHERE room_code=?",
+            (expert, room_code))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"[{room_code}] escalate failed: {e}")
+        return JSONResponse({"error": "升级失败"}, status_code=500)
+    run_logger.info(f"[{room_code}] escalated to {expert} by {user['username']}")
+    return {"ok": True, "status": "escalated", "escalated_to": expert}
+
+
+@app.post("/api/expert_assign/{room_code}")
+async def expert_assign(room_code: str, request: Request):
+    """二线下发指令（落库 expert_tickets）。仅二线账号/管理员。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") not in ("admin", "expert"):
+        return JSONResponse({"error": "仅二线账号可下发"}, status_code=403)
+    room_code = room_code.upper()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action_key = (body.get("action_key") or "").strip()
+    if not action_key:
+        return JSONResponse({"error": "缺少 action_key"}, status_code=400)
+    title = (body.get("title") or action_key)[:120]
+    tier = (body.get("tier") or "read")[:16]
+    note = (body.get("note") or "")[:300]
+    try:
+        conn = _db_connect()
+        conn.execute(
+            "INSERT INTO expert_tickets (room_code, action_key, title, tier, note, created_by) VALUES (?,?,?,?,?,?)",
+            (room_code, action_key, title, tier, note, user["username"]))
+        conn.commit()
+        tid = conn.execute("SELECT last_insert_rowid() AS i").fetchone()["i"]
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"[{room_code}] expert_assign failed: {e}")
+        return JSONResponse({"error": "下发失败"}, status_code=500)
+    run_logger.info(f"[{room_code}] expert assign: {action_key} by {user['username']} -> ticket {tid}")
+    return {"ok": True, "id": tid, "status": "pending"}
+
+
+@app.get("/api/expert_assignments/{room_code}")
+async def expert_assignments(room_code: str, request: Request):
+    """查询该房间的二线下发指令（现场端与二线端共用）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT id, action_key, title, tier, note, created_by, created_at, status, done_at, done_by "
+            "FROM expert_tickets WHERE room_code=? ORDER BY id DESC LIMIT 50", (room_code,)).fetchall()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"[{room_code}] assignments query failed: {e}")
+        rows = []
+    return {"ok": True, "room_code": room_code, "tickets": [dict(r) for r in rows]}
+
+
+@app.post("/api/expert_ticket_done/{room_code}/{ticket_id}")
+async def expert_ticket_done(room_code: str, ticket_id: int, request: Request):
+    """现场标记二线指令完成（写回执）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    try:
+        conn = _db_connect()
+        conn.execute("UPDATE expert_tickets SET status='done', done_at=datetime('now'), done_by=? WHERE id=? AND room_code=?",
+                     (user["username"], ticket_id, room_code))
+        conn.commit(); conn.close()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    run_logger.info(f"[{room_code}] expert ticket {ticket_id} done by {user['username']}")
+    return {"ok": True, "status": "done"}
+
+
+@app.get("/api/expert_rooms")
+async def expert_rooms(request: Request):
+    """二线台房间数据（2026-10-20 重做口径）。
+
+    scope=queue   → 待我处理：escalated_to = 我 且 未归档（admin 看全部 escalated）
+    scope=history → 我参与过的：我建的 / 我加入的 / 升级给我的（含已归档）
+                   支持 q 搜索、filter 过滤、days 时间范围、page/size 分页
+    不带 scope → 一次返回 queue + 首页 history（前端首屏只发一个请求）
+    """
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") not in ("admin", "expert", "engineer", "field"):
+        return JSONResponse({"error": "无权限", "role": user.get("role")}, status_code=403)
+
+    me = user["username"]
+    is_admin = user.get("role") == "admin"
+    qp = request.query_params
+    scope = (qp.get("scope") or "").strip().lower()
+    kw = (qp.get("q") or "").strip().upper()
+    flt = (qp.get("filter") or "all").strip().lower()
+    try:
+        days = int(qp.get("days") or 0)
+    except Exception:
+        days = 0
+    try:
+        page = max(1, int(qp.get("page") or 1))
+    except Exception:
+        page = 1
+    try:
+        size = min(200, max(5, int(qp.get("size") or 20)))
+    except Exception:
+        size = 20
+
+    sel = ("SELECT room_code, sn, ticket_no, machine_model, os, engineer_username, status, "
+           "escalated_to, escalated_at, report_version, closed_at, created_at FROM rooms ")
+    try:
+        conn = _db_connect()
+
+        # ── 队列：真正等我处理的 ──
+        if is_admin:
+            q_rows = conn.execute(
+                sel + "WHERE escalated_to IS NOT NULL AND escalated_to != '' AND COALESCE(status,'') != 'archived' "
+                      "ORDER BY COALESCE(escalated_at, created_at) DESC LIMIT 100").fetchall()
+        else:
+            q_rows = conn.execute(
+                sel + "WHERE escalated_to = ? AND COALESCE(status,'') != 'archived' "
+                      "ORDER BY COALESCE(escalated_at, created_at) DESC LIMIT 100", (me,)).fetchall()
+
+        # ── 历史：我参与过的（三种来源） ──
+        where = ["(engineer_username = ? OR escalated_to = ? OR room_code IN "
+                 "(SELECT room_code FROM room_members WHERE username = ?))"]
+        args = [me, me, me]
+        if is_admin:
+            where = ["1=1"]
+            args = []
+        if flt == "created":
+            where.append("engineer_username = ?"); args.append(me)
+        elif flt == "joined":
+            where.append("room_code IN (SELECT room_code FROM room_members WHERE username = ?)"); args.append(me)
+        elif flt == "escalated":
+            where.append("escalated_to = ?"); args.append(me)
+        elif flt == "archived":
+            where.append("COALESCE(status,'') = 'archived'")
+        if days > 0:
+            where.append("created_at >= datetime('now','localtime',?)"); args.append(f"-{days} days")
+        if kw:
+            where.append("(UPPER(room_code) LIKE ? OR UPPER(COALESCE(sn,'')) LIKE ? "
+                         "OR UPPER(COALESCE(ticket_no,'')) LIKE ? OR UPPER(COALESCE(machine_model,'')) LIKE ?)")
+            like = f"%{kw}%"
+            args += [like, like, like, like]
+        wsql = " AND ".join(where)
+        total = conn.execute("SELECT COUNT(*) FROM rooms WHERE " + wsql, args).fetchone()[0]
+        rows = conn.execute(sel + "WHERE " + wsql + " ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                            args + [size, (page - 1) * size]).fetchall()
+
+        joined = {r[0] for r in conn.execute(
+            "SELECT room_code FROM room_members WHERE username = ?", (me,)).fetchall()}
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"expert_rooms query error: {e}")
+        return JSONResponse({"error": "查询失败"}, status_code=500)
+
+    def pack(r):
+        d = dict(r)
+        room = rooms.get(d["room_code"])
+        src = []
+        if d.get("engineer_username") == me:
+            src.append("created")
+        if d["room_code"] in joined:
+            src.append("joined")
+        if d.get("escalated_to") == me:
+            src.append("escalated")
+        if is_admin and not src:
+            src.append("admin")
+        return {
+            "room_code": d["room_code"], "sn": d.get("sn") or "", "ticket_no": d.get("ticket_no") or "",
+            "machine_model": d.get("machine_model") or "", "os": d.get("os") or "",
+            "engineer_username": d.get("engineer_username") or "", "status": d.get("status") or "active",
+            "bridge_online": bool(room and room.bridge_ws is not None),
+            "escalated_to": d.get("escalated_to") or "", "escalated_at": d.get("escalated_at") or "",
+            "created_at": d.get("created_at") or "", "closed_at": d.get("closed_at") or "",
+            "report_version": d.get("report_version") or 0, "source": src,
+        }
+
+    queue = [pack(r) for r in q_rows]
+    hist = [pack(r) for r in rows]
+    pages = max(1, (total + size - 1) // size)
+    out = {"me": me, "queue": queue, "queue_count": len(queue),
+           "rooms": hist, "total": total, "page": page, "size": size, "pages": pages,
+           "scope": scope or "history", "filter": flt, "days": days}
+    if scope == "queue":
+        out["rooms"] = []
+    return out
+
+
+@app.get("/api/joinable_rooms")
+async def joinable_rooms(request: Request):
+    """可加入的房间：近 30 天、未归档、且不是我的（二线「加入现成房间诊断」用）。
+    支持 ?q= 按 房间码 / SN / 工单 / 机型 过滤。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") not in ("admin", "expert"):
+        return JSONResponse({"error": "仅二线账号可加入他人房间", "role": user.get("role")}, status_code=403)
+    me = user["username"]
+    q = (request.query_params.get("q") or "").strip().upper()
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT room_code, sn, ticket_no, machine_model, os, engineer_username, status, created_at "
+            "FROM rooms WHERE COALESCE(status,'') != 'archived' "
+            "AND created_at >= datetime('now','localtime','-30 days') "
+            "AND engineer_username != ? "
+            "ORDER BY created_at DESC LIMIT 200", (me,)).fetchall()
+        conn.close()
+    except Exception as e:
+        run_logger.error(f"joinable_rooms error: {e}")
+        return JSONResponse({"error": "查询失败"}, status_code=500)
+    out = []
+    for r in rows:
+        d = dict(r)
+        blob = " ".join(str(d.get(k) or "") for k in ("room_code", "sn", "ticket_no", "machine_model")).upper()
+        if q and q not in blob:
+            continue
+        room = rooms.get(d["room_code"])
+        out.append({
+            "room_code": d["room_code"], "sn": d.get("sn") or "", "ticket_no": d.get("ticket_no") or "",
+            "machine_model": d.get("machine_model") or "", "os": d.get("os") or "",
+            "engineer_username": d.get("engineer_username") or "", "status": d.get("status") or "active",
+            "bridge_online": bool(room and room.bridge_ws is not None),
+            "created_at": d.get("created_at") or "",
+        })
+    return {"rooms": out[:100], "count": len(out[:100])}
 
 
 @app.get("/api/report/{room_code}")
@@ -2785,8 +4556,26 @@ async def room_report(room_code: str, request: Request):
         return JSONResponse({"error": "数据库错误"}, status_code=500)
     if not row:
         return JSONResponse({"error": "房间不存在"}, status_code=404)
-    if user.get("role") != "admin" and row["engineer_username"] != user["username"]:
+    if not can_access_room(user, room_code):
         return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+
+    # 2026-10-20：?draft=1 = 草稿（永远实时重算、不读存档、不落盘）
+    draft = request.query_params.get("draft") == "1"
+
+    # 已结单归档 → 直接返回存档（凭证不可变）；?live=1 强制重算；草稿不读存档
+    if request.query_params.get("live") != "1" and not draft:
+        try:
+            _c2 = _db_connect()
+            _r2 = _c2.execute("SELECT report_path, report_version FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+            _c2.close()
+            if _r2 and _r2["report_path"] and os.path.exists(_r2["report_path"]):
+                with open(_r2["report_path"], "r", encoding="utf-8") as f:
+                    txt = f.read()
+                return Response(content=txt, media_type="text/plain; charset=utf-8",
+                                headers={"Content-Disposition": f'attachment; filename="report-{room_code}-v{_r2["report_version"]}.txt"',
+                                         "X-Report-Version": str(_r2["report_version"]), "X-Report-Archived": "1"})
+        except Exception as e:
+            run_logger.warning(f"[{room_code}] read archived report failed: {e}")
 
     tool_msgs = [m for m in msgs if m["role"] == "tool" and m["tool_name"]]
     user_msgs = [m for m in msgs if m["role"] == "user"]
@@ -2797,6 +4586,10 @@ async def room_report(room_code: str, request: Request):
     lines.append(f"房间: {room_code}")
     lines.append(f"SN: {row['sn'] or '-'} | 工单: {row['ticket_no'] or '-'} | 型号: {row['machine_model'] or '-'}")
     lines.append(f"工程师: {row['engineer_username'] or '-'} | 创建: {row['created_at'] or '-'}")
+    _reviewer = user.get("username", "")
+    lines.append(f"处理人: {row['engineer_username'] or '-'} | 复核人(二线): {_reviewer or '-'}")
+    if draft:
+        lines.append("【草稿 · 未存档 · 可重算】")
     lines.append(f"房间状态: {row['status'] or 'active'}")
     lines.append("-------------------------------------------------")
     lines.append("【执行记录】（按时间，观察级）")
@@ -2822,8 +4615,11 @@ async def room_report(room_code: str, request: Request):
     lines.append(f"消息总数: {len(msgs)} 条")
     lines.append("================= 报告结束 =================")
     txt = "\r\n".join(lines)
-    return Response(content=txt, media_type="text/plain; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="report-{room_code}.txt"'})
+    _h = {"Content-Disposition": f'attachment; filename="report-{room_code}{"-draft" if draft else ""}.txt"'}
+    if draft:
+        _h["X-Report-Draft"] = "1"
+        _h["X-Report-Archived"] = "0"
+    return Response(content=txt, media_type="text/plain; charset=utf-8", headers=_h)
 
 
 @app.get("/api/history/{room_code}")
@@ -3413,8 +5209,16 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
         bridge_args = {"command": "shutdown /s /t 0", "timeout": 30, "cwd": ""}
     elif fn_name == "RunCommand":
         bridge_tool = "Shell"
+        _cmd = fn_args.get("command", "")
+        # 2026-10-19：中文 Windows 的 powershell.exe 默认按 OEM 代码页（936/GBK）输出，
+        # 桥接器按 UTF-8 读取 → 中文变乱码（实测 "Windows 11 专业版" → "רҵ��"）。
+        # 在命令前注入编码引导即可，无需重编已分发到客户机的桥接器。
+        _plat = ((room.machine or {}).get("platform") or room.platform or "windows")
+        if _plat != "linux" and _cmd and "OutputEncoding" not in _cmd:
+            _cmd = ("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+                    "$OutputEncoding=[System.Text.Encoding]::UTF8;" + _cmd)
         bridge_args = {
-            "command": fn_args.get("command", ""),
+            "command": _cmd,
             "timeout": int(fn_args.get("timeout", 60)),
             "cwd": fn_args.get("cwd", ""),
         }
@@ -4913,11 +6717,14 @@ async def tools_energy_run(request: Request):
 # ============================================================
 # 工具模式 — 驱动版本信息（Win32_PnPSignedDriver）
 # ============================================================
+# 2026-10-19：改竖线分隔输出。
+# 改前用 Format-Table -AutoSize：列宽空格补齐 → 每行浪费 60+ 字符（同样的输出长度只能装 10 行左右，
+# 页面还容易按两个空格切错列），看起来就像"只查到十来条驱动"。
 DRIVERS_CMD = (
-    "Get-WmiObject Win32_PnPSignedDriver | "
+    "Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue | "
     "Where-Object { $_.DeviceName } | "
-    "Select-Object DeviceName, Manufacturer, DriverVersion | "
-    "Format-Table -AutoSize | Out-String -Width 4096"
+    "Select-Object -First 800 | "
+    "ForEach-Object { \"$($_.DeviceName)|$($_.Manufacturer)|$($_.DriverVersion)\" }"
 )
 
 
@@ -4972,14 +6779,37 @@ async def tools_drivers_list(request: Request):
                         "manufacturer": manufacturer,
                         "version": version,
                     })
+        else:
+            # 新格式（竖线分隔，2026-10-19）：Name|Manufacturer|Version —— 不受列宽补齐影响
+            piped = [l.strip() for l in (result or "").splitlines() if l.count("|") >= 2]
+            for ln in piped:
+                name, manufacturer, version = (ln.split("|") + ["", "", ""])[:3]
+                if name.strip():
+                    drivers.append({
+                        "name": name.strip(),
+                        "manufacturer": manufacturer.strip(),
+                        "version": version.strip(),
+                    })
+            if piped:
+                table_text = "\n".join(piped)
 
+        # 去重：同一驱动名+厂商+版本只留一条（原表会有大量重复行，看着像"内容少"）
+        seen, uniq = set(), []
+        for d in drivers:
+            k = (d.get("name", ""), d.get("manufacturer", ""), d.get("version", ""))
+            if k in seen:
+                continue
+            seen.add(k)
+            uniq.append(d)
+        raw_total = len(drivers)
         save_message(room_code, "tool",
-                     f"[驱动版本] 用户={user.get('username')} 驱动数={len(drivers)}",
+                     f"[驱动版本] 用户={user.get('username')} 驱动数={len(uniq)}（原始行 {raw_total}）",
                      "DriversList", 1)
         return JSONResponse({
             "status": "ok",
-            "drivers": drivers[:500],
-            "count": len(drivers),
+            "drivers": uniq[:500],
+            "count": len(uniq),
+            "raw_count": raw_total,
             "raw": (result or "")[:8000],
             "table": table_text,
         })
@@ -5400,7 +7230,10 @@ ACTION_KB = {
         "更新显卡 / 存储驱动（DPC 长时间占用）",
         "检查存储设备（SSD 固件更新——部分 SSD 固件 bug 触发）",
         "检查是否开启了内核调试（bcdedit 删除 debug 设置）"],
-        "params": {"1": "保留", "2": "保留"}},
+        "params": {"1": "看门狗类型（0=单个 DPC 超时 / 1=系统整体 DPC 超时）",
+                   "2": "看门狗时间上限（tick）",
+                   "3": "实际累计耗时（tick）",
+                   "4": "超时的 DPC 例程地址"}},
     "0x139": {"actions": [
         "更新 / 回滚最近安装的驱动",
         "运行 sfc /scannow 与 DISM 修复系统",
@@ -5675,6 +7508,9 @@ def build_dump_report(room_code: str, raw: str) -> str:
             kbinfo = kb.get(code_n)
             if kbinfo:
                 lines.append(f"  蓝屏停止码 {code_n}（{kbinfo.get('name', '')}）——{kbinfo.get('desc', '')[:150]}")
+            elif act and act.get("actions"):
+                # 微软文档库未收录，但实战建议库有该码 → 不说"未收录"，按实战库说明
+                lines.append(f"  蓝屏停止码 {code_n}（实战建议库已收录）——按售后经验处理，见下方修复建议")
             else:
                 lines.append(f"  蓝屏停止码 {code_n}——知识库未收录该代码，需查阅微软官方 BugCheck 文档确认含义")
         # 优先级建议
@@ -5985,6 +7821,65 @@ async def tools_smart(request: Request):
     return {"ok": True, "platform": platform, "log": result}
 
 
+@app.post("/api/tools/sysinfo")
+async def tools_sysinfo(request: Request):
+    """设备识别（只读）：经桥接器读取真实机型 / SN / 系统 / CPU / 内存 / 磁盘。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+    platform = (room.machine or {}).get("platform", room.platform)
+
+    if platform == "linux":
+        cmd = (
+            "echo MODEL=$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null) $(cat /sys/class/dmi/id/product_name 2>/dev/null); "
+            "echo SN=$(cat /sys/class/dmi/id/product_serial 2>/dev/null); "
+            "echo OS=$(. /etc/os-release 2>/dev/null; echo $PRETTY_NAME); echo KERNEL=$(uname -r); "
+            "echo CPU=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ //'); "
+            "echo RAM_GB=$(awk '/MemTotal/{printf \"%.1f\", $2/1048576}' /proc/meminfo); "
+            "echo DISK=$(lsblk -d -o NAME,MODEL,SIZE -n 2>/dev/null | tr -s ' ' '|' | paste -sd';' -)"
+        )
+    else:
+        cmd = (
+            "$cs = Get-CimInstance Win32_ComputerSystem; $bios = Get-CimInstance Win32_BIOS; "
+            "$os = Get-CimInstance Win32_OperatingSystem; $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1; "
+            "Write-Output ('MODEL=' + $cs.Manufacturer + ' ' + $cs.Model); "
+            "Write-Output ('SN=' + $bios.SerialNumber); "
+            "Write-Output ('OS=' + $os.Caption + ' ' + $os.Version); "
+            "Write-Output ('CPU=' + $cpu.Name); "
+            "Write-Output ('RAM_GB=' + [math]::Round($cs.TotalPhysicalMemory/1GB,1)); "
+            "$d = Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object { $_.FriendlyName + '|' + $_.MediaType + '|' + [math]::Round($_.Size/1GB) + 'GB' }; "
+            "Write-Output ('DISK=' + ($d -join ';'))"
+        )
+    try:
+        out = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 60, "cwd": ""},
+                                   f"sysinfo_{int(time.time())}", tier=1),
+            timeout=80,
+        )
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败: {e}"}, status_code=500)
+    out = out or ""
+    info = {}
+    for line in out.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            k = k.strip().upper()
+            if k in ("MODEL", "SN", "OS", "KERNEL", "CPU", "RAM_GB", "DISK"):
+                info[k.lower()] = v.strip()
+    run_logger.info(f"[{room_code}] tools_sysinfo: {info.get('model', '')} / {info.get('cpu', '')[:40]}")
+    return {"ok": True, "platform": platform, "sysinfo": info,
+            "room": {"machine_model": room.machine_model if hasattr(room, "machine_model") else "",
+                     "sn": getattr(room, "sn", ""), "os": getattr(room, "os", "")}}
+
+
 @app.post("/api/tools/tslog")
 async def tools_tslog(request: Request):
     """ThinkStation 日志采集（tslog.bat 全套 20+ 项）：
@@ -6094,7 +7989,16 @@ async def tools_upload(request: Request):
     fut = loop.create_future()
     room.pending_commands[fid] = fut
     try:
-        await room.bridge_ws.send_json({"type": "file_upload_request", "id": fid, "path": path})
+        # 2026-10-19：把候选上传地址下发给桥接器（客户机链路不稳时逐级降级）
+        #   ① 主地址（PUBLIC_URL，通常 https 443）
+        #   ② 备用地址（PUBLIC_URL_FALLBACK，如 :8443）
+        #   ③ 明文 http（仅当 UPLOAD_ALLOW_PLAIN_HTTP=1 才下发；否则一律加密）
+        # 候选链来自 .env（PUBLIC_URL + PUBLIC_URL_FALLBACK，逗号分隔多级）
+        #   是否允许明文 http 由部署方在 PUBLIC_URL_FALLBACK 里决定，不做硬编码
+        _bases = get_download_candidates(request)
+        run_logger.info(f"[{room_code}] file_upload_request fid={fid} bases={_bases}")
+        await room.bridge_ws.send_json({"type": "file_upload_request", "id": fid,
+                                        "path": path, "upload_bases": _bases})
     except Exception as e:
         room.pending_commands.pop(fid, None)
         return JSONResponse({"error": f"发送上传指令失败: {e}"}, status_code=500)
@@ -6149,7 +8053,12 @@ async def bridge_upload(request: Request, file: UploadFile = File(...)):
     bridge 读客户机文件 → POST 本接口（room+token 校验）→ 服务器收 → 转 IDG → 返回 {job_id}。"""
     room_code = str(request.query_params.get("room", "")).upper()
     token = request.query_params.get("token", "")
+    _t0 = time.time()
+    _clen = request.headers.get("content-length", "?")
+    _cli = request.headers.get("x-forwarded-for", (request.client.host if request.client else "?"))
+    run_logger.info(f"[{room_code}] bridge_upload ARRIVE from={_cli} content-length={_clen} ua={request.headers.get('user-agent','-')[:60]}")
     if not room_code or not verify_room_token(room_code, token):
+        run_logger.warning(f"[{room_code}] bridge_upload token 无效（{time.time()-_t0:.1f}s）")
         return JSONResponse({"error": "room token 无效"}, status_code=403)
     # 2026-09-09：上传不要求 bridge 在线（token 有效即可——bridge 传完文件可能断线）
     # 机器信息（sn/engineer）——查库
@@ -6183,6 +8092,7 @@ async def bridge_upload(request: Request, file: UploadFile = File(...)):
         if size == 0:
             os.remove(tmp_path)
             return JSONResponse({"error": "空文件"}, status_code=400)
+        run_logger.info(f"[{room_code}] bridge_upload 收完 {size/1024/1024:.2f} MB（{time.time()-_t0:.1f}s），开始转 IDG")
         # 转 IDG（multipart——身份头——sn 自动带）
         async with httpx.AsyncClient(timeout=300) as client:
             fname = os.path.basename(tmp_path)
@@ -6211,6 +8121,655 @@ async def bridge_upload(request: Request, file: UploadFile = File(...)):
                 os.remove(tmp_path)
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════
+# 分块上传（2026-10-19）
+#   背景：客户机到服务器链路不稳（实测 tls: bad record MAC / curl exit 56），
+#        14MB 单次 multipart 会中途断（MTU/中间设备/杀软 HTTPS 扫描都可能）。
+#   方案：客户端按 1MB 逐块 POST，断链只重传该块；全部到齐后 commit 合并 → 转 IDG。
+#   兼容：老客户端仍可用单次 multipart 的 /api/bridge/upload。
+# ═══════════════════════════════════════════════════════════════
+CHUNK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads_tmp", "chunks")
+
+
+def _chunk_part_path(fid: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_\-]", "", fid or "")[:64]
+    os.makedirs(CHUNK_DIR, exist_ok=True)
+    return os.path.join(CHUNK_DIR, f"{safe}.part")
+
+
+@app.post("/api/bridge/upload/chunk")
+async def bridge_upload_chunk(request: Request, file: UploadFile = File(...)):
+    """接收一个分块（顺序追加）。query: room / token / fid。"""
+    room_code = str(request.query_params.get("room", "")).upper()
+    token = request.query_params.get("token", "")
+    fid = request.query_params.get("fid", "")
+    if not room_code or not fid or not verify_room_token(room_code, token):
+        return JSONResponse({"error": "room token 无效"}, status_code=403)
+    part = _chunk_part_path(fid)
+    try:
+        data = await file.read()
+        if not data:
+            return JSONResponse({"error": "空分块"}, status_code=400)
+        with open(part, "ab") as f:
+            f.write(data)
+        total = os.path.getsize(part)
+        return {"ok": True, "received": len(data), "accumulated": total}
+    except Exception as e:
+        run_logger.error(f"[{room_code}] chunk upload failed: {e}")
+        return JSONResponse({"error": f"分块写入失败: {e}"}, status_code=500)
+
+
+@app.post("/api/bridge/upload/commit")
+async def bridge_upload_commit(request: Request):
+    """分块齐了 → 合并 → 转 IDG。query: room / token / fid / name"""
+    room_code = str(request.query_params.get("room", "")).upper()
+    token = request.query_params.get("token", "")
+    fid = request.query_params.get("fid", "")
+    name = os.path.basename(request.query_params.get("name", "") or "upload.zip") or "upload.zip"
+    if not room_code or not fid or not verify_room_token(room_code, token):
+        return JSONResponse({"error": "room token 无效"}, status_code=403)
+    part = _chunk_part_path(fid)
+    if not os.path.exists(part):
+        return JSONResponse({"error": "没有收到任何分块"}, status_code=400)
+    size = os.path.getsize(part)
+    run_logger.info(f"[{room_code}] chunk commit: {name} {size/1024/1024:.2f} MB (fid={fid})")
+
+    sn, engineer = "", ""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT sn, engineer_username FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        conn.close()
+        if row:
+            sn, engineer = (row[0] or ""), (row[1] or "")
+    except Exception:
+        pass
+
+    tmp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads_tmp",
+                            f"bup_{uuid.uuid4().hex[:8]}_{name}")
+    try:
+        os.replace(part, tmp_path)   # 原子改名，避免重复提交
+    except Exception:
+        tmp_path = part
+    try:
+        async with httpx.AsyncClient(timeout=600) as client:
+            with open(tmp_path, "rb") as f:
+                resp = await client.post(
+                    f"{LOG_ANALYZER_UPSTREAM}/api/upload",
+                    data={"sn": sn},
+                    files={"file": (os.path.basename(tmp_path), f)},
+                    headers={"X-Log-Analyzer-User": engineer or "ajun", "X-Log-Analyzer-Role": "engineer"},
+                )
+        d = resp.json()
+        if resp.status_code != 200 or not d.get("job_id"):
+            _err = f"IDG 上传失败: {d.get('error', resp.status_code)}"
+            _resolve_pending(room_code, fid, f"[upload_fail] {_err}")
+            return JSONResponse({"error": _err}, status_code=502)
+        _resolve_pending(room_code, fid, f"[upjob] job={d['job_id']}")
+        return {"ok": True, "job_id": d["job_id"], "size": size,
+                "analyze_url": f"/log-analyzer/analyze/{d['job_id']}"}
+    except Exception as e:
+        run_logger.error(f"[{room_code}] chunk commit 转 IDG 失败: {e}")
+        return JSONResponse({"error": f"转 IDG 失败: {e}"}, status_code=500)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════
+# 远程截图（2026-10-20 新增）
+#   二线台「远程截图」按钮 → 桥接器 PowerShell 抓屏存客户机本地 → FileDownload 拉回服务器
+#   → 存 static/downloads/ 供页面显示。不重编桥接器（复用 RunCommand + FileDownload）。
+#   注意：抓屏需要客户机有交互桌面会话；桥接器以服务方式运行时抓不到（返回黑图/失败）。
+# ═══════════════════════════════════════════════════════════════
+# ── 远程截图用 PowerShell 脚本（base64 下发，多显示器并集 + DPI 感知） ──
+# 阶段2：真正抓屏的脚本（由阶段1 用 Invoke-Expression 延迟编译，避免类型字面量在
+#   Add-Type 生效前就被解析 → 整脚本静默 exit 1（线上两次失败都是这个坑）
+PS_SHOT = r"""$ErrorActionPreference = 'Stop'
+$out = '__OUT__'
+$w = 0
+$h = 0
+$mon = 0
+$mode = 'none'
+$fatal = ''
+$blank = 'no'
+$monInfo = ''
+try {
+    New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
+    $mon = @([System.Windows.Forms.Screen]::AllScreens).Count
+    $monInfo = (@([System.Windows.Forms.Screen]::AllScreens) | ForEach-Object {
+        $b = $_.Bounds
+        ($b.X.ToString() + ',' + $b.Y.ToString() + ',' + $b.Width.ToString() + ',' + $b.Height.ToString() + ',p' + $_.Primary.ToString())
+    }) -join ';'
+    $r = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $w = $r.Width
+    $h = $r.Height
+    if ($w -le 0 -or $h -le 0) { $fatal = 'E_SIZE' }
+    else {
+        $bmp = New-Object -TypeName System.Drawing.Bitmap -ArgumentList $w, $h
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $size = New-Object -TypeName System.Drawing.Size -ArgumentList $w, $h
+        $ok = $false
+        try { $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $size); $mode = 'virtual'; $ok = $true } catch { }
+        if (-not $ok) {
+            try {
+                $p1 = New-Object -TypeName System.Drawing.Point -ArgumentList $r.Left, $r.Top
+                $p0 = New-Object -TypeName System.Drawing.Point -ArgumentList 0, 0
+                $g.CopyFromScreen($p1, $p0, $size); $mode = 'virtual-points'; $ok = $true
+            } catch { }
+        }
+        if (-not $ok) {
+            $g.Dispose()
+            $bmp.Dispose()
+            $pb = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $w = $pb.Width
+            $h = $pb.Height
+            $bmp = New-Object -TypeName System.Drawing.Bitmap -ArgumentList $w, $h
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $size = New-Object -TypeName System.Drawing.Size -ArgumentList $w, $h
+            $g.CopyFromScreen($pb.Left, $pb.Top, 0, 0, $size)
+            $mode = 'primary'
+        }
+        $g.Dispose()
+        $dark = 0
+        $cnt = 0
+        $i = 0
+        while ($i -lt 3) {
+            $j = 0
+            while ($j -lt 3) {
+                $px = [int]($w * (0.2 + 0.3 * $i))
+                $py = [int]($h * (0.2 + 0.3 * $j))
+                if ($px -ge $w) { $px = $w - 1 }
+                if ($py -ge $h) { $py = $h - 1 }
+                $c = $bmp.GetPixel($px, $py)
+                $cnt = $cnt + 1
+                if ($c.R -lt 6 -and $c.G -lt 6 -and $c.B -lt 6) { $dark = $dark + 1 }
+                $j = $j + 1
+            }
+            $i = $i + 1
+        }
+        if ($cnt -gt 0 -and $dark -eq $cnt) { $blank = 'yes' }
+        # 2026-10-28：「远程桌面观察」要小而快 → 按 maxw 等比缩小；「高清截图」maxw=0 保持原始像素
+        $maxw = __MAXW__
+        if ($maxw -gt 0 -and $w -gt $maxw) {
+            $scale = $maxw / $w
+            $nw = [int]($w * $scale)
+            $nh = [int]($h * $scale)
+            if ($nw -lt 1) { $nw = 1 }
+            if ($nh -lt 1) { $nh = 1 }
+            $nb = New-Object System.Drawing.Bitmap -ArgumentList $nw, $nh
+            $ng = [System.Drawing.Graphics]::FromImage($nb)
+            $ng.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $ng.DrawImage($bmp, 0, 0, $nw, $nh)
+            $ng.Dispose()
+            $bmp.Dispose()
+            $bmp = $nb
+            $w = $nw
+            $h = $nh
+        }
+        if ('__FMT__' -eq 'jpg') {
+            $jpgCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+            $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
+            $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]__Q__)
+            $bmp.Save($out, $jpgCodec, $ep)
+        } else {
+            $bmp.Save($out)
+        }
+        $bmp.Dispose()
+    }
+} catch {
+    $fatal = 'E_' + $_.Exception.Message
+}
+$sz = 0
+if (Test-Path $out) { $sz = (Get-Item $out).Length }
+Write-Output ('W=' + $w)
+Write-Output ('H=' + $h)
+Write-Output ('MON=' + $mon)
+Write-Output ('MONINFO=' + $monInfo)
+if ($fatal -ne '') {
+    Write-Output 'RESULT=FAIL'
+    Write-Output ('MSG=' + $fatal)
+} elseif ($blank -eq 'yes') {
+    Write-Output 'RESULT=BLANK'
+} else {
+    Write-Output 'RESULT=OK'
+    Write-Output ('MODE=' + $mode)
+    Write-Output ('BYTES=' + $sz)
+    Write-Output ('FILE=' + $out)
+}
+"""
+
+
+@app.post("/api/tools/screenshot")
+async def tools_screenshot(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user.get("role") == "guest":
+        return JSONResponse({"error": "游客无此权限"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    plat = ((room.machine or {}).get("platform") or room.platform or "windows")
+    # 2026-10-28：两种用途
+    #   preview=true → 「远程桌面观察」：缩到 1280 宽 + JPEG q55，约 60~90KB，2 秒一帧
+    #   preview 缺省   → 「高清截图」：原始像素（4K 就是 3840×2160）PNG 无损
+    _preview = bool(body.get("preview"))
+    try:
+        _maxw = int(body.get("max_width") or (1280 if _preview else 0))
+    except Exception:
+        _maxw = 1280 if _preview else 0
+    try:
+        _q = int(body.get("quality") or (55 if _preview else 90))
+    except Exception:
+        _q = 55 if _preview else 90
+    _fmt = "jpg" if _preview else "png"
+    _sub = "preview" if _preview else "shots"
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if plat == "linux":
+        _fmt = "png"   # Linux 侧抓屏工具只出 PNG，预览缩放不支持（服务器不参与图像处理）
+        out_path = f"/tmp/nexpert-shot-{room_code}-{ts}.png"
+        cmd = (
+            "P=" + out_path + "; "
+            "command -v gnome-screenshot >/dev/null 2>&1 && gnome-screenshot -f \"$P\" 2>/dev/null; "
+            "command -v scrot >/dev/null 2>&1 && scrot -o \"$P\" 2>/dev/null; "
+            "command -v import >/dev/null 2>&1 && import -window root \"$P\" 2>/dev/null; "
+            "echo 'W=0'; echo 'H=0'; echo 'MON=0'; "
+            "if [ -s \"$P\" ]; then echo 'RESULT=OK'; echo 'MODE=linux'; "
+            "echo \"BYTES=$(stat -c%s \"$P\")\"; echo \"FILE=$P\"; "
+            "else echo 'RESULT=FAIL'; echo 'MSG=no screenshot tool or no desktop session (need DISPLAY)'; fi"
+        )
+    else:
+        # Windows：脚本用 base64 下发再由 Invoke-Expression 执行 ——
+        #   避免长一行命令在 JSON → Go → powershell 链路上被引号/分号打断（历史踩过）
+        out_path = f"C:\\DiagLogs\\{_sub}\\nexpert-{room_code}-{ts}.{_fmt}"
+        # 2026-10-20：改用 -EncodedCommand（UTF-16LE base64）——这是 PowerShell 官方推荐的
+        #   "把整段脚本交给 powershell.exe" 的方式；不再自行解码 + Invoke-Expression
+        #   （上一次真机就是这条路 Parse 阶段直接 exit 1、无任何输出）。
+        # 两段式（2026-10-20）：
+        #   阶段1：只加载程序集 + 打 STAGE1=OK，然后 Invoke-Expression 阶段2。
+        #     阶段1 不含任何 WinForms/Drawing 类型字面量 → 不会在管道创建阶段被解析。
+        #   阶段2：真正抓屏（延迟编译，此时程序集已就绪）。
+        #   这样即使阶段2 里某个类型不可用，也能被阶段2 的 try/catch 捕获并回报，
+        #   而不是整脚本 exit 1、零输出。
+        _stage2 = (PS_SHOT.replace("__OUT__", out_path)
+                   .replace("__MAXW__", str(_maxw))
+                   .replace("__FMT__", _fmt)
+                   .replace("__Q__", str(_q)))
+        # 2026-10-28：改成「gzip + base64」内联。
+        #   历史踩坑：把整段脚本 base64 塞进 -EncodedCommand，再被桥接器用
+        #   `powershell -Command "powershell … -EncodedCommand <12KB>"` 包一层，
+        #   实机报 "使用1个参数调用Start时发生异常:文件名或扩展名太长"（命令行过长）。
+        #   压缩后 EncodedCommand 从 ~12.7KB 降到 ~6KB，稳在 8K 以内。
+        _gz = gzip.compress(_stage2.encode("utf-8"), 9)
+        _b64 = base64.b64encode(_gz).decode("ascii")
+        _stage1 = (
+            "$ErrorActionPreference='Stop';"
+            # DPI 感知必须在使用绘图/屏幕 API 之前声明，否则 125%/150% 缩放下只抓到左上角
+            "try { "
+            "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;"
+            "public class __DpiAw{[DllImport(\"user32.dll\")]public static extern bool SetProcessDPIAware();}' "
+            "-ErrorAction Stop; [__DpiAw]::SetProcessDPIAware() | Out-Null "
+            "} catch { }; "
+            "try { Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing } "
+            "catch { Write-Output 'RESULT=FAIL'; Write-Output 'MSG=E_ASSEMBLY'; exit 0 }; "
+            "Write-Output 'STAGE1=OK'; "
+            "$b='" + _b64 + "'; "
+            "$ms=New-Object IO.MemoryStream(,[Convert]::FromBase64String($b)); "
+            "$gz=New-Object IO.Compression.GZipStream($ms,[IO.Compression.CompressionMode]::Decompress); "
+            "$t=(New-Object IO.StreamReader($gz,[Text.Encoding]::UTF8)).ReadToEnd(); "
+            "Invoke-Expression $t"
+        )
+        _enc = base64.b64encode(_stage1.encode("utf-16-le")).decode("ascii")
+        cmd = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + _enc
+
+    try:
+        shot_log = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand",
+                                   {"command": cmd, "timeout": 60},
+                                   f"shot_{uuid.uuid4().hex[:8]}"),
+            timeout=120)
+    except Exception as e:
+        return JSONResponse({"error": f"截图命令执行失败：{e}"}, status_code=502)
+    run_logger.info(f"[{room_code}] 截图输出: {(shot_log or '').strip()[:600]}")
+    kv = {}
+    for _line in (shot_log or "").splitlines():
+        _m = re.match(r"^([A-Z_]+)=(.*)$", _line.strip())
+        if not _m:
+            continue
+        _pairs = re.findall(r"([A-Z_]+)=([^=]*?)(?=\s+[A-Z_]+=|$)", _m.group(2))
+        if _pairs:
+            for _k, _v in _pairs:
+                kv[_k] = _v.strip()
+        else:
+            kv[_m.group(1)] = _m.group(2).strip()
+    _res = kv.get("RESULT", "")
+
+    def _num(key):
+        try:
+            return int(float(kv.get(key, "0") or 0))
+        except Exception:
+            return 0
+
+    if _res == "BLANK":
+        return JSONResponse({
+            "error": "客户机桌面是纯黑的，通常是锁屏状态或远程桌面已断开",
+            "hint": "请让现场解锁屏幕后重试（锁屏状态下 Windows 不允许抓取桌面内容）",
+            "raw": (shot_log or "").strip()[:600]}, status_code=502)
+    if _res == "FAIL":
+        raw_msg = kv.get("MSG", "") or ""
+        stage_ok = kv.get("STAGE1") == "OK"
+        zh = {
+            "E_ASSEMBLY": "客户机加载 System.Windows.Forms / System.Drawing 失败（可能是 Server Core 或精简版系统）",
+            "E_SIZE": "客户机报告的桌面尺寸为 0（无交互桌面会话，或屏幕已关闭）",
+        }
+        if raw_msg in zh:
+            msg = zh[raw_msg]
+        elif "Unable to find type" in raw_msg:
+            msg = "客户机 PowerShell 找不到绘图类型（程序集未正确加载）：" + raw_msg
+        elif "Access" in raw_msg and "denied" in raw_msg:
+            msg = "客户机拒绝了截图操作（桥接器权限不足，请用 .bat 以管理员身份启动）"
+        else:
+            msg = raw_msg or "未知原因"
+        hint = ("阶段1（加载程序集）已通过，失败发生在抓屏阶段"
+                if stage_ok else "阶段1（加载绘图程序集）就失败了")
+        return JSONResponse({"error": "截图失败：" + msg, "stage1_ok": stage_ok, "hint": hint,
+                             "raw": (shot_log or "").strip()[:800]}, status_code=502)
+    if _res != "OK":
+        # 连 RESULT 都没拿到 → 探针定位（不再只给 "[exit_code] 1"）
+        probe = ""
+        if plat == "linux":
+            probe = ("[Linux] DISPLAY=" + "$DISPLAY"
+                     + " —— 无桌面会话/未安装 gnome-screenshot、scrot、imagemagick 时无法截图")
+            try:
+                probe = await asyncio.wait_for(
+                    execute_bridge_command(room, "RunCommand", {
+                        "command": "echo DISPLAY=$DISPLAY; for t in gnome-screenshot scrot import; do "
+                                   "command -v $t >/dev/null 2>&1 && echo \"have:$t\" || echo \"miss:$t\"; done",
+                        "timeout": 30}, f"probe_{uuid.uuid4().hex[:8]}"),
+                    timeout=60)
+            except Exception as e:
+                probe = f"(Linux 探针失败: {e})"
+        else:
+            try:
+                probe = await asyncio.wait_for(
+                    execute_bridge_command(room, "RunCommand", {
+                        "command": "$ErrorActionPreference='SilentlyContinue';"
+                                   "Write-Output ('PSVersion=' + $PSVersionTable.PSVersion.ToString());"
+                                   "Write-Output ('Interactive=' + [Environment]::UserInteractive);"
+                                   "Write-Output ('SessionId=' + (Get-Process -Id $PID).SessionId);"
+                                   "try { Add-Type -AssemblyName System.Windows.Forms; Write-Output 'WinForms=OK' }"
+                                   " catch { Write-Output ('WinForms=' + $_.Exception.Message) }",
+                        "timeout": 40}, f"probe_{uuid.uuid4().hex[:8]}"),
+                    timeout=90)
+            except Exception as e:
+                probe = f"(探针执行失败: {e})"
+        return JSONResponse({
+            "error": "截图命令没有返回可用结果（PowerShell 可能没执行到脚本主体）",
+            "raw": (shot_log or "").strip()[:800],
+            "probe": (probe or "").strip()[:800],
+            "hint": "把 raw 与 probe 发我即可定位；常见：无交互桌面会话、PowerShell 版本过低、缺 System.Windows.Forms"},
+            status_code=502)
+
+    real_path = kv.get("FILE") or out_path
+    _moninfo = kv.get("MONINFO", "") or ""
+    dims = {"width": _num("W"), "height": _num("H"), "monitors": _num("MON"),
+            "mode": kv.get("MODE", ""), "bytes": _num("BYTES"),
+            "monitors_info": _moninfo}
+
+
+    try:
+        dl = await asyncio.wait_for(
+            execute_bridge_command(room, "FileDownload", {"path": real_path},
+                                   f"shotdl_{uuid.uuid4().hex[:8]}"),
+            timeout=300)
+    except Exception as e:
+        return JSONResponse({"error": f"取回截图失败：{e}"}, status_code=502)
+
+    m = re.search(r"saved=(\S+)", dl or "")
+    url = m.group(1) if m else ""
+    run_logger.info(f"[{room_code}] 远程截图 {out_path} → {url}（{user['username']}）")
+    save_message(room_code, "tool", f"[远程截图] {out_path} → {url}", "截图", 1)
+    if not url:
+        return JSONResponse({"error": "截图已生成但回传失败：" + (dl or "")[:200]}, status_code=502)
+    return {"ok": True, "url": url, "path": real_path, "at": datetime.now().strftime("%H:%M:%S"), **dims}
+
+
+# ═══════════════════════════════════════════════════════════════
+# 只读命令终端（2026-10-20 新增）
+#   二线/现场都能用，但只能跑白名单里的**只读**命令：
+#     · 第一道：命令前缀必须在白名单里
+#     · 第二道：全文不得含写/删/改/重启类词（含重定向 > 与 && 串联）
+#   写操作永远不走这里。
+# ═══════════════════════════════════════════════════════════════
+CMD_ALLOW_PREFIX = [
+    # Windows
+    "systeminfo", "ipconfig", "getmac", "hostname", "whoami", "ver", "vol", "dir", "type",
+    "findstr", "netstat", "tasklist", "nslookup", "ping", "tracert", "pathping", "arp",
+    "route print", "driverquery", "query user", "quser", "openfiles", "wmic",
+    "sc query", "sc qc", "reg query", "schtasks /query", "wevtutil qe", "wevtutil gl",
+    "wevtutil el", "certutil -hashfile", "fsutil volume diskfree", "powercfg /query",
+    "powercfg /list", "powercfg /batteryreport", "sfc /verifyonly", "dism /online /cleanup-image /checkhealth",
+    "dism /online /cleanup-image /scanhealth", "netsh interface show", "netsh wlan show",
+    "netsh advfirewall show", "bcdedit /enum", "nvidia-smi", "smartctl", "dxdiag /t",
+    "get-", "$psversiontable", "get-ciminstance", "get-wmiobject",
+    # Linux
+    "ps", "top -b", "df", "du", "free", "uptime", "uname", "lsblk", "lscpu", "lspci", "lsusb",
+    "dmesg", "ip a", "ip r", "ip l", "ss", "cat /proc", "cat /etc", "tail", "head",
+    "journalctl", "systemctl status", "systemctl list-units", "systemctl is-active",
+    "dmidecode", "sensors", "nproc", "vmstat", "iostat", "who", "w", "last",
+    "dpkg -l", "rpm -qa", "hwinfo", "smartctl", "nvme list", "journalctl -p",
+]
+
+CMD_DENY_WORDS = [
+    " rm ", "rmdir", " del ", "delete", "format ", "mkfs", " dd ", "shutdown", "reboot",
+    "poweroff", "halt", "taskkill", "killall", " kill ", " sc stop", " sc config", " sc delete",
+    "reg add", "reg delete", "reg import", "netsh reset", "net user", "net localgroup",
+    "net stop", "net start", "set-", "new-item", "remove-item", "start-process",
+    "invoke-expression", "iex ", "sqlcmd", ">", ">>", "&&", "||", "2>&1", "chkdsk /f",
+    "chkdsk /r", "sfc /scannow", "dism /online /cleanup-image /restorehealth",
+    "bcdedit /set", "bcdedit /delete", "diskpart", "takeown", "icacls", "cacls",
+    "curl ", "wget ", "telnet", "ftp ", "sshd", "passwd", "useradd", "userdel", "chmod",
+    "chown", "mount ", "umount", "apt ", "yum ", "dnf ", "pip install", "npm install",
+    "systemctl restart", "systemctl stop", "systemctl start", "systemctl disable",
+]
+
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 作业项「逐步执行」（2026-10-22 新增）
+#   目的：预设模式的计划步骤要能一条一条真跑、真回执（不是整包发给 AI 后猜进度）。
+#   做法：每个作业项 → 若干只读采集步骤（命令级），逐步经桥接器执行并返回该步结果。
+#   未配置步骤的作业项由前端回退到整包执行，并如实标注「整包执行」。
+# ══════════════════════════════════════════════════════════════════════
+ACTION_STEP_SPECS = {
+    # 蓝屏分析
+    "bsod": [
+        {"label": "190 天内蓝屏记录", "cmd": 'wevtutil qe System /q:"*[System[(EventID=1001)]]" /c:10 /rd:true /f:text'},
+        {"label": "Minidump 文件清单", "cmd": 'powershell -NoProfile -Command "Get-ChildItem C:\\Windows\\Minidump -Filter *.dmp -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5 Name,Length,LastWriteTime | Format-Table -AutoSize"'},
+        {"label": "WHEA 硬件错误事件", "cmd": 'wevtutil qe System /q:"*[System[Provider[@Name=\'Microsoft-Windows-WHEA-Logger\']]]" /c:10 /rd:true /f:text'},
+        {"label": "Kernel-Power 41 事件", "cmd": 'wevtutil qe System /q:"*[System[(EventID=41)]]" /c:10 /rd:true /f:text'},
+        {"label": "内存诊断记录", "cmd": 'wevtutil qe System /q:"*[System[Provider[@Name=\'Microsoft-Windows-MemoryDiagnostics-Results\']]]" /c:5 /rd:true /f:text'},
+    ],
+    # 硬盘健康（key=disk）
+    "disk": [
+        {"label": "SMART 全量数据", "cmd": 'powershell -NoProfile -Command "Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,OperationalStatus,Size | Format-Table -AutoSize"'},
+        {"label": "磁盘空间占用", "cmd": 'powershell -NoProfile -Command "Get-CimInstance Win32_LogicalDisk -Filter \'DriveType=3\' | Select-Object DeviceID,@{n=\'TotalGB\';e={[math]::Round($_.Size/1GB,1)}},@{n=\'FreeGB\';e={[math]::Round($_.FreeSpace/1GB,1)}} | Format-Table -AutoSize"'},
+        {"label": "文件系统错误记录", "cmd": 'wevtutil qe System /q:"*[System[Provider[@Name=\'Ntfs\']]]" /c:10 /rd:true /f:text'},
+        {"label": "磁盘可靠性计数器", "cmd": 'powershell -NoProfile -Command "Get-PhysicalDisk | Get-StorageReliabilityCounter | Select-Object DeviceId,Wear,ReadErrorsTotal,WriteErrorsTotal,PowerOnHours | Format-List"'},
+    ],
+    # 温度散热（key=thermal）
+    "thermal": [
+        {"label": "机器型号识别", "cmd": 'powershell -NoProfile -Command "Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model | Format-List"'},
+        {"label": "温度读数", "cmd": 'powershell -NoProfile -Command "Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | Select-Object InstanceName,@{n=\'Celsius\';e={[math]::Round(($_.CurrentTemperature-2732)/10,1)}} | Format-Table -AutoSize"'},
+        {"label": "风扇与散热状态", "cmd": 'powershell -NoProfile -Command "Get-CimInstance Win32_Fan -ErrorAction SilentlyContinue | Select-Object Name,Status,DesiredSpeed | Format-Table -AutoSize"'},
+        {"label": "降频与温度事件", "cmd": 'wevtutil qe System /q:"*[System[Provider[@Name=\'Microsoft-Windows-Kernel-Processor-Power\']]]" /c:10 /rd:true /f:text'},
+    ],
+    # 意外重启 / 休眠唤醒
+    "reboot": [
+        {"label": "异常关机与重启事件", "cmd": 'wevtutil qe System /q:"*[System[(EventID=41 or EventID=6008 or EventID=1074)]]" /c:15 /rd:true /f:text'},
+        {"label": "最近启动时间", "cmd": 'powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime"'},
+    ],
+    # 开机自启动
+    "startup": [
+        {"label": "注册表启动项", "cmd": 'powershell -NoProfile -Command "Get-CimInstance Win32_StartupCommand | Select-Object Name,Command,Location,User | Format-Table -AutoSize"'},
+        {"label": "启动耗时（BootTime）", "cmd": 'wevtutil qe "Microsoft-Windows-Diagnostics-Performance/Operational" /q:"*[System[(EventID=100)]]" /c:5 /rd:true /f:text'},
+    ],
+    # 系统问题（系统信息与激活）
+    "system": [
+        {"label": "系统版本与补丁", "cmd": 'powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber,OSArchitecture,InstallDate,LastBootUpTime | Format-List"'},
+        {"label": "激活状态", "cmd": 'powershell -NoProfile -Command "(Get-CimInstance SoftwareLicensingProduct -Filter \'PartialProductKey is not null\' | Select-Object -First 1 Name,LicenseStatus) | Format-List"'},
+        {"label": "TPM / BitLocker 状态", "cmd": 'powershell -NoProfile -Command "Get-CimInstance -Namespace root/cimv2/security/microsofttpm -ClassName Win32_Tpm -ErrorAction SilentlyContinue | Select-Object IsEnabled_InitialValue,IsActivated_InitialValue,SpecVersion | Format-List"'},
+        {"label": "系统严重错误日志", "cmd": 'wevtutil qe System /q:"*[System[(Level=1 or Level=2)]]" /c:15 /rd:true /f:text'},
+    ],
+}
+
+
+@app.get("/api/action_steps/{action_key}")
+async def action_steps(action_key: str, request: Request):
+    """返回某作业项的逐步执行计划（label 列表 + 是否支持真分步）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    spec = ACTION_STEP_SPECS.get(action_key)
+    if not spec:
+        return {"action_key": action_key, "supported": False, "steps": []}
+    return {"action_key": action_key, "supported": True,
+            "steps": [{"index": i, "label": s["label"]} for i, s in enumerate(spec)]}
+
+
+@app.post("/api/action/step")
+async def action_step(request: Request):
+    """执行作业项的**单个步骤**（只读），返回该步结果。前端逐步调用即可得到真实进度。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") == "guest":
+        return JSONResponse({"error": "游客无此权限"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper()
+    action_key = str(body.get("action_key", ""))
+    try:
+        idx = int(body.get("step_index", -1))
+    except Exception:
+        idx = -1
+    if not room_code or not action_key:
+        return JSONResponse({"error": "缺少房间码或作业项"}, status_code=400)
+    spec = ACTION_STEP_SPECS.get(action_key)
+    if not spec:
+        return JSONResponse({"error": "该作业项未配置逐步执行", "supported": False}, status_code=400)
+    if idx < 0 or idx >= len(spec):
+        return JSONResponse({"error": "步骤索引越界"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    step = spec[idx]
+    began = time.time()
+    try:
+        out = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand",
+                                   {"command": step["cmd"], "timeout": int(body.get("timeout", 60))},
+                                   f"step_{uuid.uuid4().hex[:8]}"),
+            timeout=150)
+        ok = True
+        err = ""
+    except Exception as e:
+        out, ok, err = "", False, str(e)
+
+    text = str(out or "")
+    # 摘要：取前若干非空行，够前端展示"这一步看到了什么"
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    summary = " / ".join(lines[:3])[:300] if lines else (err or "（无输出）")
+
+    # 命令"看起来执行了但其实是失败"的判定（桥接器只回文本，不给退出码）
+    if ok and text:
+        _fail_pat = ("command not found", "不是内部或外部命令", "Access is denied", "拒绝访问",
+                     "The system cannot find", "无法识别", "No such file or directory",
+                     "Exception calling", "SqlException", "requires elevation")
+        _low = text.lower()
+        for _kw in _fail_pat:
+            if _kw.lower() in _low:
+                ok = False
+                err = "命令执行失败：" + (_kw)
+                break
+
+    save_message(room_code, "tool", f"[步骤 {idx + 1}] {step['label']}\n{text[:800]}", f"step:{action_key}", 1)
+    run_logger.info(f"[{room_code}] 步骤执行 {action_key}#{idx + 1} {step['label']} ok={ok} "
+                    f"{round((time.time() - began) * 1000)}ms")
+    return {
+        "ok": ok,
+        "action_key": action_key,
+        "step": {"index": idx, "label": step["label"]},
+        "summary": summary,
+        "output": text[:4000],
+        "lines": len(lines),
+        "error": err,
+        "duration_ms": round((time.time() - began) * 1000),
+    }
+
+
+@app.post("/api/tools/cmd")
+async def tools_cmd(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    if user.get("role") == "guest":
+        return JSONResponse({"error": "游客无此权限"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    command = str(body.get("command", "")).strip()
+    if not room_code or not command:
+        return JSONResponse({"error": "缺少房间码或命令"}, status_code=400)
+    if len(command) > 500:
+        return JSONResponse({"error": "命令过长（上限 500 字符）"}, status_code=400)
+    if "\n" in command or "\r" in command:
+        return JSONResponse({"error": "一次只允许一条命令（不支持换行）"}, status_code=400)
+
+    low = " " + command.lower() + " "
+    hit = next((w for w in CMD_DENY_WORDS if w in low), None)
+    if hit:
+        return JSONResponse({"error": f"该命令含写操作关键词「{hit.strip()}」，本终端只接受只读命令",
+                             "tier": "write", "blocked": True}, status_code=403)
+    if not any(low.strip().startswith(pre) or (" " + pre) in low for pre in CMD_ALLOW_PREFIX):
+        return JSONResponse({"error": "该命令不在只读白名单内。可执行：系统信息、磁盘、网络、日志、进程、驱动等只读查询",
+                             "tier": "unknown", "blocked": True}, status_code=403)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+    try:
+        out = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand",
+                                   {"command": command, "timeout": int(body.get("timeout", 60))},
+                                   f"cmd_{uuid.uuid4().hex[:8]}"),
+            timeout=150)
+    except Exception as e:
+        return JSONResponse({"error": f"命令执行失败：{e}"}, status_code=502)
+    save_message(room_code, "tool", f"[只读命令] {command}\n{str(out)[:400]}", "cmd", 1)
+    run_logger.info(f"[{room_code}] 只读命令（{user['username']}）: {command[:80]}")
+    return {"ok": True, "output": out, "command": command, "tier": "read",
+            "at": datetime.now().strftime("%H:%M:%S")}
 
 
 @app.post("/api/tools/sio_log")
@@ -6431,11 +8990,13 @@ async def ws_browser(websocket: WebSocket, room_code: str):
             msg_data = json.loads(raw)
 
             if msg_data.get("type") == "chat":
-                # 上门工程师（field）/游客（guest）：仅允许快捷工具指令（QUICK_ACTION），禁止对话消息
-                if ws_role in ("field", "guest"):
+                # 2026-10-22：渠道工程师（field）现在用「现场作业台」，作业项执行与 AI 协助都要走这条通道，
+                #   所以不再按角色禁对话（只读工具白名单、写操作门禁、留痕规则照旧生效）。
+                #   仍限制游客（guest）：只允许快捷工具指令。
+                if ws_role == "guest":
                     user_message = msg_data["content"]
                     if not user_message.startswith("[QUICK_ACTION:"):
-                        await websocket.send_json({"type": "error", "content": "上门工程师账号无对话权限——可使用「连接你的电脑」与快捷工具，对话诊断由远程工程师处理。"})
+                        await websocket.send_json({"type": "error", "content": "游客账号无对话权限——仅可使用 IDG 日志分析。"})
                         continue
                 # 房间过期：禁止发新消息（历史可查看）
                 if room_expired_db(room_code):
@@ -6843,6 +9404,11 @@ async def _dead_conn_reaper():
 @app.on_event("startup")
 async def _startup_reaper():
     asyncio.create_task(_dead_conn_reaper())
+    asyncio.create_task(_room_files_purge_loop())   # 2026-10-27：房间文件 24h 清理任务
+    try:
+        os.makedirs(ROOM_FILES_DIR, exist_ok=True)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

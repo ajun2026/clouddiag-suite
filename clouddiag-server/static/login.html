@@ -354,8 +354,19 @@ async function doLogin() {
       btn.disabled = false; btn.textContent = '登录';
       return;
     }
-    localStorage.setItem('cab_role', data.role || '');
-    location.href = '/dashboard?role=' + (data.role || '');
+    // 2026-10-20：登录后按角色直达作业台（最短路径）
+  function landingFor(role) {
+    role = String(role || '').toLowerCase();
+    // 2026-10-22：渠道 / CC 工程师（现场干活的人）取消前置界面，登录后直接进「现场作业台」
+    if (role === 'field' || role === 'cc') return '/field';
+    if (role === 'guest') return '/dashboard?role=guest';
+    // 2026-10-28：二线工程师取消前置主页，登录后直接进「二线作业台」（队列首屏）
+    if (role === 'expert') return '/expert';
+    // 仅管理员保留工作台
+    return '/dashboard';
+  }
+  localStorage.setItem('cab_role', data.role || '');
+  location.href = landingFor(data.role);
   } catch (e) {
     showError('网络错误: ' + e.message);
     btn.disabled = false; btn.textContent = '登录';
@@ -368,7 +379,7 @@ async function guestLogin() {
     const data = await resp.json();
     if (!resp.ok) { showError(data.error || '游客入口暂不可用'); return; }
     localStorage.setItem('cab_role', 'guest');
-    location.href = '/dashboard?role=guest';
+    location.href = landingFor('guest');
   } catch (e) { showError('网络错误: ' + e.message); }
 }
 
@@ -410,7 +421,7 @@ startAuto();
 fetch('/api/auth/me').then(r => r.json()).then(d => {
   if (!d.error) {
     localStorage.setItem('cab_role', d.role || '');
-    location.href = '/dashboard?role=' + (d.role || '');
+    location.href = landingFor(d.role);
   }
 }).catch(() => {});
 </script>

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexpert · 作业框架改造方案（参考 C/D 端结构）</title>
+<style>
+  :root{
+    --primary:#2468F2; --primary-text:#1E56D6; --primary-soft:#EEF4FE; --primary-line:#C9D9FB;
+    --ai:#AF61FF; --ai-text:#7C3AED; --ai-soft:#F6EFFF;
+    --success:#059669; --success-text:#047857; --success-soft:#ECFDF5;
+    --warn:#B45309; --warn-soft:#FFFBEB; --error:#DC2626; --error-text:#B91C1C; --error-soft:#FEF2F2;
+    --bg:#F9F9F9; --surface:#FFFFFF; --surface2:#F2F3F5;
+    --text:#151B26; --text-strong:#0F172A; --text2:#5C5F66; --text3:#9CA3AF;
+    --border:#E8E9EB; --line:#F2F3F5;
+    --font:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",-apple-system,system-ui,sans-serif;
+    --shadow:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.03);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;line-height:1.65;
+       -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .page{max-width:900px;margin:0 auto;padding:28px 32px 40px}
+  h1{font-size:24px;line-height:1.3;margin:0 0 6px;color:var(--text-strong);letter-spacing:-.2px}
+  .sub{color:var(--text2);font-size:13px;margin-bottom:4px}
+  .meta{color:var(--text3);font-size:12px;margin-bottom:18px}
+  h2{font-size:15px;margin:22px 0 10px;color:var(--text-strong);display:flex;align-items:center;gap:8px}
+  h2:before{content:"";width:3px;height:14px;background:var(--primary);border-radius:2px}
+  h3{font-size:13.5px;margin:16px 0 8px;color:var(--text-strong)}
+  p{margin:8px 0}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);margin:12px 0}
+  .card.tight{padding:14px 16px}
+  .lead{background:var(--primary-soft);border:1px solid var(--primary-line);border-radius:12px;padding:14px 18px;margin:14px 0}
+  .lead b{color:var(--primary-text)}
+  ol.clean{margin:6px 0 0 18px;padding:0}
+  ol.clean li{margin:4px 0}
+  ul.clean{margin:6px 0 0 18px;padding:0}
+  ul.clean li{margin:4px 0}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12.5px}
+  th,td{border:1px solid var(--border);padding:8px 10px;vertical-align:top;text-align:left}
+  th{background:var(--surface2);font-weight:600;color:var(--text-strong);font-size:12px}
+  td.k{width:23%;font-weight:600;color:var(--text-strong)}
+  .tag{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap;
+       border:1px solid var(--border);background:var(--surface2);color:var(--text2)}
+  .tag.p{border-color:var(--primary-line);background:var(--primary-soft);color:var(--primary-text)}
+  .tag.s{border-color:#BBF7D0;background:var(--success-soft);color:var(--success-text)}
+  .tag.w{border-color:#FDE3A7;background:var(--warn-soft);color:var(--warn)}
+  .tag.e{border-color:#FECACA;background:var(--error-soft);color:var(--error-text)}
+  .tag.a{border-color:#E3D0FA;background:var(--ai-soft);color:var(--ai-text)}
+  .yes{color:var(--error-text);font-weight:600}
+  .no{color:var(--success-text);font-weight:600}
+  .stack{border:1px solid var(--border);border-radius:12px;overflow:hidden;margin:12px 0;background:var(--surface)}
+  .layer{display:grid;grid-template-columns:132px 1fr;gap:0;border-bottom:1px solid var(--line)}
+  .layer:last-child{border-bottom:0}
+  .layer .ln{background:var(--surface2);padding:12px 14px;font-weight:600;font-size:12.5px;color:var(--text-strong);
+             border-right:1px solid var(--border)}
+  .layer .lb{padding:12px 14px}
+  .layer .lb .t{font-weight:600;color:var(--text-strong);font-size:12.5px;margin-bottom:3px}
+  .layer .lb .d{color:var(--text2);font-size:12px}
+  .flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin-top:8px}
+  .flow span.step{border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:2px 10px;color:var(--text)}
+  .flow span.ar{color:var(--text3)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .note{font-size:12px;color:var(--text2);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:10px}
+  .cut{display:flex;gap:10px;align-items:flex-start;margin:6px 0}
+  .cut .x{color:var(--error-text);font-weight:700}
+  .foot{margin-top:24px;border-top:1px solid var(--border);padding-top:12px;color:var(--text3);font-size:11.5px}
+  @media print{
+    body{background:#fff;font-size:11.5px}
+    .page{max-width:none;padding:0 0 8px}
+    h1{font-size:19px} h2{font-size:13.5px;margin:14px 0 8px} h3{font-size:12.5px}
+    .card,.lead,.stack{box-shadow:none;break-inside:avoid}
+    table{break-inside:auto;font-size:11px} tr{break-inside:avoid}
+    h2,h3{break-after:avoid}
+    .pb{break-before:page}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>作业框架改造方案 —— 参考 C/D 端结构框架</h1>
+  <div class="sub">只管「功能结构」，不动界面样式（界面已统一为擎天浅色 token）</div>
+  <div class="meta">Nexpert · 云端 AI 远程运维助手 ｜ 讨论稿 v1 ｜ 2026-10-15 ｜ 对应版本 v1.2.0</div>
+
+  <div class="lead">
+    <b>三句话结论</b>
+    <ol class="clean">
+      <li><b>学的是三层骨架</b>（作业对象 → 可执行对象 → 状态与留痕），<b>不是界面</b>；界面保持我们已有风格。</li>
+      <li>我们缺的是 <b>「计划先行 / 状态门控 / 留痕汇聚」</b> 三件结构性能力，底层能力一样不缺。</li>
+      <li>我们的真能力（真桥接器、真 AI 诊断、真日志分析、真权限）按 <b>「插槽」</b> 方式接入，<b>不重写</b>；5 步落地，只有 1 步碰后端。</li>
+    </ol>
+  </div>
+
+  <h2>一、三层骨架：他们怎么搭，我们差在哪</h2>
+  <div class="stack">
+    <div class="layer">
+      <div class="ln">① 作业对象层</div>
+      <div class="lb">
+        <div class="t">C/D：房间 / 工单 / SN / 客户常驻页头，每一步都知道在给谁干活</div>
+        <div class="d"><b>我们：数据早已存在</b>（服务端房间表含 <code>room_code / sn / engineer / status / diagnosis / last_seen</code>），但页面几乎不展示（诊断台 0 处）。<br>
+        结论：<span class="tag s">只补展示</span> 面包屑 + 状态胶囊 + 终端三值，不动数据层。</div>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="ln">② 可执行对象层</div>
+      <div class="lb">
+        <div class="t">C/D：工具即对象 —— 分级（只读/写/刷写）+ 风险话术 + 预计时长 + 4 步计划；点开先看计划，确认后才执行</div>
+        <div class="d"><b>我们：零件都在</b>（诊断项 40 条、工具 26 项已是 JSON 单一来源派生），但字段只有 <code>key/icon/title/platform/group/prompt</code>，<b>没有 risk / dur / plan</b>，计划先行 0 处。<br>
+        结论：<span class="tag p">加字段 + 加一步确认</span> 执行链路完全不动。</div>
+      </div>
+    </div>
+    <div class="layer">
+      <div class="ln">③ 状态与留痕层</div>
+      <div class="lb">
+        <div class="t">C/D：状态机驱动界面（待触达 → 检测完成 → 已回写），AI 结论按状态回流；所有动作过<b>同一个留痕出口</b></div>
+        <div class="d"><b>我们：有状态也有留痕，但都散着</b>（服务端分级审批 106 处、快照回滚 22 处；页面留痕仅 1–2 处）。<br>
+        结论：<span class="tag w">收口</span> 状态胶囊 + 统一留痕面板（唯一需要新增后端出口的一步）。</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>二、C/D 比我们多出来的 5 条理念</h2>
+  <table>
+    <thead><tr><th style="width:17%">理念</th><th style="width:30%">他们怎么做（说人话）</th><th style="width:24%">我们的缺口</th><th>要补什么</th></tr></thead>
+    <tbody>
+      <tr><td class="k">作业对象贯穿全程</td><td>房间号 / SN / 客户 / 工单一直在页头，每步都清楚在给谁干活</td><td>数据已有，页面不显示</td><td>页头面包屑 + 状态胶囊</td></tr>
+      <tr><td class="k">风险即契约</td><td>分级决定确认策略：软件类修改必走计划确认；硬件更换可直接执行</td><td>Tier 未与「确认方式」显式绑定</td><td>Tier 与确认方式对应表</td></tr>
+      <tr><td class="k">计划先行</td><td>动手前先给「做哪几步 / 什么风险 / 多久」，确认才动</td><td><b>0 处</b></td><td>计划字段 + 执行前确认弹窗</td></tr>
+      <tr><td class="k">状态门控</td><td>界面只暴露「当前合法动作」：未连接不能采集、无结论不出 AI 会话</td><td>页面无统一三态（空/等待/实时）</td><td>三态标准化 + 动作可用性约束</td></tr>
+      <tr><td class="k">留痕收口</td><td>所有动作走同一个记录出口，页面常驻流水账</td><td>留痕零散，无汇聚入口</td><td>统一留痕出口 + 常驻面板</td></tr>
+    </tbody>
+  </table>
+
+  <h2>三、我们比他们多的，怎么嵌进去</h2>
+  <p style="margin-top:0">关键判断：<b>他们多的全是框架，我们多的全是真的</b> —— 所以是「插槽」，不是「改造」。</p>
+  <table>
+    <thead><tr><th style="width:21%">我们的强项</th><th style="width:15%">嵌入哪一格</th><th>怎么嵌（保持现有链路）</th><th style="width:8%">碰后端</th></tr></thead>
+    <tbody>
+      <tr><td class="k">真桥接器（设备侧真实执行）</td><td>② 执行器</td><td>工具卡「执行」继续走现有桥接器链路，仅在前面插一步「计划确认」</td><td class="no">否</td></tr>
+      <tr><td class="k">真 AI 五段诊断（分段缓冲）</td><td>③ AI 副驾</td><td>保持「只出报告、不执行」；结论后挂两个出口：生成报告 / 升级二线</td><td class="yes">是</td></tr>
+      <tr><td class="k">IDG 日志上传与分析</td><td>② 资料收集</td><td>即 C 端「开始收集」的加强版，补「一键分享给二线」</td><td class="no">否</td></tr>
+      <tr><td class="k">真账号 / 角色 / 分级审批</td><td>③ 门控</td><td>用现有 Tier 体系输出策略表：弹窗 / 双人工号 / 自动放行</td><td>仅配置</td></tr>
+      <tr><td class="k">房间心跳 / 桥接器版本 / 延迟</td><td>① 作业对象</td><td>页头三值显示（终端标识、桥接器版本、链路延迟）</td><td class="no">否</td></tr>
+      <tr><td class="k">一键连接 · 多端部署 · 房间令牌</td><td>③ 接入</td><td>保留现有连接方式，只把入口收进统一外壳</td><td class="no">否</td></tr>
+      <tr><td class="k">40 诊断项 + 26 工具（已数据派生）</td><td>② 注册表</td><td>沿用现有单一来源，仅扩展字段，页面自动长出风险标签与计划</td><td class="no">否</td></tr>
+    </tbody>
+  </table>
+
+  <h3>改造后的结构</h3>
+  <div class="card tight">
+    <div class="flow">
+      <span class="step">① 作业对象：房间 → SN / 机型 / 客户 / 工单 / 工程师 / 桥接器版本</span>
+      <span class="ar">→</span>
+      <span class="step">② 可执行对象：诊断项 / 工具（+ risk / dur / plan）</span>
+      <span class="ar">→</span>
+      <span class="step">③ 状态与留痕：状态线 + 单一留痕出口 + AI 副驾两出口</span>
+    </div>
+    <div class="flow" style="margin-top:10px">
+      <span class="step">查看计划</span><span class="ar">→</span>
+      <span class="step">确认</span><span class="ar">→</span>
+      <span class="step">桥接器真执行</span><span class="ar">→</span>
+      <span class="step">步骤条 + 终端流</span><span class="ar">→</span>
+      <span class="step">结论 / 报告</span><span class="ar">→</span>
+      <span class="step">出报告 或 升级二线</span>
+    </div>
+  </div>
+
+  <h2 class="pb">四、落地清单（加法式，先快照可回退）</h2>
+  <table>
+    <thead><tr><th style="width:6%">步</th><th style="width:23%">改什么</th><th style="width:28%">动哪里</th><th style="width:9%">碰后端</th><th style="width:8%">风险</th><th>工时</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>新增三字段：<code>risk / dur / plan</code></td><td>诊断项 JSON、工具清单 JSON（单一来源）</td><td class="no">否</td><td><span class="tag s">低</span></td><td>0.5 天</td></tr>
+      <tr><td>2</td><td>执行前「计划确认」弹窗 + 步骤条</td><td>诊断台页、工具页</td><td class="no">否</td><td><span class="tag w">中</span></td><td>1 天</td></tr>
+      <tr><td>3</td><td>页头状态与终端三值</td><td>工作台 / 诊断台 / 工具页 页头</td><td class="no">否</td><td><span class="tag s">低</span></td><td>0.5 天</td></tr>
+      <tr><td>4</td><td>统一留痕出口 + 常驻流水账面板</td><td>服务端审计出口 + 页面面板</td><td><span class="yes">是</span></td><td><span class="tag w">中</span></td><td>1 天</td></tr>
+      <tr><td>5</td><td>AI 结论两出口：出报告 / 升级</td><td>页面 + 三处 prompt 同步</td><td><span class="yes">是</span></td><td><span class="tag w">中</span></td><td>1 天</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>注</b>：表中「是」的两处（AI 口径、留痕出口）需先出方案——AI 口径调整必须同步服务端三段 prompt / JSON / 页面三条消费路径。<br>合计约 <b>4 个工作日</b>。第 1、3 步可立即做（零后端、纯加法）；第 2 步是体验分水岭；第 4、5 步涉及后端与 prompt，需先出方案再动手。</div>
+
+  <h2>五、明确不抄的部分</h2>
+  <div class="grid2">
+    <div class="card tight">
+      <div class="cut"><span class="x">×</span><div>原型门户页（四端入口、重置剧本）—— 演示用</div></div>
+      <div class="cut"><span class="x">×</span><div>假执行：定时器点亮步骤、写死的 AI 答案</div></div>
+      <div class="cut"><span class="x">×</span><div>免登录 / 任意密码 —— 无真实鉴权</div></div>
+    </div>
+    <div class="card tight">
+      <div class="cut"><span class="x">×</span><div>繁体名称与品牌署名 —— 与产品口径冲突</div></div>
+      <div class="cut"><span class="x">×</span><div>演示数值（房间号、工单号、SN 均为假数据）</div></div>
+      <div class="cut"><span class="x">×</span><div>界面样式改造 —— 样式已统一，无需再动</div></div>
+    </div>
+  </div>
+
+  <h2>六、风险与验收口径</h2>
+  <ul class="clean">
+    <li><b>改动方式</b>：全部加法式（新增 key / 新增函数），改前快照 + 一句话回退命令。</li>
+    <li><b>prompt 同步</b>：任何 AI 口径调整必须同步三处消费路径（服务端三段 + JSON + 页面），改完用异语言样本验收字段数。</li>
+    <li><b>验收方式</b>：真机跑通「收集 → 诊断 → 工具执行 → 结论/报告」全链路；逐元素对比度复算；真浏览器主路径回归；旧结构无残留。</li>
+    <li><b>不改变</b>：内部功能、接口、既有操作习惯（第 2 步新增的确认弹窗为前插一步，不替换原有审批流）。</li>
+  </ul>
+
+  <div class="foot">
+    本文档仅讨论功能结构框架，不含界面样式变更。样式已于 v1.2.0 统一为擎天浅色 token（6 页 44 令牌同值、对比度全部达标）。
+    参考对象为 C/D 端演示原型，其机制可借鉴、实现不可照搬。
+  </div>
+
+</div>
+</body>
+</html>

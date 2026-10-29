@@ -249,20 +249,14 @@
         <span id="file-tabs"></span>
         {% else %}
         {% if os_type == 'linux' %}
-        <!-- 2026-09-26 精简：与 Windows 侧口径统一（去掉「深度分析」——与 AI 分析同类） -->
-        <div class="tab" data-type="linux_overview">📄 系统概览</div>
+        <!-- 2026-10-26：只留 AI 分析（系统概览页签已去掉） -->
         {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>{% endif %}
         <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
         <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
         <span id="file-tabs"></span>
         {% elif os_type == 'windows' %}
-        <!-- 2026-09-26 精简：7 个页签 → 4 个（主人确认）
-             去掉「整体总结」（是前三项的汇总，重复）、「深度分析」（与 AI 分析同类，只是后端通道不同）、
-             「SIOlog」（仅部分机型有，已改为按文件自动出现）
-             保留：系统概览（基础事实）/ 系统诊断（错误事件+Dump摘要）/ Dump 分析 / AI 分析 -->
-        <div class="tab" data-type="overview">📄 系统概览</div>
-        <div class="tab" data-type="diagnostics">📋 系统诊断</div>
-        <div class="tab" data-type="dump">💾 Dump 分析</div>
+        <!-- 2026-10-26：按主人要求只去掉这 3 个页签（系统概览 / 系统诊断 / Dump 分析），
+             左侧诊断文件栏与文件预览保持原样，默认落在 AI 分析 -->
         {% if not is_guest %}<div class="tab ai-tab" data-type="chat">🤖 AI 分析</div>{% endif %}
         <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
         <span class="file-tabs-sep" id="file-tabs-sep" style="display:none;"></span>
@@ -305,7 +299,8 @@
         const osType = '{{ os_type }}';
         const isOtherLayout = osType === 'other' || osType === 'bmc';
         // 2026-09-08 主人要求：默认视图 = 系统概览（本地快）——AI 整体总结不自动跑（点击才触发）
-        let currentType = isOtherLayout ? 'chat' : '{{ "linux_overview" if os_type in ("linux", "bmc") else "overview" }}';
+        // 2026-10-26：概览/诊断/Dump 页签已去掉，默认进 AI 分析
+        let currentType = 'chat';
         // For other layout, activate AI tab by default
         if (isOtherLayout) {
             setTimeout(function() {
@@ -498,10 +493,9 @@
         // 初始化:激活默认 tab 并加载——优先直接读已有报告(立即出数据),报告不存在才触发分析
         (function () {
             var dt = document.querySelector('.tab[data-type="' + currentType + '"]');
-            if (dt) {
-                dt.classList.add('active');
-                if (!isOtherLayout) loadReportData(currentType);
-            }
+            if (dt) dt.classList.add('active');
+            if (currentType === 'chat') { renderChat('api'); }
+            else { loadReportData(currentType); }
         })();
         async function runAnalysis(type) {
             if (type === 'chat') return;

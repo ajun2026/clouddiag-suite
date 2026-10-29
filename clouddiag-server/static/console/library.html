@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Nexpert · 产品资料库</title>
+<style>
+:root{
+  --brand:#2468F2; --brand-tint:#EAF1FE; --brand-ink:#1747B8;
+  --paper:#FFFFFF; --paper-2:#F7F9FC; --line:#E5E9F0; --line-2:#EFF2F7;
+  --text:#1A1F2B; --text-2:#5A6472; --text-3:#8A94A3;
+  --ok:#0E9F6E; --warn:#B45309; --danger:#B91C1C;
+  --rail:248px; --h:56px;
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--paper-2);color:var(--text);
+  font:400 14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit;text-decoration:none}
+
+/* ── 顶栏 ── */
+.top{position:sticky;top:0;z-index:30;height:var(--h);display:flex;align-items:center;gap:10px;
+  padding:0 14px;background:var(--paper);border-bottom:1px solid var(--line)}
+.top .brand{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.2px}
+.top .brand svg{color:var(--brand)}
+.top .t-title{font-size:14.5px;font-weight:650}
+.top .spacer{flex:1}
+.top .icon-btn{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:var(--text-2);
+  border:1px solid transparent}
+.top .icon-btn:hover{background:var(--paper-2);border-color:var(--line);color:var(--text)}
+.top .icon-btn.on{background:var(--brand-tint);border-color:#CFE0FD;color:var(--brand-ink)}
+.top .hamb{display:none}
+
+/* ── 搜索 ── */
+.search{display:flex;align-items:center;gap:8px;background:var(--paper-2);border:1px solid var(--line);
+  border-radius:9px;padding:0 10px;height:34px;width:230px}
+.search svg{color:var(--text-3);flex:0 0 auto}
+.search input{border:0;background:none;outline:none;width:100%;font-size:13px;color:var(--text)}
+.search input::placeholder{color:var(--text-3)}
+
+/* ── 抽屉 / 左侧导航 ── */
+.shell{display:flex;min-height:calc(100vh - var(--h))}
+.rail{flex:0 0 var(--rail);background:var(--paper);border-right:1px solid var(--line);
+  padding:12px 0;position:sticky;top:var(--h);height:calc(100vh - var(--h));overflow:auto}
+.rail .grp{padding:10px 18px 6px;font-size:11px;color:var(--text-3);letter-spacing:.6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:11px 18px;font-size:13.5px;color:var(--text);
+  border-left:3px solid transparent;width:100%;text-align:left}
+.nav-item svg{color:var(--text-3);flex:0 0 auto}
+.nav-item .cn{margin-left:auto;font-size:11.5px;color:var(--text-3)}
+.nav-item .arw{margin-left:auto;color:var(--text-3);transition:transform .15s}
+.nav-item:hover{background:var(--paper-2)}
+.nav-item.on{background:var(--brand-tint);color:var(--brand-ink);border-left-color:var(--brand);font-weight:600}
+.nav-item.on svg{color:var(--brand)}
+.nav-item.open .arw{transform:rotate(90deg)}
+.sub{overflow:hidden;max-height:0;transition:max-height .2s ease}
+.sub.open{max-height:520px}
+.sub .nav-item{padding:9px 18px 9px 44px;font-size:13px;color:var(--text-2)}
+.sub .nav-item.on{color:var(--brand-ink);font-weight:600;background:transparent}
+.rail .foot{padding:12px 18px;margin-top:6px;border-top:1px solid var(--line-2);font-size:11.5px;color:var(--text-3)}
+
+/* ── 内容区 ── */
+.main{flex:1;min-width:0;padding:18px 20px 40px}
+.crumb{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-3);margin-bottom:12px}
+.crumb svg{color:var(--danger)}
+.crumb b{color:var(--text);font-weight:600}
+.h1{font-size:19px;font-weight:700;letter-spacing:.2px;margin:0 0 4px}
+.sub1{font-size:12.5px;color:var(--text-2);margin:0 0 16px}
+
+.cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(268px,1fr))}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 15px;
+  text-align:left;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,box-shadow .15s}
+.card:hover{border-color:#C7D7F8;box-shadow:var(--shadow)}
+.card .c-top{display:flex;align-items:center;gap:9px}
+.card .c-ic{width:30px;height:30px;border-radius:8px;background:var(--brand-tint);color:var(--brand);
+  display:grid;place-items:center;flex:0 0 auto}
+.card .c-name{font-size:14.5px;font-weight:650;letter-spacing:.2px}
+.card .c-desc{font-size:12.5px;color:var(--text-2);min-height:20px}
+.card .c-specs{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--text-2);
+  border-top:1px dashed var(--line-2);padding-top:8px}
+.card .c-row{display:flex;gap:8px}
+.card .c-row span:first-child{color:var(--text-3);flex:0 0 66px}
+.card .c-foot{display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:6px}
+.badge{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:6px;font-size:11px;
+  border:1px solid var(--line);color:var(--text-2);background:var(--paper-2)}
+.badge.b{color:var(--brand-ink);border-color:#CFE0FD;background:var(--brand-tint)}
+.badge.g{color:var(--ok);border-color:#BFE8D8;background:#F1FBF6}
+.more{font-size:12px;color:var(--brand);font-weight:600}
+.empty{background:var(--paper);border:1px dashed var(--line);border-radius:12px;padding:34px 18px;
+  text-align:center;color:var(--text-3);font-size:13px}
+.empty b{display:block;color:var(--text);font-size:14px;margin-bottom:4px}
+
+/* ── 机型详情 ── */
+.detail{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px 18px 8px}
+.detail h2{font-size:16px;margin:0 0 3px;font-weight:700}
+.detail .d-sub{font-size:12.5px;color:var(--text-2);margin:0 0 14px}
+.sect-title{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:650;color:var(--text);
+  margin:16px 0 8px;padding-top:10px;border-top:1px solid var(--line-2)}
+.sect-title svg{color:var(--brand)}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;font-size:12.5px;margin-bottom:10px}
+.kv dt{color:var(--text-3)}
+.kv dd{margin:0;color:var(--text)}
+.list{list-style:none;padding:0;margin:0 0 12px}
+.list li{position:relative;padding-left:16px;font-size:12.5px;color:var(--text-2);margin-bottom:6px}
+.list li::before{content:"";position:absolute;left:3px;top:8px;width:5px;height:5px;border-radius:50%;background:var(--brand)}
+.tofill{color:var(--warn)}
+
+/* ── 遮罩（移动端抽屉） ── */
+.mask{position:fixed;inset:0;background:rgba(16,24,40,.42);opacity:0;pointer-events:none;transition:opacity .2s;z-index:35}
+.mask.on{opacity:1;pointer-events:auto}
+
+@media (max-width:860px){
+  :root{--rail:82%}
+  .top .hamb{display:grid}
+  .top .brand .t-title{display:none}
+  .search{width:auto;flex:1;min-width:0}
+  .rail{position:fixed;left:0;top:0;height:100vh;z-index:40;transform:translateX(-102%);
+    transition:transform .22s ease;box-shadow:0 0 40px rgba(16,24,40,.18);padding-top:14px}
+  .rail.on{transform:none}
+  .main{padding:14px 13px 34px}
+  .cards{grid-template-columns:1fr}
+  .kv{grid-template-columns:96px 1fr}
+  .rail .rail-head{display:flex}
+}
+@media (min-width:861px){ .mask{display:none} }
+/* 抽屉顶部品牌区（移动端可见） */
+.rail-head{display:none;align-items:center;gap:10px;padding:6px 16px 14px;border-bottom:1px solid var(--line-2);margin-bottom:6px}
+.rail-head .rh-ic{width:34px;height:34px;border-radius:9px;background:var(--brand);color:#fff;display:grid;place-items:center}
+.rail-head .rh-t{font-size:13.5px;font-weight:700}
+.rail-head .rh-s{font-size:11px;color:var(--text-3)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <button class="icon-btn hamb" id="hamb" aria-label="菜单">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div class="brand">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V6a2 2 0 0 1 2-2h13v16H6.5A2.5 2.5 0 0 0 4 22.5"/><path d="M8 8h7M8 12h5"/></svg>
+    <span class="t-title">产品资料库</span>
+  </div>
+  <div class="search">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+    <input id="q" readonly placeholder="搜索机型或规格">
+  </div>
+  <div class="spacer"></div>
+  <button class="icon-btn" id="btnHome" title="回首页">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+  </button>
+  <a class="icon-btn" href="/dashboard" title="回工作台">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v6h6V3zM21 3h-4v8h6V5a2 2 0 0 0-2-2zM3 15v4a2 2 0 0 0 2 2h4v-6H3zM15 15h6v4a2 2 0 0 1-2 2h-4v-6z"/></svg>
+  </a>
+</header>
+
+<div class="shell">
+  <aside class="rail" id="rail">
+    <div class="rail-head">
+      <span class="rh-ic">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V6a2 2 0 0 1 2-2h13v16H6.5A2.5 2.5 0 0 0 4 22.5"/></svg>
+      </span>
+      <span><span class="rh-t">产品资料库</span><br><span class="rh-s">Nexpert</span></span>
+    </div>
+    <button class="nav-item on" data-view="home">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      首页
+    </button>
+    <div class="grp">产品系列</div>
+    <div id="navSeries"></div>
+    <div class="foot">v0.1.0 · 资料维护见 data/library.json</div>
+  </aside>
+
+  <main class="main" id="main"></main>
+</div>
+<div class="mask" id="mask"></div>
+
+<script>
+(function(){
+  'use strict';
+  var DATA = null, VIEW = { page:'home', cat:null, model:null }, Q = '';
+
+  var IC = {
+    ws:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+    tower:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 6h6M9 10h6"/><circle cx="12" cy="17" r="2"/></svg>',
+    tiny:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5"/></svg>',
+    arw:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>',
+    doc:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+    info:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
+    spec:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+    warn:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>'
+  };
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+  function $(id){ return document.getElementById(id); }
+
+  /* ── 导航渲染 ── */
+  function paintNav(){
+    var h = '';
+    (DATA.categories||[]).forEach(function(c){
+      var on = VIEW.page==='cat' && VIEW.cat===c.key;
+      var open = (VIEW.cat===c.key) ? ' open' : '';
+      var models = c.models||[];
+      h += '<button class="nav-item'+(on?' on':'')+open.replace(' open',' open')+'" data-cat="'+esc(c.key)+'">'
+        + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg>'
+        + esc(c.name)
+        + '<span class="arw">'+IC.arw+'</span></button>';
+      h += '<div class="sub'+open+'">';
+      models.forEach(function(m,i){
+        var mon = VIEW.page==='model' && VIEW.cat===c.key && VIEW.model===i;
+        h += '<button class="nav-item'+(mon?' on':'')+'" data-cat="'+esc(c.key)+'" data-model="'+i+'">'+esc(m.name)+'</button>';
+      });
+      h += '</div>';
+    });
+    $('navSeries').innerHTML = h;
+    document.querySelectorAll('#navSeries .nav-item').forEach(function(b){
+      b.addEventListener('click', function(){
+        var cat = b.dataset.cat, mi = b.dataset.model;
+        if (mi!=null) openModel(cat, parseInt(mi,10)); else openCat(cat);
+        closeDrawer();
+      });
+    });
+  }
+
+  /* ── 视图 ── */
+  function openHome(){ VIEW={page:'home',cat:null,model:null}; paint(); }
+  function openCat(k){ VIEW={page:'cat',cat:k,model:null}; paint(); }
+  function openModel(k,i){ VIEW={page:'model',cat:k,model:i}; paint(); }
+
+  function catByKey(k){ return (DATA.categories||[]).filter(function(c){ return c.key===k; })[0]; }
+
+  function filtered(list){
+    if (!Q) return list;
+    var q = Q.toLowerCase();
+    return list.filter(function(m){
+      var blob = (m.name+' '+(m.desc||'')+' '+JSON.stringify(m.specs||{})+' '+(m.highlights||[]).join(' ')).toLowerCase();
+      return blob.indexOf(q)>=0;
+    });
+  }
+
+  function paint(){
+    paintNav();
+    document.querySelectorAll('#rail > .nav-item[data-view="home"]').forEach(function(b){
+      b.classList.toggle('on', VIEW.page==='home');
+    });
+    var m = $('main');
+    if (Q) { m.innerHTML = viewSearch(); bindCards(); return; }
+    if (VIEW.page==='home') m.innerHTML = viewHome();
+    else if (VIEW.page==='cat') m.innerHTML = viewCat(VIEW.cat);
+    else m.innerHTML = viewModel(VIEW.cat, VIEW.model);
+    bindCards();
+    // 搜索框只保留命中信息，不自动聚焦
+  }
+
+  function viewHome(){
+    var total = 0;
+    (DATA.categories||[]).forEach(function(c){ total += (c.models||[]).length; });
+    var h = '<div class="crumb">'
+      + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>'
+      + '<b>首页</b></div>'
+      + '<h1 class="h1">产品资料库</h1>'
+      + '<p class="sub1">共 '+ (DATA.categories||[]).length +' 个系列 · '+ total +' 个机型条目</p>'
+      + '<div class="cards">';
+    (DATA.categories||[]).forEach(function(c){
+      h += '<button class="card" data-cat="'+esc(c.key)+'">'
+        + '<div class="c-top"><span class="c-ic">'+(c.key==='ws'?IC.ws:IC.tower)+'</span>'
+        + '<span class="c-name">'+esc(c.name)+'</span><span class="badge b" style="margin-left:auto">'+((c.models||[]).length)+' 个机型</span></div>'
+        + '<div class="c-desc">'+esc(c.desc||'')+'</div>'
+        + '<div class="c-foot"><span class="more">查看系列</span>'+IC.arw+'</div>'
+        + '</button>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function viewSearch(){
+    var hits = [];
+    (DATA.categories||[]).forEach(function(c){
+      filtered(c.models||[]).forEach(function(mm){
+        hits.push({ cat:c, model:mm, idx:(c.models||[]).indexOf(mm) });
+      });
+    });
+    var h = '<div class="crumb"><b>搜索</b></div>'
+      + '<h1 class="h1">搜索「'+esc(Q)+'」</h1>'
+      + '<p class="sub1">全库命中 '+hits.length+' 个机型条目</p>';
+    if (!hits.length){
+      h += '<div class="empty"><b>没有匹配的机型</b>换个关键词，或从左栏选系列浏览</div>';
+      return h;
+    }
+    h += '<div class="cards">';
+    hits.forEach(function(x){
+      var specs = x.model.specs||{}; var keys = Object.keys(specs).slice(0,3);
+      h += '<button class="card" data-cat="'+esc(x.cat.key)+'" data-model="'+x.idx+'">'
+        + '<div class="c-top"><span class="c-ic">'+(/塔|Tower/i.test(x.model.form||'')?IC.tower:IC.tiny)+'</span>'
+        + '<span class="c-name">'+esc(x.model.name)+'</span>'
+        + '<span class="badge b" style="margin-left:auto">'+esc(x.cat.name)+'</span></div>'
+        + '<div class="c-desc">'+esc(x.model.desc||'')+'</div>'
+        + '<div class="c-specs">'+keys.map(function(kk){
+            return '<span class="c-row"><span>'+esc(kk)+'</span><span'+(specs[kk]==='待补充'?' class="tofill"':'')+'>'+esc(specs[kk])+'</span></span>';
+          }).join('')+'</div>'
+        + '<div class="c-foot"><span class="more">查看资料</span>'+IC.arw+'</div>'
+        + '</button>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function viewCat(k){
+    var c = catByKey(k); if (!c) return viewHome();
+    var list = filtered(c.models||[]);
+    var h = '<div class="crumb">'
+      + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>'
+      + '<b>'+esc(c.name)+'</b></div>'
+      + '<h1 class="h1">'+esc(c.name)+'</h1>'
+      + '<p class="sub1">'+esc(c.desc||'')+(Q?(' · 搜索「'+esc(Q)+'」命中 '+list.length+' 项'):(' · '+list.length+' 个机型'))+'</p>';
+    if (!list.length){
+      h += '<div class="empty"><b>暂无机型资料</b>可在 data/library.json 的 '+esc(c.key)+' 分类下补充后刷新本页</div>';
+      return h;
+    }
+    h += '<div class="cards">';
+    list.forEach(function(m){
+      var idx = (c.models||[]).indexOf(m);
+      var specs = m.specs||{};
+      var keys = Object.keys(specs).slice(0,3);
+      h += '<button class="card" data-cat="'+esc(c.key)+'" data-model="'+idx+'">'
+        + '<div class="c-top"><span class="c-ic">'+(/塔|Tower/i.test(m.form||'')?IC.tower:IC.tiny)+'</span>'
+        + '<span class="c-name">'+esc(m.name)+'</span>'
+        + (m.form?'<span class="badge" style="margin-left:auto">'+esc(m.form)+'</span>':'')+'</div>'
+        + '<div class="c-desc">'+esc(m.desc||'')+'</div>'
+        + '<div class="c-specs">' + keys.map(function(kk){
+            return '<span class="c-row"><span>'+esc(kk)+'</span><span'+(specs[kk]==='待补充'?' class="tofill"':'')+'>'+esc(specs[kk])+'</span></span>';
+          }).join('') + '</div>'
+        + '<div class="c-foot"><span class="more">查看资料</span>'+IC.arw+'</div>'
+        + '</button>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function viewModel(k, i){
+    var c = catByKey(k); if (!c) return viewHome();
+    var m = (c.models||[])[i]; if (!m) return viewCat(k);
+    var specs = m.specs||{};
+    var h = '<div class="crumb">'
+      + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>'
+      + '<b>'+esc(c.name)+'</b> › '+esc(m.name)+'</div>'
+      + '<div class="detail">'
+      + '<h2>'+esc(m.name)+(m.form?' <span class="badge">'+esc(m.form)+'</span>':'')+'</h2>'
+      + '<p class="d-sub">'+esc(m.desc||'')+'</p>';
+
+    if (Object.keys(specs).length){
+      h += '<div class="sect-title">'+IC.spec+'主要规格</div><dl class="kv">';
+      Object.keys(specs).forEach(function(kk){
+        h += '<dt>'+esc(kk)+'</dt><dd'+(specs[kk]==='待补充'?' class="tofill"':'')+'>'+esc(specs[kk])+'</dd>';
+      });
+      h += '</dl>';
+    }
+    if ((m.highlights||[]).length){
+      h += '<div class="sect-title">'+IC.info+'要点</div><ul class="list">'
+        + m.highlights.map(function(x){ return '<li>'+esc(x)+'</li>'; }).join('') + '</ul>';
+    }
+    if ((m.notes||[]).length){
+      h += '<div class="sect-title">'+IC.warn+'现场注意</div><ul class="list">'
+        + m.notes.map(function(x){ return '<li>'+esc(x)+'</li>'; }).join('') + '</ul>';
+    }
+    if ((m.docs||[]).length){
+      h += '<div class="sect-title">'+IC.doc+'相关资料</div><ul class="list">'
+        + m.docs.map(function(d){
+            return '<li><a href="'+esc(d.url||'#')+'"'+(d.url?' target="_blank" rel="noopener"':'')+'>'+esc(d.title||d.url)+'</a></li>';
+          }).join('') + '</ul>';
+    }
+    h += '<div style="height:8px"></div></div>';
+    return h;
+  }
+
+  function bindCards(){
+    document.querySelectorAll('#main .card').forEach(function(b){
+      b.addEventListener('click', function(){
+        var cat = b.dataset.cat, mi = b.dataset.model;
+        if (mi!=null) openModel(cat, parseInt(mi,10)); else openCat(cat);
+      });
+    });
+  }
+
+  /* ── 交互 ── */
+  function openDrawer(){ $('rail').classList.add('on'); $('mask').classList.add('on'); }
+  function closeDrawer(){ $('rail').classList.remove('on'); $('mask').classList.remove('on'); }
+  $('hamb').addEventListener('click', openDrawer);
+  $('mask').addEventListener('click', closeDrawer);
+  $('btnHome').addEventListener('click', function(){ Q=''; $('q').value=''; $('q').readOnly=true; openHome(); });
+  document.addEventListener('keydown', function(e){ if (e.key==='Escape'){ closeDrawer(); } });
+  document.querySelector('#rail > .nav-item[data-view="home"]').addEventListener('click', function(){ openHome(); closeDrawer(); });
+
+  /* 搜索框：默认 readonly 防浏览器自动填充，点击才解锁 */
+  var q = $('q');
+  q.addEventListener('click', function(){ q.readOnly = false; q.focus(); });
+  q.addEventListener('input', function(){
+    var v = q.value.trim();
+    if (/@/.test(v)) { q.value=''; v=''; }         // 防账号/邮箱被塞进来
+    Q = v;
+    if (!Q && VIEW.page==='model') { VIEW.page='cat'; }   // 清空搜索回到原系列
+    paint();
+  });
+
+  /* ── 数据 ── */
+  function boot(){
+    fetch('/api/library', {credentials:'same-origin'})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(j){ DATA = j || {categories:[]}; openHome(); })
+      .catch(function(e){
+        $('main').innerHTML = '<div class="empty"><b>资料库读取失败</b>'+esc(e.message||e)+'</div>';
+      });
+  }
+  boot();
+})();
+</script>
+</body>
+</html>

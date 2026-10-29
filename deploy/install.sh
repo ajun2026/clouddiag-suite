@@ -130,12 +130,12 @@ read -p " AI API Key: " AI_KEY
 [ -z "$AI_KEY" ] && { echo -e "${C_RED}API Key 不能为空${C_NC}"; exit 1; }
 echo ""
 echo "  模型名（须支持 Function Calling）示例："
-echo "      · DeepSeek: deepseek-chat / deepseek-reasoner"
+echo "      · DeepSeek: deepseek-flash（旧名 deepseek-chat / deepseek-reasoner 亦路由到同一模型）"
 echo "      · OpenAI:   gpt-4o / gpt-4o-mini"
 echo "      · 通义:     qwen-plus / qwen-max"
 echo "      · 智谱:     glm-4-plus"
-read -p " 模型名 (默认 deepseek-chat): " AI_MODEL
-AI_MODEL=${AI_MODEL:-deepseek-chat}
+read -p " 模型名 (默认 deepseek-flash): " AI_MODEL
+AI_MODEL=${AI_MODEL:-deepseek-flash}
 echo -e " ${C_GREEN}✓ AI 通道: $AI_URL ($AI_MODEL)${C_NC}"
 echo ""
 echo -e "  ${C_BLUE}备用 AI 通道（可选，按回车跳过）${C_NC}"

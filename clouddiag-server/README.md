@@ -223,7 +223,7 @@ Create a `.env` file in the project root (template: `.env.example`):
 # API Configuration (DeepSeek or any OpenAI-compatible API)
 OPENAI_BASE_URL=https://api.deepseek.com/v1
 OPENAI_API_KEY=sk-your-api-key-here
-OPENAI_MODEL=deepseek-chat
+OPENAI_MODEL=deepseek-flash
 
 # Server Configuration
 SERVER_HOST=0.0.0.0

@@ -31,7 +31,7 @@ CONTEXT_DIR = HERMES_QUEUE / "context"
 
 API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
-MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
 
 POLL_INTERVAL = 3.0   # 轮询秒数
 MAX_CONTEXT_CHARS = 60000  # 上下文截断上限（防超长）

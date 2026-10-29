@@ -44,7 +44,7 @@ python server.py
 |---|---|---|
 | `OPENAI_BASE_URL` | ✅ | 你的 AI API 地址，如 `https://api.deepseek.com/v1` |
 | `OPENAI_API_KEY` | ✅ | 你的 API Key（sk- 开头） |
-| `OPENAI_MODEL` | ✅ | 你的模型名，如 `deepseek-chat` |
+| `OPENAI_MODEL` | ✅ | 你的模型名，如 `deepseek-flash` |
 | `SERVER_HOST` | 一般不用 | `0.0.0.0`（监听所有网卡） |
 | `SERVER_PORT` | 一般不用 | `8000` |
 | `AGENT_BRAIN` | 默认即可 | `deepseek`＝纯 DeepSeek 大脑，无需 Hermes 即可用 |

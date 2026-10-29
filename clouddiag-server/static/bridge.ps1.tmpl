@@ -247,12 +247,39 @@ function Handle-UploadFileRequest {
         $httpBase = $ServerUrl -replace '^wss://', 'https://' -replace '^ws://', 'http://'
         $uploadUrl = "$httpBase/api/bridge/upload?room=$Room&token=$([uri]::EscapeDataString($env:BRIDGE_TOKEN))&fid=$id"
         $tmpResp = Join-Path $env:TEMP "clouddiag_up_$([guid]::NewGuid().ToString('N')).txt"
-        $cp = Start-Process -FilePath "curl.exe" -ArgumentList @('-sk','-X','POST','-m','600','-F',"file=@`"$path`"",'-o',$tmpResp,$uploadUrl) -NoNewWindow -Wait -PassThru
+        # 2026-10-19：大文件上传稳定性加固
+        #   实测客户机 curl exit 56（Failure in receiving network data）：上传 14.75MB 中途连接被断。
+        #   - "--http1.1"      避开部分中间设备/运营商对 HTTP/2 大体积上行处理异常（最常见诱因）
+        #   - "-H 'Expect:'"   关闭 100-continue（服务器不回 100 时 curl 会空等/异常）
+        #   - "--retry ..."    断流自动重试（-F 上传可安全重试；服务端按 fid 幂等）
+        #   - "speed-time/limit" 超过 120 秒无有效传输即判定失败并重试，避免挂死
+        #   - "-v" 输出落到审计，下次失败能直接看到握手/传输层原因
+        $errLog = Join-Path $env:TEMP "clouddiag_up_err_$([guid]::NewGuid().ToString('N')).txt"
+        $curlArgs = @(
+            '-sS', '-k', '--http1.1', '-H', 'Expect:', '-X', 'POST',
+            '-m', '1800',
+            '--connect-timeout', '20',
+            '--retry', '3', '--retry-delay', '3', '--retry-all-errors',
+            '--speed-time', '120', '--speed-limit', '1024',
+            '-F', "file=@`"$path`"",
+            '-o', $tmpResp, '-w', '%{http_code}',
+            $uploadUrl
+        )
+        $cp = Start-Process -FilePath "curl.exe" -ArgumentList $curlArgs -NoNewWindow -Wait -PassThru -RedirectStandardError $errLog
         $body = if (Test-Path $tmpResp) { Get-Content $tmpResp -Raw } else { "" }
+        $errBody = if (Test-Path $errLog) { Get-Content $errLog -Raw } else { "" }
         if (Test-Path $tmpResp) { Remove-Item $tmpResp -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $errLog) { Remove-Item $errLog -Force -ErrorAction SilentlyContinue }
         if ($cp.ExitCode -ne 0) {
-            Send-Json @{ type = "file_upload_error"; id = $id; error = "http upload failed (curl exit $($cp.ExitCode)): $body" }
-            Write-Audit "upload_request HTTP ERROR exit=$($cp.ExitCode) $path"
+            $hint = switch ($cp.ExitCode) {
+                56 { "（上传中途连接被断开：多为客户机上行网络/中间设备中断，已自动重试 3 次仍失败）" }
+                28 { "（传输超时：客户机上行太慢或网络不稳）" }
+                35 { "（TLS 握手失败：可能被中间设备拦截 https）" }
+                6  { "（DNS 解析失败：检查客户机 DNS/网络）" }
+                default { "" }
+            }
+            Send-Json @{ type = "file_upload_error"; id = $id; error = "http upload failed (curl exit $($cp.ExitCode)) $hint $body $errBody" }
+            Write-Audit "upload_request HTTP ERROR exit=$($cp.ExitCode) $path $errBody"
             return
         }
         # 服务器返回 {job_id, analyze_url}——回传 WS（tools/upload 的 future 解析）

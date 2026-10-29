@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexpert · 作业框架改造蓝图（一页版）</title>
+<style>
+  :root{
+    --primary:#2468F2; --primary-text:#1E56D6; --primary-soft:#EEF4FE; --primary-line:#C9D9FB;
+    --ok-text:#047857; --ok-soft:#ECFDF5; --ok-line:#BBF7D0;
+    --warn:#B45309; --warn-soft:#FFFBEB; --warn-line:#FDE3A7;
+    --err-text:#B91C1C; --err-soft:#FEF2F2; --err-line:#FECACA;
+    --bg:#F9F9F9; --surface:#FFFFFF; --surface2:#F2F3F5;
+    --text:#151B26; --text-strong:#0F172A; --text2:#5C5F66; --text3:#9CA3AF;
+    --border:#E8E9EB; --line:#F2F3F5;
+    --font:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Segoe UI",-apple-system,system-ui,sans-serif;
+    --shadow:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.03);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:12px;line-height:1.5;
+       -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+  .page{max-width:940px;margin:0 auto;padding:20px 26px 26px}
+  h1{font-size:19px;margin:0;color:var(--text-strong);letter-spacing:-.2px}
+  .hdr{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;border-bottom:2px solid var(--primary);padding-bottom:8px}
+  .hdr .r{font-size:11.5px;color:var(--text2);text-align:right;line-height:1.4}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--text2);margin:8px 0 2px}
+  .sec{margin:13px 0 0}
+  .sec-t{font-size:12px;font-weight:700;color:var(--text-strong);margin-bottom:6px;display:flex;align-items:baseline;gap:7px}
+  .sec-t em{font-style:normal;color:var(--primary-text);font-weight:700}
+  .sec-t span{font-weight:400;color:var(--text2);font-size:11.5px}
+  .layers{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow)}
+  .ly{display:grid;grid-template-columns:112px 1fr 128px;align-items:stretch;border-bottom:1px solid var(--line)}
+  .ly:last-child{border-bottom:0}
+  .ly .n{background:var(--surface2);padding:9px 12px;font-weight:700;font-size:12px;color:var(--text-strong);display:flex;align-items:center;border-right:1px solid var(--border)}
+  .ly .c{padding:8px 12px}
+  .ly .c .a{font-size:12px;color:var(--text);font-weight:600}
+  .ly .c .b{font-size:11.5px;color:var(--text2);margin-top:2px}
+  .ly .c .b b{color:var(--text-strong)}
+  .ly .s{padding:8px 12px;text-align:right;display:flex;flex-direction:column;gap:3px;align-items:flex-end;justify-content:center}
+  .tag{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10.5px;font-weight:700;white-space:nowrap;border:1px solid var(--border);background:var(--surface2);color:var(--text2)}
+  .tag.ok{border-color:var(--ok-line);background:var(--ok-soft);color:var(--ok-text)}
+  .tag.add{border-color:var(--primary-line);background:var(--primary-soft);color:var(--primary-text)}
+  .tag.fix{border-color:var(--warn-line);background:var(--warn-soft);color:var(--warn)}
+  .tag.be{border-color:var(--err-line);background:var(--err-soft);color:var(--err-text)}
+  .gaps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .gap{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 11px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px}
+  .gap .t{font-weight:700;font-size:12.5px;color:var(--text-strong);display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+  .gap .d{color:var(--text2);font-size:11.5px}
+  .gap .d b{color:var(--text)}
+  .map{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 12px;box-shadow:var(--shadow);
+       display:grid;grid-template-columns:1fr 36px 1fr;gap:3px 0;align-items:center}
+  .map .l{font-size:11.5px;background:var(--surface2);border-radius:6px;padding:3px 9px;margin:1.5px 0;color:var(--text)}
+  .map .a{text-align:center;color:var(--primary);font-weight:700;font-size:11px}
+  .map .r{font-size:11.5px;padding:3px 9px;margin:1.5px 0;border:1px solid var(--primary-line);background:var(--primary-soft);
+          color:var(--primary-text);border-radius:6px;font-weight:600}
+  .map .r small{color:var(--text2);font-weight:400;font-size:11px}
+  .flow{display:flex;align-items:center;gap:5px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);
+        border-radius:10px;padding:10px 12px;box-shadow:var(--shadow)}
+  .flow .s{border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:3px 10px;font-size:11.5px;color:var(--text2)}
+  .flow .s.new{border-color:var(--primary);background:var(--primary-soft);color:var(--primary-text);font-weight:700}
+  .flow .ar{color:var(--text3);font-size:11px}
+  .road{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+  .st{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 10px;box-shadow:var(--shadow)}
+  .st .n{font-size:10.5px;font-weight:700;color:var(--primary-text);letter-spacing:.3px}
+  .st .t{font-weight:700;font-size:11.5px;color:var(--text-strong);margin:3px 0;line-height:1.35}
+  .st .m{color:var(--text2);font-size:10.5px;line-height:1.5}
+  .st .m .tag{margin-top:4px}
+  .foot{display:grid;grid-template-columns:1.25fr 1fr;gap:10px;margin-top:13px}
+  .box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 12px;box-shadow:var(--shadow)}
+  .box .t{font-size:11.5px;font-weight:700;color:var(--text-strong);margin-bottom:5px}
+  .box ul{margin:0;padding:0;list-style:none}
+  .box li{font-size:11px;color:var(--text2);line-height:1.65;display:flex;gap:6px}
+  .box li i{font-style:normal;font-weight:700;flex-shrink:0}
+  .box.no li i{color:var(--text3)}
+  .box.yes li i{color:var(--text3)}
+  .box li b{color:var(--text)}
+  .sig{margin-top:9px;font-size:10.5px;color:var(--text3);border-top:1px solid var(--border);padding-top:6px}
+  @media print{
+    body{background:#fff;font-size:10px;line-height:1.42}
+    .page{max-width:none;padding:0}
+    .sec{margin:7px 0 0} .sec-t{font-size:11px;margin-bottom:5px}
+    h1{font-size:15px} .hdr{padding-bottom:5px} .legend{font-size:10px;margin:6px 0 0}
+    .ly{grid-template-columns:100px 1fr 116px}
+    .ly .n{padding:6px 9px;font-size:11px} .ly .c{padding:6px 9px}
+    .ly .c .a{font-size:11px} .ly .c .b{font-size:10.5px} .ly .s{padding:6px 9px}
+    .gap{padding:7px 9px} .gap .t{font-size:11.5px} .gap .d{font-size:10.5px}
+    .map{padding:7px 10px} .map .l,.map .r{font-size:10.5px;padding:2.5px 8px;margin:1px 0}
+    .flow{padding:8px 10px} .flow .s{font-size:10.5px;padding:2px 9px}
+    .road{gap:6px} .st{padding:7px 9px} .st .t{font-size:11px;margin:2px 0} .st .m{font-size:10px;line-height:1.45}
+    .foot{margin-top:9px;gap:8px} .box{padding:7px 10px} .box .t{font-size:11px} .box li{font-size:10.5px;line-height:1.55}
+    .layers,.map,.flow,.gap,.st,.box{box-shadow:none;break-inside:avoid}
+    .sig{margin-top:6px;padding-top:5px;font-size:10px}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="hdr">
+    <h1>作业框架改造蓝图<span style="font-size:12.5px;color:var(--text2);font-weight:400"> — 参考 C/D 端底层设计</span></h1>
+    <div class="r">Nexpert ｜ v1.2.0<br>只谈功能结构，不动界面样式</div>
+  </div>
+
+  <div class="legend">
+    <span class="tag ok">绿 = 已有 · 零后端</span>
+    <span class="tag add">蓝 = 要补 / 新增</span>
+    <span class="tag fix">橙 = 需收口</span>
+    <span class="tag be">红 = 要碰后端</span>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t"><em>一</em>三层骨架<span>他们这样搭，我们缺哪一格</span></div>
+    <div class="layers">
+      <div class="ly">
+        <div class="n">① 作业对象</div>
+        <div class="c">
+          <div class="a">房间 · SN · 机型 · 客户 · 工单 · 工程师 · 桥接器版本</div>
+          <div class="b">每步都清楚"在给谁干活" ｜ 数据<b>服务端早就有</b>，只是页面不显示</div>
+        </div>
+        <div class="s"><span class="tag ok">数据已有</span><span class="tag add">补"显示"</span></div>
+      </div>
+      <div class="ly">
+        <div class="n">② 可执行对象</div>
+        <div class="c">
+          <div class="a">40 诊断项 + 26 工具（已是数据派生，好底子）</div>
+          <div class="b">他们的工具卡带 分级 / 风险 / 时长 / 4 步计划 ｜ 我们<b>只有标题和提示词</b></div>
+        </div>
+        <div class="s"><span class="tag ok">注册表已有</span><span class="tag add">补 3 字段</span></div>
+      </div>
+      <div class="ly">
+        <div class="n">③ 状态与留痕</div>
+        <div class="c">
+          <div class="a">状态线 · 单一留痕出口 · AI 副驾两个出口</div>
+          <div class="b">他们状态机驱动界面 ｜ 我们有状态也有留痕，但<b>都散着</b></div>
+        </div>
+        <div class="s"><span class="tag ok">零件齐全</span><span class="tag fix">需收口</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t"><em>二</em>我们缺的三件<span>不是缺能力，是缺"结构"</span></div>
+    <div class="gaps">
+      <div class="gap">
+        <div class="t">计划先行 <span class="tag fix">现在 0 处</span></div>
+        <div class="d">动手前先看：<b>哪几步 · 什么风险 · 多久</b> —— 确认才动</div>
+      </div>
+      <div class="gap">
+        <div class="t">状态门控 <span class="tag fix">页面不显示</span></div>
+        <div class="d">界面只给<b>当前合法动作</b>：没连接不能采集 · 没结论不出 AI</div>
+      </div>
+      <div class="gap">
+        <div class="t">留痕收口 <span class="tag fix">留痕零散</span></div>
+        <div class="d">所有动作走<b>同一个出口</b> · 页面常驻流水账</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t"><em>三</em>我们的真本事 → 插进哪一格<span>他们是框架，我们是真的（右侧标出落在第一区的哪一层）</span></div>
+    <div class="map">
+      <div class="l">真桥接器 · 设备侧真执行</div><div class="a">→</div><div class="r">可执行层 · 执行器 <small>· 仅前面加一步确认</small></div>
+      <div class="l">真 AI 五段诊断</div><div class="a">→</div><div class="r">状态层 · AI 副驾 <small>· 只出报告不执行</small></div>
+      <div class="l">IDG 日志上传与分析</div><div class="a">→</div><div class="r">可执行层 · 资料收集 <small>· 补"分享给二线"</small></div>
+      <div class="l">真账号 / 角色 / 分级审批</div><div class="a">→</div><div class="r">状态层 · 门控 <small>· Tier 对应确认方式</small></div>
+      <div class="l">房间心跳 · 桥接器版本 · 链路延迟</div><div class="a">→</div><div class="r">作业对象层 · 页头三值 <small>· 页头三个值</small></div>
+      <div class="l">一键连接 · 多端部署 · 房间令牌</div><div class="a">→</div><div class="r">状态层 · 接入 <small>· 入口收进统一外壳</small></div>
+      <div class="l">40 诊断项 + 26 工具清单</div><div class="a">→</div><div class="r">可执行层 · 注册表 <small>· 仅扩字段</small></div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t"><em>四</em>改造后的一条执行链<span>蓝色 = 本次新增</span></div>
+    <div class="flow">
+      <span class="s new">查看计划</span><span class="ar">→</span>
+      <span class="s new">确认</span><span class="ar">→</span>
+      <span class="s">桥接器真执行</span><span class="ar">→</span>
+      <span class="s">步骤条 + 终端流</span><span class="ar">→</span>
+      <span class="s">结论</span><span class="ar">→</span>
+      <span class="s new">出报告</span><span class="ar">/</span>
+      <span class="s new">升级二线</span>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t"><em>五</em>五步路线<span>全加法式，改前快照可回退</span></div>
+    <div class="road">
+      <div class="st"><div class="n">第 1 步</div><div class="t">JSON 加 3 字段</div><div class="m">risk / dur / plan<br><span class="tag ok">零后端</span> 0.5 天</div></div>
+      <div class="st"><div class="n">第 2 步</div><div class="t">计划确认弹窗</div><div class="m">+ 步骤条<br><span class="tag ok">零后端</span> 1 天</div></div>
+      <div class="st"><div class="n">第 3 步</div><div class="t">状态胶囊 · 终端三值</div><div class="m">页头面包屑<br><span class="tag ok">零后端</span> 0.5 天</div></div>
+      <div class="st"><div class="n">第 4 步</div><div class="t">留痕出口</div><div class="m">统一 + 常驻面板<br><span class="tag be">碰后端</span> 1 天</div></div>
+      <div class="st"><div class="n">第 5 步</div><div class="t">AI 两个出口</div><div class="m">出报告 / 升级<br><span class="tag be">碰后端</span> 1 天</div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="box no">
+      <div class="t">不抄 —— 那是他们的"剧本"</div>
+      <ul>
+        <li><i>×</i><span>门户演示页（四端入口 · 重置剧本）</span></li>
+        <li><i>×</i><span>假执行：定时器点亮步骤、写死的 AI 答案</span></li>
+        <li><i>×</i><span>免登录 / 任意密码（无真实鉴权）</span></li>
+        <li><i>×</i><span>演示数值 · 繁体名称 · 品牌署名</span></li>
+        <li><i>×</i><span>界面样式改造（已统一，无需再动）</span></li>
+      </ul>
+    </div>
+    <div class="box yes">
+      <div class="t">抄 —— 底层机制</div>
+      <ul>
+        <li><i>✓</i><span><b>数据派生 UI</b>：加数据即长界面</span></li>
+        <li><i>✓</i><span><b>风险即契约</b>：分级决定确认策略</span></li>
+        <li><i>✓</i><span><b>计划先行</b>：先演后做</span></li>
+        <li><i>✓</i><span><b>状态门控</b>：只给合法动作</span></li>
+        <li><i>✓</i><span><b>留痕收口</b> · <b>AI 只做副驾</b></span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="sig">一句话：他们强在"结构"，我们强在"是真的" —— 把真能力一格一格插进他们的结构里，不重写、不改界面。本文档不含任何代码改动，可放心讨论。</div>
+
+</div>
+</body>
+</html>

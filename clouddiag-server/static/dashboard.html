@@ -318,7 +318,8 @@
   .tool-card.open { border-color:#1E56D6; }
   .tool-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
   .tool-card-title { font-size: 15px; font-weight: 600; flex: 1; }
-  .tool-card-icon { font-size: 20px; }
+  .tool-card-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #2468F2; }
+.tool-card-icon svg { width: 20px; height: 20px; }
   .tool-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; line-height: 1.6; }
   .tool-card-open { align-self: flex-start; }
   .tool-card-body {
@@ -398,17 +399,14 @@
     if (ng) ng.style.display = 'none';
     return;
   }
-  // 注入首帧规则：隐藏首页/对话/工单/密码/反馈导航 + 默认显示创建页
-  var target = 'create';
+  // 注入首帧规则：默认显示首页（2026-10-20：创建房间已并入现场作业台）
+  var target = 'home';
   document.getElementById('role-css').textContent =
-    '.page-home{display:none!important}'
-    + '#nav-home,#nav-chat,#nav-workorders,#nav-password,#nav-feedback{display:none!important}'
-    + '.page-' + target + '{display:block!important}';
+    '.page-' + target + '{display:block!important}';
   // DOM ready 后移除注入规则（交给正常 switchTab 逻辑，避免后续冲突）
   document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('role-css').textContent = '';
-    // 同步切默认页（field 首帧正确）：默认创建房间
-    var target = 'create';
+    var target = 'home';
     document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
     var pg = document.getElementById('page-' + target);
     if (pg) pg.classList.add('active');
@@ -421,9 +419,9 @@
 
   <div class="header">
     <div class="brand">
-      <div class="logo">AI</div>
+      <div class="logo">N</div>
       <div>
-        <div class="title">云端 AI 远程运维助手</div>
+        <div class="title">Nexpert</div>
         <div class="sub">电脑问题远程诊断</div>
       </div>
     </div>
@@ -437,24 +435,21 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="折叠/展开侧边栏">◀</div>
       <nav id="sidebar-nav">
-        <!-- FIELD_HIDE_START --><div class="nav-item active" id="nav-home" onclick="switchTab('home')"><span data-i18n="nav_home">🏠 首页</span></div><!-- FIELD_HIDE_END -->
-        <div class="nav-item" id="nav-create" onclick="switchTab('create')"><span data-i18n="nav_create">➕ 创建房间</span></div>
-        <div class="nav-item" id="nav-join" onclick="switchTab('join')"><span data-i18n="nav_join">⇄ 加入房间</span></div>
-        <div class="nav-item" id="nav-field-guide" onclick="openFieldGuideFromNav()"><span>📶 连接客户机</span></div>
-        <!-- FIELD_HIDE_START --><div class="nav-item" id="nav-chat" onclick="switchTab('chat')"><span data-i18n="nav_chat">💬 对话</span></div><!-- FIELD_HIDE_END -->
-        <div class="nav-item admin-only" id="nav-download" onclick="switchTab('download')"><span data-i18n="nav_download">📦 下载桥接器</span></div>
+        <div class="nav-item active" id="nav-home" onclick="switchTab('home')"><span data-i18n="nav_home">首页</span></div>
         <div class="nav-divider"></div>
-        <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('workorders')" id="nav-workorders"><span data-i18n="nav_workorders">📋 诊断记录</span></div><!-- FIELD_HIDE_END -->
-        <div class="nav-item" onclick="switchTab('tools-win')" id="nav-tools-win"><span data-i18n="nav_tools_win">🪟 Windows 工具</span></div>
-        <div class="nav-item" onclick="openIdgPage()" id="nav-idg"><span>📊 IDG 日志分析</span></div>
-        <div class="nav-item" onclick="switchTab('tools-linux')" id="nav-tools-linux"><span data-i18n="nav_tools_linux">🐧 Linux 工具</span></div>
+        <!-- 两个作业台（2026-10-20：创建/加入/对话/诊断记录已并入作业台） -->
+        <div class="nav-item" id="nav-field" onclick="location.href='/field'"><span>现场作业台</span></div>
+        <div class="nav-item expert-nav" id="nav-expert" onclick="location.href='/expert'"><span>二线作业台</span></div>
+        <div class="nav-item" onclick="openIdgPage()" id="nav-idg"><span>IDG 日志分析</span></div>
+        <div class="nav-item" id="nav-links" onclick="switchTab('links')"><span>常用网站</span></div>
+        <!-- 2026-10-26：产品资料库（独立页面 /library，左侧系列导航 + 机型卡片） -->
+        <div class="nav-item" id="nav-library" onclick="location.href='/library'"><span>产品资料库</span></div>
         <div class="nav-divider"></div>
-        <!-- FIELD_HIDE_START --><div class="nav-item" onclick="switchTab('password')" id="nav-password"><span data-i18n="nav_password">🔒 修改密码</span></div>
-        <div class="nav-item" onclick="switchTab('feedback')" id="nav-feedback"><span data-i18n="nav_feedback">📝 反馈</span></div><!-- FIELD_HIDE_END -->
-        <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">👥 账号管理</span></div>
-        <div class="nav-item admin-only" id="nav-ai" onclick="switchTab('ai')"><span>🤖 AI 模型配置</span></div>
-        <div class="nav-item admin-only" id="nav-admin" onclick="switchTab('admin')"><span data-i18n="nav_admin">🛠 管理后台</span></div>
-      </nav>
+        <div class="nav-item admin-only" id="nav-users" onclick="switchTab('users')"><span data-i18n="nav_users">账号管理</span></div>
+        <div class="nav-item admin-only" id="nav-ai" onclick="switchTab('ai')"><span>AI 模型配置</span></div>
+        <div class="nav-item" onclick="switchTab('password')" id="nav-password"><span data-i18n="nav_password">修改密码</span></div>
+        <div class="nav-item" onclick="switchTab('feedback')" id="nav-feedback"><span data-i18n="nav_feedback">反馈</span></div>
+      </nav></nav>
       <script>
       // 侧边栏折叠（记忆状态——2026-08-28）
       function toggleSidebar() {
@@ -493,9 +488,7 @@
           return;
         }
         if (r !== 'field') return;
-        ['nav-home', 'nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback', 'nav-idg'].forEach(function (id) {
-          var el = document.getElementById(id); if (el) el.style.display = 'none';
-        });
+         // 2026-10-20：渠道工程师也保留完整导航（首页/现场作业台/IDG/修改密码/反馈）
         // 同步默认页（避免首页闪现）：DOM ready 后切——有记住的房间→连接引导，否则创建房间
         document.addEventListener('DOMContentLoaded', function () {
           // 强制清空创建表单（防浏览器 autofill 误填）
@@ -511,10 +504,7 @@
               });
             }, 400);
           });
-          var target = 'create';
-          document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
-          document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.remove('active'); });
-          var pg = document.getElementById('page-' + target); if (pg) pg.classList.add('active');
+          // 默认停在首页（不再强制跳创建页）
         });
       })();
       </script>
@@ -526,22 +516,229 @@
       <!-- 首页（默认页） -->
       <!-- FIELD_HIDE_START --><section class="page active" id="page-home">
         <div class="home-hero">
-          <div class="home-title">🤖 云端 AI 远程运维助手</div>
+          <div class="home-title">Nexpert 工作台</div>
           <div class="home-sub" data-i18n="home_sub">云端 AI 诊断 Windows / Linux 电脑问题 · 硬件工具全覆盖</div>
         </div>
 
         <div class="home-section">
           <div class="home-section-title" data-i18n="home_howto">快速上手</div>
           <div class="home-steps">
-            <div class="home-step"><span class="step-num">1</span><div><b data-i18n="home_step1_t">创建房间</b><div class="step-desc" data-i18n="home_step1_d">填写电脑 SN 与报修工单号，生成房间码</div></div></div>
-            <div class="home-step"><span class="step-num">2</span><div><b>获取连接</b><div class="step-desc">进入对话页点「📶 连接你的电脑」，复制一键命令或下载连接包（已预填房间码）</div></div></div>
-            <div class="home-step"><span class="step-num">3</span><div><b>客户机连接</b><div class="step-desc">客户机粘贴命令运行 / 双击连接包——自动完成连接，无需输入房间码</div></div></div>
-            <div class="home-step"><span class="step-num">4</span><div><b data-i18n="home_step4_t">诊断与处理</b><div class="step-desc">对话式 AI 诊断，或「Windows / Linux 工具」执行硬件诊断、日志收集、刷写激活</div></div></div>
+            <div class="home-step"><span class="step-num">1</span><div><b>进入作业台</b><div class="step-desc">点左侧「现场作业台」，在里面新建房间或加入已有房间</div></div></div>
+            <div class="home-step"><span class="step-num">2</span><div><b>连接客户机</b><div class="step-desc">作业台内点「连接客户机」，把 .bat 或命令发到客户机执行（已预填房间码）</div></div></div>
+            <div class="home-step"><span class="step-num">3</span><div><b>勾选作业项执行</b><div class="step-desc">按需勾选硬件诊断 / 日志收集 / 刷写激活，只读项可批量执行</div></div></div>
+            <div class="home-step"><span class="step-num">4</span><div><b>复核与结单</b><div class="step-desc">需要二线支援时升级；完成后结单归档，报告与证据一并存档</div></div></div>
           </div>
         </div>
       </section><!-- FIELD_HIDE_END -->
 
-      <!-- 诊断记录 -->
+    
+<style>
+  .adm-hero{display:flex;align-items:baseline;gap:10px;margin:2px 0 16px}
+  .adm-hero h2{font-size:17px;font-weight:650;margin:0}
+  .adm-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:1080px){.adm-grid{grid-template-columns:1fr}}
+  .adm-card{background:var(--surface,#fff);border:1px solid var(--line-2,#E8E9EB);border-radius:10px;
+            display:flex;flex-direction:column;min-height:320px;max-height:calc(100vh - 220px)}
+  .adm-card-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line-2,#E8E9EB)}
+  .adm-card-head .t{font-weight:650;font-size:13.5px}
+  .adm-card-body{flex:1;overflow:auto;padding:6px 0}
+  .adm-row{display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer;border-bottom:1px dashed var(--line-2,#F0F1F3)}
+  .adm-row:hover{background:var(--brand-tint,#EEF4FE)}
+  .adm-row.on{background:var(--brand-tint,#EEF4FE)}
+  .adm-code{font-family:ui-monospace,Menlo,monospace;font-weight:650;font-size:12.5px;width:92px}
+  .adm-meta{flex:1;min-width:0;font-size:12px;color:var(--text-2,#5C5F66);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .adm-time{font-size:11.5px;color:var(--text-3,#9AA0A6);font-variant-numeric:tabular-nums}
+  .adm-dot{width:6px;height:6px;border-radius:50%;background:#C9CDD4;flex:none}
+  .adm-dot.on{background:#047857}
+  .adm-empty{padding:18px 14px;color:var(--text-2,#5C5F66);font-size:12.5px;line-height:1.8}
+  .msg{padding:7px 0;border-bottom:1px dashed var(--line-2,#F0F1F3);font-size:12.5px;line-height:1.65}
+  .msg .who{font-weight:650;margin-right:6px}
+  .msg .tm{color:var(--text-3,#9AA0A6);font-size:11px;margin-right:8px;font-variant-numeric:tabular-nums}
+</style>
+
+<script>
+/* ============================================================
+   管理员工作台（2026-10-20 统一设计）
+   只保留两块：当前活跃房间 / 历史聊天记录
+   数据来源：/api/my_rooms?all=1、/api/history/{room}
+   ============================================================ */
+(function () {
+  let ADM = { rooms: [], cur: '', msgs: {} };
+
+  function fmtTime(s) {
+    if (!s) return '';
+    const d = new Date(String(s).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return String(s).slice(5, 16);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const p = n => String(n).padStart(2, '0');
+    return sameDay ? (p(d.getHours()) + ':' + p(d.getMinutes()))
+                   : (p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()));
+  }
+
+  function activeList() {
+    const now = Date.now();
+    return ADM.rooms.filter(r => {
+      if ((r.status || '') === 'archived') return false;
+      if (r.bridge_online) return true;
+      const t = new Date(String(r.last_seen || r.created_at || '').replace(' ', 'T')).getTime();
+      return !isNaN(t) && (now - t) < 24 * 3600 * 1000;
+    });
+  }
+
+  function render() {
+    const wrap = document.getElementById('admConsole');
+    if (!wrap) return;
+    const act = activeList();
+    const hist = ADM.rooms.slice().sort((a, b) =>
+      String(b.last_seen || b.created_at || '').localeCompare(String(a.last_seen || a.created_at || '')));
+
+    wrap.innerHTML =
+      '<div class="adm-hero"><h2>工作台</h2>' +
+      '<span class="adm-time" id="admCount">活跃 ' + act.length + ' · 历史 ' + hist.length + '</span>' +
+      '<span style="flex:1"></span>' +
+      '<button class="btn" id="admRefresh" style="height:26px;font-size:12px">刷新</button></div>' +
+      '<div class="adm-grid">' +
+        '<div class="adm-card"><div class="adm-card-head"><span class="t">当前活跃房间</span>' +
+          '<span style="flex:1"></span><span class="adm-time">桥接在线 / 近 24 小时有活动</span></div>' +
+          '<div class="adm-card-body" id="admActive">' +
+            (act.length ? act.map(r =>
+              '<div class="adm-row" data-room="' + r.room_code + '">' +
+              '<span class="adm-dot' + (r.bridge_online ? ' on' : '') + '"></span>' +
+              '<span class="adm-code">' + r.room_code + '</span>' +
+              '<span class="adm-meta">SN ' + (r.sn || '—') + ' · 工单 ' + (r.ticket_no || '—') + ' · ' +
+                (r.engineer_username || '—') + (r.bridge_online ? ' · 桥接在线' : '') + '</span>' +
+              '<span class="adm-time">' + fmtTime(r.last_seen || r.created_at) + '</span></div>').join('')
+             : '<div class="adm-empty">当前没有活跃房间。<br>工程师在现场作业台建房并连接客户机后，会出现在这里。</div>') +
+          '</div></div>' +
+        '<div class="adm-card"><div class="adm-card-head"><span class="t">历史聊天记录</span>' +
+          '<span style="flex:1"></span><span class="adm-time" id="admCur">' + (ADM.cur ? ADM.cur : '点左侧房间查看') + '</span></div>' +
+          '<div class="adm-card-body" id="admMsgs">' + renderMsgs() + '</div></div>' +
+      '</div>';
+
+    wrap.querySelectorAll('[data-room]').forEach(el => el.addEventListener('click', () => loadMsgs(el.dataset.room)));
+    const rf = document.getElementById('admRefresh');
+    if (rf) rf.addEventListener('click', () => load(true));
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function renderMsgs() {
+    if (!ADM.cur) return '<div class="adm-empty">在左侧点一个房间，查看它的完整对话与执行记录。</div>';
+    const list = ADM.msgs[ADM.cur];
+    if (!list) return '<div class="adm-empty">加载中…</div>';
+    if (!list.length) return '<div class="adm-empty">该房间还没有任何记录。</div>';
+    const who = { user: '工程师', ai: 'AI', tool: '工具', system: '系统' };
+    return list.map(m => '<div class="msg"><span class="tm">' + fmtTime(m.created_at) + '</span>' +
+      '<span class="who">' + (who[m.role] || m.role) + (m.tool_name ? '·' + esc(m.tool_name) : '') + '</span>' +
+      esc(String(m.content || '').slice(0, 400)).replace(/\n/g, '<br>') + '</div>').join('');
+  }
+
+  function loadMsgs(code) {
+    ADM.cur = code;
+    render();
+    fetch('/api/history/' + encodeURIComponent(code), { credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(j => { ADM.msgs[code] = (j.messages || []).filter(m => m.content); render(); })
+      .catch(() => { ADM.msgs[code] = []; render(); });
+  }
+
+  function load(manual) {
+    fetch('/api/my_rooms?all=1', { credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(j => {
+        ADM.rooms = (j.rooms || j.data || j || []).filter(r => r && r.room_code);
+        render();
+        if (manual && window.NP && NP.toast) { /* 静默 */ }
+      })
+      .catch(e => {
+        const w = document.getElementById('admConsole');
+        if (w) w.innerHTML = '<div class="adm-empty">读取房间失败：' + esc(e.message) + '</div>';
+      });
+  }
+
+  /* ============================================================
+     非管理员首页（2026-10-20）：介绍 + 角色化快捷入口
+     ============================================================ */
+  window.userBoot = function (role, username) {
+    const page = document.getElementById('page-home');
+    if (!page) return;
+    const isExpert = (role === 'expert');
+    const roleCn = { field: '渠道工程师', cc: 'CC 工程师', expert: '二线工程师' }[role] || '工程师';
+
+    const card = (href, title, desc, primary) =>
+      '<a href="' + href + '" style="text-decoration:none;color:inherit;flex:1;min-width:240px">' +
+      '<div style="border:1px solid var(--line-2,#E8E9EB);border-radius:10px;padding:16px 16px 14px;' +
+      'background:' + (primary ? 'var(--brand-tint,#EEF4FE)' : '#fff') + ';height:100%;' +
+      'transition:.15s" onmouseover="this.style.borderColor=\'#2468F2\'" onmouseout="this.style.borderColor=\'#E8E9EB\'">' +
+      '<div style="font-size:14.5px;font-weight:650;margin-bottom:6px">' + title + '</div>' +
+      '<div style="font-size:12.5px;color:var(--text-2,#5C5F66);line-height:1.7">' + desc + '</div></div></a>';
+
+    page.innerHTML =
+      '<div style="max-width:960px">' +
+        '<div style="margin:6px 0 4px;font-size:22px;font-weight:700;letter-spacing:.2px">Nexpert 工作台</div>' +
+        '<div style="font-size:13px;color:var(--text-2,#5C5F66);margin-bottom:20px">' +
+          '你好，' + (username || '') + '（' + roleCn + '）· 永不离线的数字专家' +
+        '</div>' +
+
+        '<div style="border:1px solid var(--line-2,#E8E9EB);border-radius:10px;padding:16px 18px;' +
+             'background:#fff;margin-bottom:18px">' +
+          '<div style="font-size:13.5px;font-weight:650;margin-bottom:8px">这个平台做什么</div>' +
+          '<div style="font-size:12.8px;color:var(--text-2,#5C5F66);line-height:1.9">' +
+            '把一台出问题的电脑接进来，采集真实数据（系统日志 / 蓝屏转储 / 硬盘 SMART / 硬件信息），' +
+            '由 AI 与工程师一起判读，最后输出可归档的诊断报告。<br>' +
+            '所有操作按「只读 / 写 / 刷写」分级留痕，写与刷写必须现场工程师确认后才执行。' +
+          '</div>' +
+        '</div>' +
+
+        '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px">' +
+          card('/field', '现场作业台',
+               '新建或加入房间 → 连接客户机 → 勾选作业项采集与诊断 → 结单归档。' +
+               (isExpert ? '' : '<br><b style="color:#1E56D6">你的主工作区</b>'), !isExpert) +
+          (isExpert ? card('/expert', '二线作业台',
+               '接现场升级上来的房间，做只读复核、远程截图、下发指令，并完成结单报告。', true) : '') +
+          card('javascript:openIdgPage()', 'IDG 日志分析',
+               '上传客户机日志包（7z/rar/zip）→ 自动解析事件日志、Dump、硬件信息，生成分析结论。', false) +
+        '</div>' +
+
+        '<div style="border:1px solid var(--line-2,#E8E9EB);border-radius:10px;padding:14px 18px;background:#fff">' +
+          '<div style="font-size:13px;font-weight:650;margin-bottom:8px">常用操作</div>' +
+          '<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12.8px">' +
+            '<a href="javascript:switchTab(\'password\')" style="color:#1E56D6;text-decoration:none">修改密码</a>' +
+            '<a href="javascript:switchTab(\'feedback\')" style="color:#1E56D6;text-decoration:none">提交反馈</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  };
+
+  // 首次进入 home 且是管理员时初始化
+  window.admBoot = function () {
+    const page = document.getElementById('page-home');
+    if (!page || document.getElementById('admConsole')) { load(); return; }
+    page.innerHTML = '<div id="admConsole"></div>';
+    load();
+    setInterval(() => { if (document.getElementById('page-home')?.classList.contains('active')) load(); }, 20000);
+  };
+})();
+</script>
+
+  <!-- 诊断记录 -->
+      <!-- 常用网站（2026-10-20 新增 · 所有角色可见，管理员可维护） -->
+      <section class="page" id="page-links">
+        <div class="page-title"><span>常用网站</span></div>
+        <div class="page-desc">工程师日常使用的外部站点与 AI 工具，点击卡片在新标签页打开</div>
+        <div class="toolbar">
+          <input id="links-search" placeholder="按名称 / 介绍 / 网址搜索" oninput="linksRender()">
+          <span class="count" id="links-count"></span>
+          <span style="flex:1"></span>
+          <button id="links-new" onclick="linksEdit(null)" style="display:none">＋ 新增网站</button>
+        </div>
+        <div id="links-wrap"></div>
+      </section>
+
       <!-- FIELD_HIDE_START --><section class="page" id="page-workorders">
         <div class="page-title"><span data-i18n="nav_workorders">诊断记录</span></div>
         <div class="page-desc" data-i18n="wo_desc">当前账号处理过的诊断房间</div>
@@ -605,7 +802,7 @@
       <section class="page" id="page-download">
         <div class="page-title"><span data-i18n="nav_download">下载桥接器</span></div>
         <div class="page-desc" data-i18n="dl_desc">在需要诊断的电脑上运行桥接器，输入房间码完成配对</div>
-        <div style="margin:8px 0 14px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--info);border-radius:8px;font-size:13px;color:#1E56D6;">💡 创建房间后可在「诊断记录 → 📶 连接」或对话页获取<b>房间专属一键连接</b>（预填房间码，无需再输入）</div>
+        <div style="margin:8px 0 14px;padding:8px 12px;background:var(--surface2);border:1px dashed var(--info);border-radius:8px;font-size:13px;color:#1E56D6;">💡 创建房间后可在「诊断记录 → 连接」或对话页获取<b>房间专属一键连接</b>（预填房间码，无需再输入）</div>
         <div class="dl-steps">
           <span class="s"><span class="num">1</span><span data-i18n="dl_step1">安装桥接器</span></span>
           <span class="arrow">→</span>
@@ -696,8 +893,8 @@
           </div>
         </div>
         <div class="panel dl-facts">
-          <div data-i18n="dl_facts_cap">🔧 桥接器能力：AI 远程诊断（系统信息 / 事件日志 / 驱动 / BIOS）· 远程命令 · 文件传输 · 断线自动重连</div>
-          <div data-i18n="dl_facts_sec">🛡 安全机制：只读诊断自动执行；修改 / 危险操作需在对话页人工审批</div>
+          <div data-i18n="dl_facts_cap">桥接器能力：AI 远程诊断（系统信息 / 事件日志 / 驱动 / BIOS）· 远程命令 · 文件传输 · 断线自动重连</div>
+          <div data-i18n="dl_facts_sec">安全机制：只读诊断自动执行；修改 / 危险操作需在对话页人工审批</div>
         </div>
       </section>
 
@@ -705,7 +902,7 @@
 
       <!-- 上门工程师连接引导（field 专属） -->
       <section class="page" id="page-field-guide">
-        <div class="page-title">📶 连接客户机</div>
+        <div class="page-title">连接客户机</div>
         <div class="page-desc">创建或加入房间后，在此引导客户机连接服务器；客户机上线后按系统平台使用对应工具</div>
         <div class="field-card" style="margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;">
           <div class="field" style="margin-bottom:10px;">
@@ -724,7 +921,7 @@
             </select>
           </div>
           <div id="field-guide-actions" style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn-main" id="field-guide-copy" onclick="fieldGuideCopy()">📋 复制一键命令</button>
+            <button class="btn-main" id="field-guide-copy" onclick="fieldGuideCopy()">复制一键命令</button>
             <button class="btn-main" id="field-guide-bat" onclick="fieldGuideBat()">⬇ 下载连接包</button>
           </div>
           <div id="field-guide-os-tip" style="margin-top:8px;font-size:12px;color:var(--text2);">复制的是 <b id="field-guide-os-label">Windows PowerShell</b> 命令——粘贴到客户机终端运行即可连接</div>
@@ -754,430 +951,430 @@
       </section>
 
       <section class="page" id="page-tools-win">
-        <div class="page-title"><span data-i18n="nav_tools_win">Windows 工具</span></div>
-        <div class="page-desc" data-i18n="tools_win_desc">Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行</div>
+ <div class="page-title"><span data-i18n="nav_tools_win">Windows 工具</span></div>
+ <div class="page-desc" data-i18n="tools_win_desc">Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行</div>
 
-        <div class="tool-grid">
+ <div class="tool-grid">
 
-          <div class="tool-card" id="card-winlogs">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">📋</div>
-              <div class="tool-card-title">Windows 系统日志</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">导出系统/应用程序/安全事件日志（.evtx）到客户机本地 C:\DiagLogs\日期\logs\——数据不经过云端，只显示清单</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-winlogs')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="winlogs-msg"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="winlogs-room" onchange="winlogsClear()"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="winlogs-btn" onclick="winlogsFetch()">📋 收集系统日志（.evtx）</button>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-winlogs">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h4"/></svg></div>
+ <div class="tool-card-title">Windows 系统日志</div>
+ <span class="badge badge-read">只读</span>
+ </div>
+ <div class="tool-card-desc">导出系统/应用程序/安全事件日志（.evtx）到客户机本地 C:\DiagLogs\日期\logs\——数据不经过云端，只显示清单</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-winlogs')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="winlogs-msg"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线）</label>
+ <select id="winlogs-room" onchange="winlogsClear()"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="winlogs-btn" onclick="winlogsFetch()">收集系统日志（.evtx）</button>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-dump">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">💥</div>
-              <div class="tool-card-title">Dump / Minidump 收集</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">收集蓝屏转储文件（Minidump + MEMORY.DMP）到客户机本地 C:\DiagLogs\日期\dump\——数据不经过云端，只显示清单</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-dump')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="dump-msg"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="dump-room" onchange="dumpClear()"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="dump-btn" onclick="dumpFetch()">💥 收集蓝屏 Dump</button>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-dump">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>
+ <div class="tool-card-title">Dump / Minidump 收集</div>
+ <span class="badge badge-read">只读</span>
+ </div>
+ <div class="tool-card-desc">收集蓝屏转储文件（Minidump + MEMORY.DMP）到客户机本地 C:\DiagLogs\日期\dump\——数据不经过云端，只显示清单</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-dump')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="dump-msg"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线）</label>
+ <select id="dump-room" onchange="dumpClear()"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="dump-btn" onclick="dumpFetch()">收集蓝屏 Dump</button>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-dumpanalyze">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">💥</div>
-              <div class="tool-card-title">蓝屏 / Dump 分析</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">分析蓝屏崩溃：事件日志信号 + dump 解析（停止码/参数）+ WinDbg 深度定位——支持<b>指定路径</b>分析拷来的 dump 并关联对应时间的 Windows 事件日志</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-dumpanalyze')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="dumpanalyze-msg"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="dumpanalyze-room" onchange="dumpAnalyzeClear()"></select>
-              </div>
-              <div class="field">
-                <label>指定路径（可选——分析指定位置的 dump 文件（目录或 .dmp）并关联对应时间的 Windows 事件日志；留空=分析本机默认 Minidump + MEMORY.DMP）</label>
-                <input id="dumpanalyze-path" placeholder="如 D:\dumps 或 D:\dumps\xxx.dmp；留空使用本机默认路径">
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="dumpanalyze-btn" onclick="dumpAnalyzeFetch()">💥 分析蓝屏 / Dump</button>
-              </div>
-              <div id="dumpanalyze-result" style="display:none;">
-                <div class="tool-card-actions">
-                  <button class="btn-main" onclick="openLogModal('dumpanalyze-win', document.getElementById('dumpanalyze-room').value)">📄 查看分析报告</button>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-dumpanalyze">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>
+ <div class="tool-card-title">蓝屏 / Dump 分析</div>
+ <span class="badge badge-read">只读</span>
+ </div>
+ <div class="tool-card-desc">分析蓝屏崩溃：事件日志信号 + dump 解析（停止码/参数）+ WinDbg 深度定位——支持<b>指定路径</b>分析拷来的 dump 并关联对应时间的 Windows 事件日志</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-dumpanalyze')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="dumpanalyze-msg"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线）</label>
+ <select id="dumpanalyze-room" onchange="dumpAnalyzeClear()"></select>
+ </div>
+ <div class="field">
+ <label>指定路径（可选——分析指定位置的 dump 文件（目录或 .dmp）并关联对应时间的 Windows 事件日志；留空=分析本机默认 Minidump + MEMORY.DMP）</label>
+ <input id="dumpanalyze-path" placeholder="如 D:\dumps 或 D:\dumps\xxx.dmp；留空使用本机默认路径">
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="dumpanalyze-btn" onclick="dumpAnalyzeFetch()">分析蓝屏 / Dump</button>
+ </div>
+ <div id="dumpanalyze-result" style="display:none;">
+ <div class="tool-card-actions">
+ <button class="btn-main" onclick="openLogModal('dumpanalyze-win', document.getElementById('dumpanalyze-room').value)">查看分析报告</button>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-raid">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">🛡</div>
-              <div class="tool-card-title">RAID 信息（VROC / RSTe / Broadcom）</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">抓取 RAID 控制器信息（Intel VROC / Intel RSTe / Broadcom-LSI 三件套）——自动分发工具到客户机执行</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-raid')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="raid-msg"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="raid-room" onchange="raidClear()"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="raid-btn" onclick="raidFetch()">🛡 抓取 RAID 信息</button>
-              </div>
-              <div id="raid-result" style="display:none;">
-                <div class="tool-card-actions">
-                  <button class="btn-main" onclick="openLogModal('raid-win', document.getElementById('raid-room').value)">📄 查看 RAID 信息</button>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-raid">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></div>
+ <div class="tool-card-title">RAID 信息（VROC / RSTe / Broadcom）</div>
+ <span class="badge badge-read">只读</span>
+ </div>
+ <div class="tool-card-desc">抓取 RAID 控制器信息（Intel VROC / Intel RSTe / Broadcom-LSI 三件套）——自动分发工具到客户机执行</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-raid')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="raid-msg"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线）</label>
+ <select id="raid-room" onchange="raidClear()"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="raid-btn" onclick="raidFetch()">抓取 RAID 信息</button>
+ </div>
+ <div id="raid-result" style="display:none;">
+ <div class="tool-card-actions">
+ <button class="btn-main" onclick="openLogModal('raid-win', document.getElementById('raid-room').value)">查看 RAID 信息</button>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-smart-win">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">💽</div>
-              <div class="tool-card-title">硬盘健康检测（SMART）</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">读取硬盘 SMART 健康数据（温度/重映射坏道/通电时长/SSD 磨损）——自动分发 smartctl 工具到客户机执行</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-smart-win')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="smart-msg-win"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="smart-room-win" onchange="smartClear('win')"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="smart-btn-win" onclick="smartFetch('win')">🔍 检测硬盘健康</button>
-              </div>
-              <div id="smart-result-win" style="display:none;">
-                <div class="tool-card-actions">
-                  <button class="btn-main" onclick="openLogModal('smart-win', document.getElementById('smart-room-win').value)">📄 查看 SMART 信息</button>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-smart-win">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg></div>
+ <div class="tool-card-title">硬盘健康检测（SMART）</div>
+ <span class="badge badge-read">只读</span>
+ </div>
+ <div class="tool-card-desc">读取硬盘 SMART 健康数据（温度/重映射坏道/通电时长/SSD 磨损）——自动分发 smartctl 工具到客户机执行</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-smart-win')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="smart-msg-win"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线）</label>
+ <select id="smart-room-win" onchange="smartClear('win')"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="smart-btn-win" onclick="smartFetch('win')">检测硬盘健康</button>
+ </div>
+ <div id="smart-result-win" style="display:none;">
+ <div class="tool-card-actions">
+ <button class="btn-main" onclick="openLogModal('smart-win', document.getElementById('smart-room-win').value)">查看 SMART 信息</button>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-sio-win">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">🔧</div>
-              <div class="tool-card-title">SIO Log 硬件诊断日志</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">抓取 SIO EEPROM 硬件事件日志（温度/电压/异常记录，共 124 条）——自动下载 HWDiag 工具到客户机并执行，日志可查看/下载</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-sio-win')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="sio-msg-win"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="sio-room-win" onchange="sioClear('win')"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="sio-btn-win" onclick="sioFetch('win')">🔍 抓取 SIO Log</button>
-              </div>
-              <div id="sio-result-win" style="display:none;">
-                <div class="tool-card-actions">
-                  <button class="btn-main" onclick="openLogModal('sio-win', document.getElementById('sio-room-win').value)">📄 查看 SIO Log</button>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-sio-win">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9.4 9.4a2.8 2.8 0 1 1-4-4L15.7 7.3"/><path d="M14.7 6.3 18 3l3 3-3.3 3.3"/></svg></div>
+ <div class="tool-card-title">SIO Log 硬件诊断日志</div>
+ <span class="badge badge-read">只读</span>
+ </div>
+ <div class="tool-card-desc">抓取 SIO EEPROM 硬件事件日志（温度/电压/异常记录，共 124 条）——自动下载 HWDiag 工具到客户机并执行，日志可查看/下载</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-sio-win')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="sio-msg-win"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线）</label>
+ <select id="sio-room-win" onchange="sioClear('win')"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="sio-btn-win" onclick="sioFetch('win')">抓取 SIO Log</button>
+ </div>
+ <div id="sio-result-win" style="display:none;">
+ <div class="tool-card-actions">
+ <button class="btn-main" onclick="openLogModal('sio-win', document.getElementById('sio-room-win').value)">查看 SIO Log</button>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-tslog">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">📦</div>
-              <div class="tool-card-title">ThinkStation 日志采集</div>
-              <span class="badge badge-read">采集 · 数据留本地</span>
-            </div>
-            <div class="tool-card-desc">一键采集 ThinkStation 全套日志（软件/BIOS/systeminfo/系统日志/dump/进程/硬件/RAID/SMART/显卡/DirectX 共 20+ 项）——7z 打包到客户机本地，服务器只返回包路径与大小（数据不上云）</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-tslog')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="tslog-msg"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="tslog-room" onchange="tslogClear()"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="tslog-btn" onclick="tslogFetch(false)">📦 打包到本地</button>
-                <button class="btn-main btn-green" id="tslog-upload-btn" onclick="tslogFetch(true)">📤 打包并上传到 IDG</button>
-              </div>
-              <div id="tslog-result" style="display:none;"></div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-tslog">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></div>
+ <div class="tool-card-title">ThinkStation 日志采集</div>
+ <span class="badge badge-read">采集 · 数据留本地</span>
+ </div>
+ <div class="tool-card-desc">一键采集 ThinkStation 全套日志（软件/BIOS/systeminfo/系统日志/dump/进程/硬件/RAID/SMART/显卡/DirectX 共 20+ 项）——7z 打包到客户机本地，服务器只返回包路径与大小（数据不上云）</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-tslog')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="tslog-msg"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线）</label>
+ <select id="tslog-room" onchange="tslogClear()"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="tslog-btn" onclick="tslogFetch(false)">打包到本地</button>
+ <button class="btn-main btn-green" id="tslog-upload-btn" onclick="tslogFetch(true)">打包并上传到 IDG</button>
+ </div>
+ <div id="tslog-result" style="display:none;"></div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-sntm">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">💾</div>
-              <div class="tool-card-title">SN/MTM 刷写</div>
-              <span class="badge badge-write" data-i18n="tools_write">写入类 · 需审批</span>
-            </div>
-            <div class="tool-card-desc" data-i18n="snmtm_desc">ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区</div>
-            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-sntm')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="sntm-msg"></div>
-              <div class="field">
-                <label data-i18n="lbl_tool_room">目标房间（需桥接器在线）</label>
-                <select id="sntm-room" onchange="sntmRefreshRoom()"></select>
-              </div>
-              <div class="field">
-                <label data-i18n="lbl_tool_model">机型型号</label>
-                <select id="sntm-model"></select>
-                <div class="field-hint" id="sntm-route-hint"></div>
-              </div>
-              <div class="field"><label data-i18n="lbl_tool_sn">序列号 SN</label><input id="sntm-sn" maxlength="32" data-i18n-placeholder="ph_tool_sn" placeholder="如 PC22XGDR"></div>
-              <div class="field"><label data-i18n="lbl_tool_mtm">机型型号 MTM</label><input id="sntm-mtm" maxlength="32" data-i18n-placeholder="ph_tool_mtm" placeholder="如 30E1S5NV00"></div>
-              <div class="tool-warn" data-i18n="snmtm_warn">⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写</div>
-              <div class="tool-card-actions">
-                <button class="btn-main btn-danger" id="sntm-btn" data-i18n="btn_snmtm_flash" onclick="snmtmFlash()">✍️ 刷写 SN/MTM</button>
-              </div>
-              <div class="tool-steps" id="sntm-steps" style="display:none;"></div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-sntm">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg></div>
+ <div class="tool-card-title">SN/MTM 刷写</div>
+ <span class="badge badge-write" data-i18n="tools_write">写入类 · 需审批</span>
+ </div>
+ <div class="tool-card-desc" data-i18n="snmtm_desc">ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区</div>
+ <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-sntm')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="sntm-msg"></div>
+ <div class="field">
+ <label data-i18n="lbl_tool_room">目标房间（需桥接器在线）</label>
+ <select id="sntm-room" onchange="sntmRefreshRoom()"></select>
+ </div>
+ <div class="field">
+ <label data-i18n="lbl_tool_model">机型型号</label>
+ <select id="sntm-model"></select>
+ <div class="field-hint" id="sntm-route-hint"></div>
+ </div>
+ <div class="field"><label data-i18n="lbl_tool_sn">序列号 SN</label><input id="sntm-sn" maxlength="32" data-i18n-placeholder="ph_tool_sn" placeholder="如 PC22XGDR"></div>
+ <div class="field"><label data-i18n="lbl_tool_mtm">机型型号 MTM</label><input id="sntm-mtm" maxlength="32" data-i18n-placeholder="ph_tool_mtm" placeholder="如 30E1S5NV00"></div>
+ <div class="tool-warn" data-i18n="snmtm_warn">写入后无法撤销，请仔细核对 SN / MTM 再点击刷写</div>
+ <div class="tool-card-actions">
+ <button class="btn-main btn-danger" id="sntm-btn" data-i18n="btn_snmtm_flash" onclick="snmtmFlash()">刷写 SN/MTM</button>
+ </div>
+ <div class="tool-steps" id="sntm-steps" style="display:none;"></div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-oa3">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">🔑</div>
-              <div class="tool-card-title">OA3 密钥读取 / 激活</div>
-              <span class="badge badge-read" data-i18n="tools_read">只读 + 写入</span>
-            </div>
-            <div class="tool-card-desc" data-i18n="oa3_desc">读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用</div>
-            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-oa3')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="oa3-msg"></div>
-              <div class="field">
-                <label data-i18n="lbl_tool_room2">目标房间（需桥接器在线）</label>
-                <select id="oa3-room"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="oa3-read-btn" data-i18n="btn_oa3_read" onclick="oa3Read()">🔍 读取 OA3 密钥</button>
-              </div>
-              <div class="oa3-result" id="oa3-result" style="display:none;">
-                <div class="oa3-key-row">
-                  <span class="oa3-label" data-i18n="oa3_key">主板 OA3 密钥:</span>
-                  <span class="oa3-key mono" id="oa3-key"></span>
-                  <button class="btn-sm" data-i18n="copy" onclick="copyOa3Key()">复制</button>
-                </div>
-                <div class="oa3-meta" id="oa3-meta"></div>
-                <div class="tool-warn" data-i18n="oa3_activate_warn">⚠ 激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配</div>
-                <div class="tool-card-actions">
-                  <button class="btn-main btn-danger" id="oa3-act-btn" data-i18n="btn_oa3_activate" onclick="oa3Activate()">⚡ 导入密钥并激活系统</button>
-                </div>
-              </div>
-              <div class="tool-steps" id="oa3-steps" style="display:none;"></div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-oa3">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 21 2m-4 4 3 3m-6 0 3 3"/></svg></div>
+ <div class="tool-card-title">OA3 密钥读取 / 激活</div>
+ <span class="badge badge-read" data-i18n="tools_read">只读 + 写入</span>
+ </div>
+ <div class="tool-card-desc" data-i18n="oa3_desc">读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用</div>
+ <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-oa3')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="oa3-msg"></div>
+ <div class="field">
+ <label data-i18n="lbl_tool_room2">目标房间（需桥接器在线）</label>
+ <select id="oa3-room"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="oa3-read-btn" data-i18n="btn_oa3_read" onclick="oa3Read()">读取 OA3 密钥</button>
+ </div>
+ <div class="oa3-result" id="oa3-result" style="display:none;">
+ <div class="oa3-key-row">
+ <span class="oa3-label" data-i18n="oa3_key">主板 OA3 密钥:</span>
+ <span class="oa3-key mono" id="oa3-key"></span>
+ <button class="btn-sm" data-i18n="copy" onclick="copyOa3Key()">复制</button>
+ </div>
+ <div class="oa3-meta" id="oa3-meta"></div>
+ <div class="tool-warn" data-i18n="oa3_activate_warn">激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配</div>
+ <div class="tool-card-actions">
+ <button class="btn-main btn-danger" id="oa3-act-btn" data-i18n="btn_oa3_activate" onclick="oa3Activate()">导入密钥并激活系统</button>
+ </div>
+ </div>
+ <div class="tool-steps" id="oa3-steps" style="display:none;"></div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-bios">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">🖥</div>
-              <div class="tool-card-title">BIOS 信息读取</div>
-              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
-            </div>
-            <div class="tool-card-desc" data-i18n="bios_desc">通过联想 WMI 接口（Lenovo_BiosSetting）读取当前机器 BIOS 全量配置——不重启、不改设置，纯采集</div>
-            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-bios')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="bios-msg"></div>
-              <div class="field">
-                <label data-i18n="lbl_tool_room3">目标房间（需桥接器在线）</label>
-                <select id="bios-room"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="bios-btn" data-i18n="btn_bios_read" onclick="biosRead()">🖥 读取 BIOS 配置</button>
-              </div>
-              <div id="bios-result" style="display:none;">
-                <div class="bios-info" id="bios-info"></div>
-                <div class="tool-card-actions">
-                  <button class="btn-main" id="bios-view-btn" onclick="openBiosModal()">📄 <span data-i18n="bios_view_all">查看全部设置</span> (<span id="bios-count2">0</span>)</button>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-bios">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+ <div class="tool-card-title">BIOS 信息读取</div>
+ <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+ </div>
+ <div class="tool-card-desc" data-i18n="bios_desc">通过联想 WMI 接口（Lenovo_BiosSetting）读取当前机器 BIOS 全量配置——不重启、不改设置，纯采集</div>
+ <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-bios')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="bios-msg"></div>
+ <div class="field">
+ <label data-i18n="lbl_tool_room3">目标房间（需桥接器在线）</label>
+ <select id="bios-room"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="bios-btn" data-i18n="btn_bios_read" onclick="biosRead()">读取 BIOS 配置</button>
+ </div>
+ <div id="bios-result" style="display:none;">
+ <div class="bios-info" id="bios-info"></div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="bios-view-btn" onclick="openBiosModal()"> <span data-i18n="bios_view_all">查看全部设置</span>(<span id="bios-count2">0</span>)</button>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-sleep">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">😴</div>
-              <div class="tool-card-title">睡眠报告</div>
-              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
-            </div>
-            <div class="tool-card-desc" data-i18n="sleep_desc">用 powercfg /sleepstudy 生成最近 28 天的睡眠质量报告（HTML）——排查睡眠唤醒异常、耗电、休眠失败等问题</div>
-            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-sleep')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="sleep-msg"></div>
-              <div class="field">
-                <label data-i18n="lbl_tool_room4">目标房间（需桥接器在线）</label>
-                <select id="sleep-room"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="sleep-btn" data-i18n="btn_sleep_run" onclick="sleepStudyRun()">😴 生成睡眠报告（28天）</button>
-              </div>
-              <div id="sleep-result" style="display:none;">
-                <div class="tool-warn" data-i18n="sleep_admin_hint">🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）</div>
-                <div class="tool-card-actions">
-                  <a class="btn-main" id="sleep-dl" href="#" download data-i18n="sleep_download">📥 下载睡眠报告 (.html)</a>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-sleep">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></div>
+ <div class="tool-card-title">睡眠报告</div>
+ <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+ </div>
+ <div class="tool-card-desc" data-i18n="sleep_desc">用 powercfg /sleepstudy 生成最近 28 天的睡眠质量报告（HTML）——排查睡眠唤醒异常、耗电、休眠失败等问题</div>
+ <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-sleep')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="sleep-msg"></div>
+ <div class="field">
+ <label data-i18n="lbl_tool_room4">目标房间（需桥接器在线）</label>
+ <select id="sleep-room"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="sleep-btn" data-i18n="btn_sleep_run" onclick="sleepStudyRun()">生成睡眠报告（28天）</button>
+ </div>
+ <div id="sleep-result" style="display:none;">
+ <div class="tool-warn" data-i18n="sleep_admin_hint">需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）</div>
+ <div class="tool-card-actions">
+ <a class="btn-main" id="sleep-dl" href="#" download data-i18n="sleep_download">下载睡眠报告 (.html)</a>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-energy">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">⚡</div>
-              <div class="tool-card-title">能源效率报告</div>
-              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
-            </div>
-            <div class="tool-card-desc" data-i18n="energy_desc">用 powercfg /energy 采集 60 秒生成系统能源效率与电源设置诊断报告（HTML）——发现潜在的耗电问题</div>
-            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-energy')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="energy-msg"></div>
-              <div class="field">
-                <label data-i18n="lbl_tool_room5">目标房间（需桥接器在线）</label>
-                <select id="energy-room"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="energy-btn" data-i18n="btn_energy_run" onclick="energyRun()">⚡ 生成能源报告（60秒）</button>
-              </div>
-              <div id="energy-result" style="display:none;">
-                <div class="tool-warn" data-i18n="energy_admin_hint">🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）</div>
-                <div class="tool-card-actions">
-                  <a class="btn-main" id="energy-dl" href="#" download data-i18n="energy_download">📥 下载能源报告 (.html)</a>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-energy">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h8l-1 8 10-12h-8l1-8z"/></svg></div>
+ <div class="tool-card-title">能源效率报告</div>
+ <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+ </div>
+ <div class="tool-card-desc" data-i18n="energy_desc">用 powercfg /energy 采集 60 秒生成系统能源效率与电源设置诊断报告（HTML）——发现潜在的耗电问题</div>
+ <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-energy')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="energy-msg"></div>
+ <div class="field">
+ <label data-i18n="lbl_tool_room5">目标房间（需桥接器在线）</label>
+ <select id="energy-room"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="energy-btn" data-i18n="btn_energy_run" onclick="energyRun()">生成能源报告（60秒）</button>
+ </div>
+ <div id="energy-result" style="display:none;">
+ <div class="tool-warn" data-i18n="energy_admin_hint">需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）</div>
+ <div class="tool-card-actions">
+ <a class="btn-main" id="energy-dl" href="#" download data-i18n="energy_download">下载能源报告 (.html)</a>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-drivers">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">🖱</div>
-              <div class="tool-card-title">驱动版本信息</div>
-              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
-            </div>
-            <div class="tool-card-desc" data-i18n="drivers_desc">读取系统已安装驱动的 DeviceName / Manufacturer / DriverVersion——核对驱动版本、排查驱动过期或不匹配</div>
-            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-drivers')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="drivers-msg"></div>
-              <div class="field">
-                <label data-i18n="lbl_tool_room6">目标房间（需桥接器在线）</label>
-                <select id="drivers-room"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="drivers-btn" data-i18n="btn_drivers_list" onclick="driversList()">🖱 读取驱动版本</button>
-              </div>
-              <div id="drivers-result" style="display:none;">
-                <div class="bios-info" id="drivers-summary"></div>
-                <div class="tool-card-actions">
-                  <button class="btn-main" id="drivers-view-btn" onclick="openDriversModal()">📄 <span data-i18n="drivers_view_all">查看全部驱动</span> (<span id="drivers-count2">0</span>)</button>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-drivers">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="7"/><line x1="12" y1="6" x2="12" y2="10"/></svg></div>
+ <div class="tool-card-title">驱动版本信息</div>
+ <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+ </div>
+ <div class="tool-card-desc" data-i18n="drivers_desc">读取系统已安装驱动的 DeviceName / Manufacturer / DriverVersion——核对驱动版本、排查驱动过期或不匹配</div>
+ <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-drivers')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="drivers-msg"></div>
+ <div class="field">
+ <label data-i18n="lbl_tool_room6">目标房间（需桥接器在线）</label>
+ <select id="drivers-room"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="drivers-btn" data-i18n="btn_drivers_list" onclick="driversList()">读取驱动版本</button>
+ </div>
+ <div id="drivers-result" style="display:none;">
+ <div class="bios-info" id="drivers-summary"></div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="drivers-view-btn" onclick="openDriversModal()"> <span data-i18n="drivers_view_all">查看全部驱动</span>(<span id="drivers-count2">0</span>)</button>
+ </div>
+ </div>
+ </div>
+ </div>
 
-        </div>
-      </section>
+ </div>
+ </section>
 
-      <!-- Linux 工具 -->
-      <section class="page" id="page-tools-linux">
-        <div class="page-title"><span data-i18n="nav_tools_linux">Linux 工具</span></div>
-        <div class="page-desc" data-i18n="tools_linux_desc">Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行</div>
+ <!-- Linux 工具 -->
+ <section class="page" id="page-tools-linux">
+ <div class="page-title"><span data-i18n="nav_tools_linux">Linux 工具</span></div>
+ <div class="page-desc" data-i18n="tools_linux_desc">Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行</div>
 
-        <div class="tool-grid">
+ <div class="tool-grid">
 
-          <div class="tool-card" id="card-smart-linux">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">💽</div>
-              <div class="tool-card-title">硬盘健康检测（SMART）</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">读取硬盘 SMART 健康数据（温度/重映射坏道/通电时长/SSD 磨损）——自动安装 smartmontools 后执行</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-smart-linux')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="smart-msg-linux"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线）</label>
-                <select id="smart-room-linux" onchange="smartClear('linux')"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="smart-btn-linux" onclick="smartFetch('linux')">🔍 检测硬盘健康</button>
-              </div>
-              <div id="smart-result-linux" style="display:none;">
-                <div class="tool-card-actions">
-                  <button class="btn-main" onclick="openLogModal('smart-linux', document.getElementById('smart-room-linux').value)">📄 查看 SMART 信息</button>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-smart-linux">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg></div>
+ <div class="tool-card-title">硬盘健康检测（SMART）</div>
+ <span class="badge badge-read">只读</span>
+ </div>
+ <div class="tool-card-desc">读取硬盘 SMART 健康数据（温度/重映射坏道/通电时长/SSD 磨损）——自动安装 smartmontools 后执行</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-smart-linux')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="smart-msg-linux"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线）</label>
+ <select id="smart-room-linux" onchange="smartClear('linux')"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="smart-btn-linux" onclick="smartFetch('linux')">检测硬盘健康</button>
+ </div>
+ <div id="smart-result-linux" style="display:none;">
+ <div class="tool-card-actions">
+ <button class="btn-main" onclick="openLogModal('smart-linux', document.getElementById('smart-room-linux').value)">查看 SMART 信息</button>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-sio-linux">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">🔧</div>
-              <div class="tool-card-title">SIO Log 硬件诊断日志</div>
-              <span class="badge badge-read">只读</span>
-            </div>
-            <div class="tool-card-desc">抓取 SIO EEPROM 硬件事件日志（温度/电压/异常记录，共 124 条）——自动下载 HWDiag Linux 版到客户机（root 执行），日志可查看/下载</div>
-            <button class="btn-sm tool-card-open" onclick="toggleTool('card-sio-linux')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="sio-msg-linux"></div>
-              <div class="field">
-                <label>目标房间（需桥接器在线，Linux 平台）</label>
-                <select id="sio-room-linux" onchange="sioClear('linux')"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="sio-btn-linux" onclick="sioFetch('linux')">🔍 抓取 SIO Log</button>
-              </div>
-              <div id="sio-result-linux" style="display:none;">
-                <div class="tool-card-actions">
-                  <button class="btn-main" onclick="openLogModal('sio-linux', document.getElementById('sio-room-linux').value)">📄 查看 SIO Log</button>
-                </div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-sio-linux">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9.4 9.4a2.8 2.8 0 1 1-4-4L15.7 7.3"/><path d="M14.7 6.3 18 3l3 3-3.3 3.3"/></svg></div>
+ <div class="tool-card-title">SIO Log 硬件诊断日志</div>
+ <span class="badge badge-read">只读</span>
+ </div>
+ <div class="tool-card-desc">抓取 SIO EEPROM 硬件事件日志（温度/电压/异常记录，共 124 条）——自动下载 HWDiag Linux 版到客户机（root 执行），日志可查看/下载</div>
+ <button class="btn-sm tool-card-open" onclick="toggleTool('card-sio-linux')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="sio-msg-linux"></div>
+ <div class="field">
+ <label>目标房间（需桥接器在线，Linux 平台）</label>
+ <select id="sio-room-linux" onchange="sioClear('linux')"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="sio-btn-linux" onclick="sioFetch('linux')">抓取 SIO Log</button>
+ </div>
+ <div id="sio-result-linux" style="display:none;">
+ <div class="tool-card-actions">
+ <button class="btn-main" onclick="openLogModal('sio-linux', document.getElementById('sio-room-linux').value)">查看 SIO Log</button>
+ </div>
+ </div>
+ </div>
+ </div>
 
-          <div class="tool-card" id="card-linux-logpack">
-            <div class="tool-card-head">
-              <div class="tool-card-icon">📦</div>
-              <div class="tool-card-title">打包系统日志</div>
-              <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
-            </div>
-            <div class="tool-card-desc" data-i18n="linux_logpack_desc">将 /var/log 日志打包为 tar.gz 保存到客户机桌面，文件名以机器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查时快速收集日志</div>
-            <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-linux-logpack')">▶ 打开工具</button>
-            <div class="tool-card-body">
-              <div class="msg-box" id="linux-logpack-msg"></div>
-              <div class="field">
-                <label data-i18n="lbl_tool_room_linux">目标房间（需 Linux 桥接器在线）</label>
-                <select id="linux-logpack-room"></select>
-              </div>
-              <div class="tool-card-actions">
-                <button class="btn-main" id="linux-logpack-btn" data-i18n="btn_linux_logpack" onclick="linuxLogPack(false)">📦 打包到本地</button>
-                <button class="btn-main btn-green" id="linux-logpack-upload-btn" onclick="linuxLogPack(true)">📤 打包并上传到 IDG</button>
-              </div>
-              <div id="linux-logpack-result" style="display:none;">
-                <div class="bios-info" id="linux-logpack-info"></div>
-                <div class="tool-warn" data-i18n="linux_logpack_tip">💡 压缩包已保存到客户机桌面，可直接拷贝/发送；如需服务器下载请告知</div>
-              </div>
-            </div>
-          </div>
+ <div class="tool-card" id="card-linux-logpack">
+ <div class="tool-card-head">
+ <div class="tool-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></div>
+ <div class="tool-card-title">打包系统日志</div>
+ <span class="badge badge-read" data-i18n="tools_readonly">只读</span>
+ </div>
+ <div class="tool-card-desc" data-i18n="linux_logpack_desc">将 /var/log 日志打包为 tar.gz 保存到客户机桌面，文件名以机器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查时快速收集日志</div>
+ <button class="btn-sm tool-card-open" data-i18n="btn_open_tool" onclick="toggleTool('card-linux-logpack')">打开工具</button>
+ <div class="tool-card-body">
+ <div class="msg-box" id="linux-logpack-msg"></div>
+ <div class="field">
+ <label data-i18n="lbl_tool_room_linux">目标房间（需 Linux 桥接器在线）</label>
+ <select id="linux-logpack-room"></select>
+ </div>
+ <div class="tool-card-actions">
+ <button class="btn-main" id="linux-logpack-btn" data-i18n="btn_linux_logpack" onclick="linuxLogPack(false)">打包到本地</button>
+ <button class="btn-main btn-green" id="linux-logpack-upload-btn" onclick="linuxLogPack(true)">打包并上传到 IDG</button>
+ </div>
+ <div id="linux-logpack-result" style="display:none;">
+ <div class="bios-info" id="linux-logpack-info"></div>
+ <div class="tool-warn" data-i18n="linux_logpack_tip">压缩包已保存到客户机桌面，可直接拷贝/发送；如需服务器下载请告知</div>
+ </div>
+ </div>
+ </div>
 
-        </div>
-      </section>
+ </div>
+ </section>
 
       <!-- 修改密码 -->
       <!-- FIELD_HIDE_START --><section class="page" id="page-password">
@@ -1195,7 +1392,7 @@
       <!-- 账号管理（仅管理员） -->
       <section class="page" id="page-users">
         <div class="page-title"><span data-i18n="nav_users">账号管理</span></div>
-        <div class="page-desc" data-i18n="users_desc">创建工程师账号、停用/启用、重置密码</div>
+        <div class="page-desc" data-i18n="users_desc">创建账号（渠道 / CC / 二线 / 管理员）、停用/启用、改角色、重置密码</div>
         <div class="toolbar">
           <button class="btn-main" data-i18n="btn_new_user" onclick="showCreateUser()">+ 新建账号</button>
           <span class="count" id="user-count"></span>
@@ -1206,7 +1403,12 @@
             <div class="field"><label data-i18n="lbl_username">工号</label><input id="u-username" data-i18n-placeholder="ph_username" placeholder="如 E10086"></div>
             <div class="field"><label data-i18n="lbl_name">姓名</label><input id="u-name" data-i18n-placeholder="ph_name" placeholder="如 张三"></div>
             <div class="field"><label data-i18n="lbl_role">角色</label>
-              <select id="u-role"><option value="engineer" data-i18n="role_engineer">工程师</option><option value="admin" data-i18n="role_admin">管理员</option></select>
+              <select id="u-role">
+            <option value="field">渠道工程师</option>
+            <option value="cc">CC 工程师</option>
+            <option value="expert" selected>二线工程师</option>
+            <option value="admin">管理员</option>
+          </select>
             </div>
             <div class="field"><label data-i18n="lbl_init_pwd">初始密码</label><input id="u-password" data-i18n-placeholder="ph_init_pwd" placeholder="至少 4 位"></div>
           </div>
@@ -1284,7 +1486,7 @@
 <div class="modal-overlay" id="bios-modal">
   <div class="modal-lg modal-lg-wide">
     <div class="modal-head">
-      <div class="modal-title">🖥 <span data-i18n="bios_modal_title">BIOS 设置项（全量）</span></div>
+      <div class="modal-title"><span data-i18n="bios_modal_title">BIOS 设置项（全量）</span></div>
       <button class="modal-close" onclick="closeBiosModal()">✕</button>
     </div>
     <div class="history-body" style="display:flex; flex-direction:column;">
@@ -1308,13 +1510,13 @@
 <div class="modal-overlay" id="log-modal">
   <div class="modal-lg modal-lg-wide">
     <div class="modal-head">
-      <div class="modal-title" id="log-modal-title">📄 查看日志</div>
+      <div class="modal-title" id="log-modal-title">查看日志</div>
       <button class="modal-close" onclick="closeLogModal()">✕</button>
     </div>
     <div class="history-body" style="display:flex; flex-direction:column;">
       <div class="toolbar" style="margin-bottom:10px; flex-shrink:0;">
-        <button class="btn-sm" onclick="copyLogText()">📋 复制全部</button>
-        <button class="btn-sm" onclick="downloadLogTxt()">💾 下载 .txt</button>
+        <button class="btn-sm" onclick="copyLogText()">复制全部</button>
+        <button class="btn-sm" onclick="downloadLogTxt()">下载 .txt</button>
       </div>
       <div style="flex:1; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--bg);">
         <pre id="log-modal-content" style="margin:0; padding:12px; font-size:12px; white-space:pre-wrap; word-break:break-all;"></pre>
@@ -1327,7 +1529,7 @@
 <div class="modal-overlay" id="drivers-modal">
   <div class="modal-lg modal-lg-wide">
     <div class="modal-head">
-      <div class="modal-title">🖱 <span data-i18n="drivers_modal_title">驱动版本信息（全量）</span></div>
+      <div class="modal-title"><span data-i18n="drivers_modal_title">驱动版本信息（全量）</span></div>
       <button class="modal-close" onclick="closeDriversModal()">✕</button>
     </div>
     <div class="history-body" style="display:flex; flex-direction:column;">
@@ -1350,46 +1552,46 @@
 <script>
 const I18N = {
   'zh-CN': {
-    nav_workorders: '📋 诊断记录', nav_chat: '💬 对话', nav_create: '➕ 创建房间', nav_join: '⇄ 加入房间',
-    nav_download: '📦 下载桥接器', nav_password: '🔒 修改密码', nav_users: '👥 账号管理', nav_admin: '🛠 管理后台', nav_feedback: '📝 反馈',
+    nav_workorders: '诊断记录', nav_chat: ' 对话', nav_create: ' 创建房间', nav_join: ' 加入房间',
+    nav_download: '下载桥接器', nav_password: ' 修改密码', nav_users: ' 账号管理', nav_admin: ' 管理后台', nav_feedback: ' 反馈',
     fb_desc: '把测试中发现的问题或建议告诉我们', fb_placeholder: '请描述您遇到的问题或建议（如：诊断结果不准确、页面报错、希望增加的功能…）', fb_submit: '提交反馈', fb_success: '反馈已提交，感谢您的建议！', fb_need: '请填写反馈内容', fb_empty: '暂无反馈记录', fb_history: '我的反馈记录',
-    nav_home: '🏠 首页',
+    nav_home: '首页',
     home_sub: '云端 AI 诊断 Windows / Linux 电脑问题 · 硬件工具全覆盖',
     home_howto: '快速上手',
     home_step1_t: '创建房间', home_step1_d: '填写电脑 SN 与报修工单号，生成 8 位房间码',
-    home_step2_t: '获取连接', home_step2_d: '进入对话页点「📶 连接你的电脑」，复制一键命令或下载连接包',
+    home_step2_t: '获取连接', home_step2_d: '进入对话页点「连接你的电脑」，复制一键命令或下载连接包',
     home_step3_t: '客户机连接', home_step3_d: '粘贴命令运行 / 双击连接包，自动连接当前房间',
     home_step4_t: '诊断与处理', home_step4_d: '对话式 AI 诊断，或工具页执行硬件诊断、日志收集、刷写激活',
     tools_desc: '无需 AI 对话的本地工具集合，通过桥接器远程推送到客户机执行',
     btn_open_tool: '打开工具', btn_close_tool: '收起',
-    nav_tools_win: '🪟 Windows 工具', nav_tools_linux: '🐧 Linux 工具',
+    nav_tools_win: 'Windows 工具', nav_tools_linux: ' Linux 工具',
     tools_win_desc: 'Windows 客户机专用工具集合，通过桥接器远程推送到客户机执行',
     tools_linux_desc: 'Linux 客户机专用工具集合（Ubuntu / UOS / KOS / 麒麟 / 龙芯等），通过桥接器远程推送到客户机执行',
     lbl_tool_room_linux: '目标房间（需 Linux 桥接器在线）',
-    btn_linux_logpack: '📦 打包日志到桌面',
+    btn_linux_logpack: '打包日志到桌面',
     linux_logpack_desc: '将 /var/log 日志打包为 tar.gz 保存到客户机桌面，文件名以机器 SN + 日期命名（如 SN_20260809_logs.tar.gz）——故障排查时快速收集日志',
     linux_logpack_running: '正在打包 /var/log 日志（视日志大小可能需要 1-3 分钟）...',
     linux_logpack_done: '日志打包完成',
-    linux_logpack_file: '压缩包路径: ',
+    linux_logpack_file: '压缩包路径:',
     linux_logpack_empty: '未获取到打包结果',
-    linux_logpack_tip: '💡 压缩包已保存到客户机桌面，可直接拷贝/发送；如需服务器下载请告知',
+    linux_logpack_tip: '压缩包已保存到客户机桌面，可直接拷贝/发送；如需服务器下载请告知',
     tools_write: '写入类 · 需审批',
     snmtm_desc: 'ThinkStation 工作站更换主板后，将正确的序列号(SN)与机型型号(MTM)写入 BIOS DMI 区',
     lbl_tool_room: '目标房间（需桥接器在线）', lbl_tool_model: '机型型号',
     lbl_tool_sn: '序列号 SN', lbl_tool_mtm: '机型型号 MTM',
     ph_tool_sn: '如 PC22XGDR', ph_tool_mtm: '如 30E1S5NV00',
-    snmtm_warn: '⚠ 写入后无法撤销，请仔细核对 SN / MTM 再点击刷写',
-    btn_snmtm_flash: '✍️ 刷写 SN/MTM',
+    snmtm_warn: '写入后无法撤销，请仔细核对 SN / MTM 再点击刷写',
+    btn_snmtm_flash: '刷写 SN/MTM',
     sntm_no_room: '暂无可用的在线房间。请先在「诊断记录」/「创建房间」让客户机桥接器上线',
     need_model: '请选择机型型号',
-    snmtm_running: '刷写执行中，请稍候（推送工具 → 写入 SN/MTM → 回读校验）...',
+    snmtm_running: '刷写执行中，请稍候（推送工具 写入 SN/MTM 回读校验）...',
     snmtm_verify_label: '回读校验:',
     snmtm_ok: '刷写成功，WMI 回读一致。建议重启后进入 BIOS 二次确认',
     snmtm_warn_verify: '写入命令已执行，但回读校验未完全匹配',
     tools_read: '只读 + 写入',
     oa3_desc: '读取主板内置 OA3 系统激活密钥（SoftwareLicensingService），并可导入密钥激活当前系统——换主板后重装/激活用',
     lbl_tool_room2: '目标房间（需桥接器在线）',
-    btn_oa3_read: '🔍 读取 OA3 密钥',
+    btn_oa3_read: '读取 OA3 密钥',
     oa3_key: '主板 OA3 密钥:',
     oa3_marker: 'OA2 主板标记',
     oa3_lic: '激活状态',
@@ -1397,22 +1599,22 @@ const I18N = {
     oa3_lic_activated: '已激活(永久)', oa3_lic_oob: 'OOB 宽限期', oa3_lic_oot: 'OOT 宽限期', oa3_lic_none: '未激活',
     oa3_reading: '读取中...', oa3_read_ok: 'OA3 密钥读取成功', oa3_read_empty: '未读取到 OA3 密钥（该主板可能无 OA3 标记）',
     oa3_no_key: '暂无密钥', oa3_confirm: '确认导入以下密钥并激活系统？',
-    oa3_activate_warn: '⚠ 激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配',
-    btn_oa3_activate: '⚡ 导入密钥并激活系统',
-    oa3_activating: '激活中（导入密钥 → 在线激活 → 状态验证）...',
+    oa3_activate_warn: '激活系统会导入密钥并尝试在线激活，请确认密钥与当前系统版本匹配',
+    btn_oa3_activate: '导入密钥并激活系统',
+    oa3_activating: '激活中（导入密钥 在线激活 状态验证）...',
     oa3_act_ok: '激活完成，系统处于已激活/宽限期状态',
     oa3_act_warn: '激活命令已执行，但系统状态未确认',
     tools_readonly: '只读',
     bios_desc: '通过联想 WMI 接口（Lenovo_BiosSetting）读取当前机器 BIOS 全量配置——不重启、不改设置，纯采集',
     lbl_tool_room3: '目标房间（需桥接器在线）',
-    btn_bios_read: '🖥 读取 BIOS 配置',
+    btn_bios_read: '读取 BIOS 配置',
     bios_reading: '读取中（采集 BIOS 全量设置项）...',
     bios_read_ok: 'BIOS 配置读取成功',
     bios_empty: '未读取到 BIOS 设置项（该机型可能不支持 Lenovo WMI 接口）',
     bios_search_ph: '搜索设置项（如 WakeOnLAN）',
     bios_th_item: '设置项', bios_th_value: '当前值',
     bios_no_match: '无匹配的设置项',
-    bios_elevate_title: '🔒 需管理员权限：bridge 当前为普通权限运行，无法读取完整 BIOS 设置',
+    bios_elevate_title: '需管理员权限：bridge 当前为普通权限运行，无法读取完整 BIOS 设置',
     bios_elevate_hint: '请在客户机上重启 bridge（双击会自动请求管理员权限，UAC 弹窗点"是"即可）',
     bios_view_all: '查看全部设置',
     bios_modal_title: 'BIOS 设置项（全量）',
@@ -1420,23 +1622,23 @@ const I18N = {
     bios_downloaded: 'BIOS 配置已下载',
     sleep_desc: '用 powercfg /sleepstudy 生成最近 28 天的睡眠质量报告（HTML）——排查睡眠唤醒异常、耗电、休眠失败等问题',
     lbl_tool_room4: '目标房间（需桥接器在线）',
-    btn_sleep_run: '😴 生成睡眠报告（28天）',
-    sleep_admin_hint: '🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）',
-    sleep_download: '📥 下载睡眠报告 (.html)',
+    btn_sleep_run: '生成睡眠报告（28天）',
+    sleep_admin_hint: '需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）',
+    sleep_download: '下载睡眠报告 (.html)',
     sleep_running: '正在生成睡眠报告（读取最近 28 天睡眠历史）...',
     sleep_done: '睡眠报告已生成',
     sleep_empty: '未生成报告（系统可能无睡眠历史或组件缺失）',
     energy_desc: '用 powercfg /energy 采集 60 秒生成系统能源效率与电源设置诊断报告（HTML）——发现潜在的耗电问题',
     lbl_tool_room5: '目标房间（需桥接器在线）',
-    btn_energy_run: '⚡ 生成能源报告（60秒）',
-    energy_admin_hint: '🔒 需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）',
-    energy_download: '📥 下载能源报告 (.html)',
+    btn_energy_run: '生成能源报告（60秒）',
+    energy_admin_hint: '需要管理员权限：请确认客户机 bridge 以管理员运行（双击自动请求 UAC）',
+    energy_download: '下载能源报告 (.html)',
     energy_running: '正在采集 60 秒能耗数据并生成报告（约需 1-2 分钟）...',
     energy_done: '能源报告已生成',
     energy_empty: '未生成报告（采样失败或系统组件缺失）',
     drivers_desc: '读取系统已安装驱动的 DeviceName / Manufacturer / DriverVersion——核对驱动版本、排查驱动过期或不匹配',
     lbl_tool_room6: '目标房间（需桥接器在线）',
-    btn_drivers_list: '🖱 读取驱动版本',
+    btn_drivers_list: '读取驱动版本',
     drivers_reading: '正在读取驱动版本信息...',
     drivers_done: '驱动版本读取成功',
     drivers_empty: '未读取到驱动信息',
@@ -1474,13 +1676,13 @@ const I18N = {
     room_not_found: '房间不存在，请确认房间码或先创建房间',
     check_fail: '校验失败',
     dl_desc: '在需要诊断的电脑上运行桥接器，输入房间码完成配对',
-    dl_win: '⬇ Windows 桥接器 (clouddiag-bridge-win64.exe, 4.8MB)', dl_linux: '⬇ Linux x86_64 桥接器',
+    dl_win: 'Windows 桥接器 (clouddiag-bridge-win64.exe, 4.8MB)', dl_linux: ' Linux x86_64 桥接器',
     copy: '复制', copied_cmd: '命令已复制',
     dl_note: 'Linux 其他架构（ARM64 / 龙芯）请从管理后台获取。<br>运行后按提示输入服务器地址与 8 位房间码即可连接。',
-    dl_ps_title: '⚡ 命令版（免安装 · Windows PowerShell）',
+    dl_ps_title: '命令版（免安装 · Windows PowerShell）',
     dl_ps_desc: '不想下载 .exe？在客户机的「管理员 PowerShell」窗口粘贴一行命令即可连接——不下载文件、不落盘，适合 .exe 被杀毒软件拦截的场景。',
     dl_ps_step1_t: '打开管理员 PowerShell',
-    dl_ps_step1_d: '在客户机上右键「开始」菜单 → 选择「Windows PowerShell (管理员)」',
+    dl_ps_step1_d: '在客户机上右键「开始」菜单 选择「Windows PowerShell (管理员)」',
     dl_ps_step2_t: '粘贴一行命令',
     dl_ps_step2_d: '回车后按提示输入 8 位房间码：',
     dl_ps_step2_note: '也可以提前写入房间码，免交互直接连（把 ABC12345 换成你的房间码）：',
@@ -1495,16 +1697,16 @@ const I18N = {
     dl_linux_uninstall_t: '用完清理（可选）', dl_linux_uninstall_d: '诊断结束后不再需要时，一条命令卸载桥接器（删除程序与审计日志，并恢复系统自带的 bridge 命令）：',
     dl_step1: '安装桥接器', dl_step2: '输入房间码', dl_step3: '对话诊断',
     dl_recommend: '推荐',
-    dl_card_win_t: 'Windows 客户端 (.exe)', dl_card_win_desc: '下载后双击运行，输入 8 位房间码即连接。主力方案，最省心。', dl_card_win_btn: '⬇ 下载 clouddiag-bridge-win64.exe (4.8MB)', dl_card_win_note: '双击自动请求管理员权限（UAC 弹窗点「是」即可）',
+    dl_card_win_t: 'Windows 客户端 (.exe)', dl_card_win_desc: '下载后双击运行，输入 8 位房间码即连接。主力方案，最省心。', dl_card_win_btn: ' 下载 clouddiag-bridge-win64.exe (4.8MB)', dl_card_win_note: '双击自动请求管理员权限（UAC 弹窗点「是」即可）',
     dl_card_ps_t: 'Windows 命令版（免安装）', dl_card_ps_desc: '管理员 PowerShell 粘贴一行命令即连接。不下载文件、不落盘，杀毒软件友好。', dl_more_steps: '查看详细步骤',
-    dl_card_linux_t: 'Linux 客户端', dl_card_linux_desc: 'Ubuntu / UOS / KOS / 麒麟 / 龙芯等发行版通用，一条命令安装。', dl_card_linux_btn: '⬇ 下载 x86_64 桥接器', dl_card_linux_note: '仅支持 x86_64 架构；ARM64 / 龙芯版本制作中',
-    dl_facts_cap: '🔧 桥接器能力：AI 远程诊断（系统信息 / 事件日志 / 驱动 / BIOS）· 远程命令 · 文件传输 · 断线自动重连',
-    dl_facts_sec: '🛡 安全机制：只读诊断自动执行；修改 / 危险操作需在对话页人工审批',
+    dl_card_linux_t: 'Linux 客户端', dl_card_linux_desc: 'Ubuntu / UOS / KOS / 麒麟 / 龙芯等发行版通用，一条命令安装。', dl_card_linux_btn: ' 下载 x86_64 桥接器', dl_card_linux_note: '仅支持 x86_64 架构；ARM64 / 龙芯版本制作中',
+    dl_facts_cap: '桥接器能力：AI 远程诊断（系统信息 / 事件日志 / 驱动 / BIOS）· 远程命令 · 文件传输 · 断线自动重连',
+    dl_facts_sec: '安全机制：只读诊断自动执行；修改 / 危险操作需在对话页人工审批',
     pwd_desc: '定期修改密码保护账号安全',
     lbl_old: '旧密码', lbl_new: '新密码（至少 4 位）', lbl_confirm: '确认新密码',
     btn_change: '确认修改',
     pwd_mismatch: '两次输入的新密码不一致', pwd_short: '新密码至少 4 位', pwd_ok: '密码修改成功', pwd_fail: '修改失败',
-    users_desc: '创建工程师账号、停用/启用、重置密码',
+    users_desc: '创建账号（渠道 / CC / 二线 / 管理员）、停用/启用、改角色、重置密码',
     btn_new_user: '+ 新建账号',
     lbl_username: '工号', lbl_name: '姓名', lbl_role: '角色', lbl_init_pwd: '初始密码',
     ph_username: '如 E10086', ph_name: '如 张三', ph_init_pwd: '至少 4 位',
@@ -1517,9 +1719,9 @@ const I18N = {
     btn_disable: '停用', btn_enable: '启用', btn_reset: '重置密码',
     reset_ok: '密码已重置', op_fail: '操作失败',
     chat_empty1: '尚未选择房间', chat_empty2: '在「诊断记录」里点「进入对话」，或创建/加入房间后自动打开',
-    room_prefix: '房间: ',
+    room_prefix: '房间:',
     net_err: '网络错误',
-    user_guest: '未登录', user_admin: ' (管理员)', user_prefix: '工号: ',
+    user_guest: '未登录', user_admin: ' (管理员)', user_prefix: '工号:',
   },
 };
 
@@ -1559,6 +1761,7 @@ function switchTab(name) {
   if (name === 'workorders') loadRooms();
   if (name === 'users') loadUsers();
   if (name === 'feedback') loadMyFeedbacks();
+  if (name === 'links') linksLoad();
   // 工具模式依赖桥接器在线状态：每次进入都重新拉取房间列表，避免用页面加载时的旧快照
   if (name === 'tools-win') loadRooms(true, true).then(() => { initTools(); preselectChatRoom(); });
   if (name === 'tools-linux') loadRooms(true, true).then(() => { initLinuxTools(); preselectChatRoom(); });
@@ -1599,7 +1802,7 @@ function fillDiagCount() {
     .catch(e => console.warn('诊断项数量获取失败（文案回退为“多”）：', e));
 })();
 
-function chooseInterface(room, sn, ticket, title) {
+function chooseInterface(room, sn, ticket, title, model) {
   const old = document.getElementById('iface-modal');
   if (old) old.remove();
   const box = document.createElement('div');
@@ -1611,12 +1814,20 @@ function chooseInterface(room, sn, ticket, title) {
     + '<div style="font-size:12.5px;color:#5C5F66;margin-bottom:18px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
     + '房间 <b style="color:#151B26;font-family:Consolas,monospace;letter-spacing:1px;font-size:14px;">' + room + '</b>'
     + '<button onclick="copyRoomCodeNew(\'' + room + '\')" id="iface-copy-btn" '
-    + 'style="background:#F2F3F5;border:1px solid #E8E9EB;color:#5C5F66;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;">📋 复制房间码</button>'
+    + 'style="background:#F2F3F5;border:1px solid #E8E9EB;color:#5C5F66;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;">复制房间码</button>'
     + (sn ? '<span>· SN ' + sn + '</span>' : '') + (ticket ? '<span>· 工单 ' + ticket + '</span>' : '') + '</div>'
+
+    + '<div onclick="ifaceGo(\'/field?room=' + room + (sn ? '&sn=' + encodeURIComponent(sn) : '') + (ticket ? '&ticket=' + encodeURIComponent(ticket) : '') + (model ? '&model=' + encodeURIComponent(model) : '') + '\')" '
+    + 'style="cursor:pointer;border:1.5px solid #2468F2;background:linear-gradient(180deg,#F5F9FF,#EEF4FE);border-radius:12px;padding:15px 18px;margin-bottom:12px;position:relative;">'
+    + '<span style="position:absolute;right:14px;top:13px;background:#2468F2;color:#fff;font-size:10.5px;font-weight:700;border-radius:4px;padding:2px 7px;letter-spacing:.4px;">新版</span>'
+    + '<div style="font-size:14.5px;font-weight:650;color:#151B26;margin-bottom:4px;">🧭 现场作业台（推荐）</div>'
+    + '<div style="font-size:12.5px;color:#5C5F66;line-height:1.55;">按计划执行：作业项按分级（只读 / 写操作 / 刷写）走门禁，执行过程与结果自动进证据链<br>'
+    + '状态线 6 段贯穿「连接 → 采集 → 判读 → 二线接管 → 闭环」，全程留痕</div>'
+    + '</div>'
 
     + '<div onclick="ifaceGo(\'/diag?room=' + room + (sn ? '&sn=' + encodeURIComponent(sn) : '') + (ticket ? '&ticket=' + encodeURIComponent(ticket) : '') + '\')" '
     + 'style="cursor:pointer;border:1.5px solid #2468F2;background:#EEF4FE;border-radius:12px;padding:15px 18px;margin-bottom:12px;">'
-    + '<div style="font-size:14.5px;font-weight:650;color:#151B26;margin-bottom:4px;">🔍 诊断台（推荐）</div>'
+    + '<div style="font-size:14.5px;font-weight:650;color:#151B26;margin-bottom:4px;">诊断台（经典）</div>'
     + '<div style="font-size:12.5px;color:#5C5F66;line-height:1.55;">左侧 <span class="diag-count">多</span> 项诊断工具 → 右侧结构化结果（采集项清单 / 观察 / 依据 / 缺失 / 初步判读）<br>每条判读结论标注依据、置信度与未知项，结果可追溯</div>'
     + '</div>'
 
@@ -1716,7 +1927,7 @@ function startFieldGuidePolling() {
   }, 5000);
 }
 
-// 左侧「📶 连接客户机」导航：记住的房间直接回引导页，没有则提示先创建/加入
+// 左侧「连接客户机」导航：记住的房间直接回引导页，没有则提示先创建/加入
 function openFieldGuideFromNav() {
   const lastRoom = localStorage.getItem(fieldRoomKey());
   if (lastRoom) {
@@ -1784,7 +1995,7 @@ async function refreshFieldStatus() {
       if (on) {
         toolsDiv.style.display = 'block';
         const btn = document.getElementById('field-guide-tool-btn');
-        btn.textContent = plat === 'linux' ? '🐧 打开 Linux 工具' : '🪟 打开 Windows 工具';
+        btn.textContent = plat === 'linux' ? '打开 Linux 工具' : '打开 Windows 工具';
         btn.onclick = function () { switchTab(plat === 'linux' ? 'tools-linux' : 'tools-win'); };
       } else {
         toolsDiv.style.display = 'none';
@@ -1833,27 +2044,40 @@ async function loadMe() {
     const data = await resp.json();
     if (data.error) { location.href = '/login'; return; }
     currentRole = data.role;
-    const roleTag = data.role === 'admin' ? t('user_admin') : (data.role === 'field' ? '（上门工程师）' : '');
+    const ROLE_TAG = { admin: '（管理员）', field: '（渠道工程师）', cc: '（CC 工程师）', expert: '（二线工程师）', engineer: '（二线工程师）' };
+    const roleTag = ROLE_TAG[data.role] || '';
     document.getElementById('user-name').textContent = t('user_prefix') + data.username + roleTag;
-    if (data.role === 'admin') {
+    // 2026-10-20：导航按角色收敛——现场作业台人人可见，二线作业台仅 expert/admin
+    currentUsername = data.username || '';
+    const isAdmin = data.role === 'admin';
+    const isExpert = (data.role === 'expert' || isAdmin);
+    document.querySelectorAll('.expert-nav').forEach(el => { el.style.display = isExpert ? '' : 'none'; });
+    document.querySelectorAll('.legacy-nav').forEach(el => { el.style.display = 'none'; });
+    if (isAdmin) {
       document.querySelectorAll('.admin-only').forEach(el => el.classList.add('show'));
+      try { if (window.admBoot) window.admBoot(); } catch (e) {}
       aiLoad();
-    } else if (data.role === 'field') {
-      // 上门工程师极简界面：只保留 创建/加入 + 工具（隐藏对话/工单/密码/反馈/首页）
-      ['nav-chat', 'nav-workorders', 'nav-password', 'nav-feedback', 'nav-home'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = 'none';
-      });
-      currentUsername = data.username || '';
-      // 默认进入创建房间（不自动分配/恢复房间——创建或加入后才进引导页）
-      switchTab('create');
     } else {
-      // 普通工程师：隐藏「连接客户机」导航（field 专属）
-      const ng = document.getElementById('nav-field-guide');
-      if (ng) ng.style.display = 'none';
+      try { if (window.userBoot) window.userBoot(data.role, data.username); } catch (e) {}
+      // P1：旧工具页仅管理员 + URL 带 ?legacy=1 时显示（功能已并入 /field）
+      if (new URLSearchParams(location.search).get('legacy') === '1') {
+        document.querySelectorAll('.legacy-nav').forEach(el => { el.style.display = ''; });
+      }
     }
   } catch (e) { location.href = '/login'; }
 }
+
+// P2：旧工具页（tools-win / tools-linux）已并入现场作业台，非管理员一律拦回，
+// 避免绕过 /field 的分级门禁（旧页的 SN/MTM 刷写、OA3 激活没有双人工号确认）。
+const LEGACY_TABS = ['tools-win', 'tools-linux'];
+const _switchTabRaw = switchTab;
+switchTab = function (name) {
+  if (LEGACY_TABS.indexOf(name) >= 0 && currentRole !== 'admin') {
+    alert('该工具页已并入「现场作业台」，请从工作台进入现场作业台执行（分级门禁更严格）。');
+    return _switchTabRaw('home');
+  }
+  return _switchTabRaw(name);
+};
 
 function doLogout() {
   localStorage.removeItem('cab_role');   // 清除角色标记,防止游客残留误置灰
@@ -1977,7 +2201,7 @@ async function createRoom() {
       return;
     }
     // 创建成功 → 直接弹分流选择（房间码/SN/工单都在弹窗内显示——2026-09-16）
-    chooseInterface(data.room_code, sn, ticket, '房间创建成功 · 选择进入方式');
+    chooseInterface(data.room_code, sn, ticket, '房间创建成功 · 选择进入方式', model);
     document.getElementById('f-sn').value = '';
     document.getElementById('f-ticket').value = '';
     document.getElementById('f-model').value = '';
@@ -2070,8 +2294,8 @@ function renderRooms() {
       + '<td>' + stHtml + '</td>'
       + '<td>' + validityBadge(r.days_left) + '</td>'
       + '<td><div class="row-actions">'
-      + '<button class="btn-sm" onclick="chooseInterface(\'' + escapeHtml(r.room_code) + '\', \'' + escapeHtml(r.sn||'') + '\', \'' + escapeHtml(r.ticket_no||'') + '\', \'选择进入方式\')">' + t('enter_chat') + '</button>'
-      + '<button class="btn-sm" onclick="connectRoom(\'' + escapeHtml(r.room_code) + '\')" title="一键连接">📶 连接</button>'
+      + '<button class="btn-sm" onclick="chooseInterface(\'' + escapeHtml(r.room_code) + '\', \'' + escapeHtml(r.sn||'') + '\', \'' + escapeHtml(r.ticket_no||'') + '\', \'选择进入方式\', \'' + escapeHtml(r.machine_model||'') + '\')">' + t('enter_chat') + '</button>'
+      + '<button class="btn-sm" onclick="connectRoom(\'' + escapeHtml(r.room_code) + '\')" title="一键连接">连接</button>'
       + '<button class="btn-sm" onclick="viewHistory(\'' + escapeHtml(r.room_code) + '\')">' + t('view_history') + '</button>'
       + '<button class="btn-sm" onclick="exportRoom(\'' + escapeHtml(r.room_code) + '\')">' + t('export_record') + '</button>'
       + '</div></td>'
@@ -2165,12 +2389,15 @@ function renderUsers(users) {
   }
   document.getElementById('user-tbody').innerHTML = users.map(u => {
     const st = u.enabled ? '<span class="status on">' + t('status_enabled') + '</span>' : '<span class="status disabled">' + t('status_disabled') + '</span>';
-    const roleTxt = u.role === 'admin' ? t('role_admin') : t('role_engineer');
+    const ROLE_CN = { field: '渠道工程师', cc: 'CC 工程师', expert: '二线工程师', admin: '管理员', engineer: '二线工程师' };
+      const roleTxt = ROLE_CN[u.role] || u.role;
     return '<tr>'
       + '<td>' + u.id + '</td>'
       + '<td class="mono">' + u.username + '</td>'
       + '<td>' + u.name + '</td>'
-      + '<td>' + roleTxt + '</td>'
+      + '<td><select class="input" style="height:24px;font-size:12px;padding:0 4px" onchange="setUserRole(\'' + u.username + '\', this.value)">'
+      + ['field', 'cc', 'expert', 'admin'].map(v => '<option value="' + v + '"' + ((u.role === v || (u.role === 'engineer' && v === 'expert')) ? ' selected' : '') + '>' + ROLE_CN[v] + '</option>').join('')
+      + '</select></td>'
       + '<td>' + st + '</td>'
       + '<td>' + (u.created_at || '').replace('T', ' ').slice(0, 16) + '</td>'
       + '<td><div class="row-actions">'
@@ -2179,6 +2406,18 @@ function renderUsers(users) {
       + '</div></td>'
       + '</tr>';
   }).join('');
+}
+
+async function setUserRole(username, role) {
+  try {
+    const resp = await fetch('/api/admin/users/' + encodeURIComponent(username) + '/role', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: role })
+    });
+    const data = await resp.json();
+    if (!resp.ok) { showToast(data.error || '修改失败'); return; }
+    showToast('已把 ' + username + ' 设为 ' + ({ field: '渠道工程师', cc: 'CC 工程师', expert: '二线工程师', admin: '管理员' }[role] || role));
+    loadUsers();
+  } catch (e) { showToast('修改失败：' + e.message); }
 }
 
 async function toggleUser(username) {
@@ -2470,7 +2709,7 @@ async function tslogFetch(uploadToIdg) {
       msg.textContent = '✅ 已上传到 IDG 日志分析';
       msg.className = 'msg-box';
       box.innerHTML = '<div style="margin-top:10px;padding:12px;background:#F2F3F5;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
-        '📤 日志包已上传 IDG 并完成分析<br><br>' +
+        '日志包已上传 IDG 并完成分析<br><br>' +
         '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#1E56D6;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
     }
     btn.disabled = false; if (btn2) btn2.disabled = false;
@@ -3382,10 +3621,10 @@ let logModalRoom = '';
 
 function getLogState(kind) {
   const p = kind.split('-')[1] || 'win';
-  if (kind.startsWith('sio')) return { title: '🔧 SIO Log（' + p + '）', text: sioLogText[p] || '' };
-  if (kind.startsWith('raid')) return { title: '🛡 RAID 信息（VROC / RSTe / Broadcom）', text: raidLogText || '' };
-  if (kind.startsWith('dumpanalyze')) return { title: '💥 蓝屏 / Dump 分析报告', text: dumpAnalyzeReport || '' };
-  return { title: '💽 硬盘健康 SMART（' + p + '）', text: smartLogText[p] || '' };
+  if (kind.startsWith('sio')) return { title: 'SIO Log（' + p + '）', text: sioLogText[p] || '' };
+  if (kind.startsWith('raid')) return { title: 'RAID 信息（VROC / RSTe / Broadcom）', text: raidLogText || '' };
+  if (kind.startsWith('dumpanalyze')) return { title: '蓝屏 / Dump 分析报告', text: dumpAnalyzeReport || '' };
+  return { title: '硬盘健康 SMART（' + p + '）', text: smartLogText[p] || '' };
 }
 
 function openLogModal(kind, room) {
@@ -3498,7 +3737,7 @@ async function linuxLogPack(uploadToIdg) {
       document.getElementById('linux-logpack-result').style.display = 'block';
       document.getElementById('linux-logpack-result').innerHTML =
         '<div style="margin-top:10px;padding:12px;background:#F2F3F5;border:1px solid var(--border);border-radius:8px;font-size:13px;">' +
-        '📤 日志包已上传 IDG 并完成分析<br><br>' +
+        '日志包已上传 IDG 并完成分析<br><br>' +
         '<a href="#" onclick="openIdgJob(\'' + upData.job_id + '\');return false;" style="color:#1E56D6;font-weight:600;">👉 在右侧打开 IDG 分析（job: ' + upData.job_id + '）</a></div>';
     }
     btn.disabled = false; if (btn2) btn2.disabled = false;
@@ -3556,6 +3795,159 @@ document.getElementById('drivers-modal').addEventListener('click', (e) => { if (
 applyLang(currentLang);
 loadMe();
 loadRooms();
+</script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════
+   常用网站导航（2026-10-20 新增 · 设计模块）
+   · 数据来自 GET /api/links（服务端 data/links.json）
+   · 所有角色可看；管理员 可 新增 / 编辑 / 删除
+   · 只做外链跳转，不承载任何诊断数据
+   ══════════════════════════════════════════════════════════════════ */
+window.LINKS = { categories: [], links: [], can_edit: false };
+
+window.linksLoad = async function () {
+  const wrap = document.getElementById('links-wrap');
+  if (wrap && !window.LINKS.links.length) wrap.innerHTML = '<div style="padding:16px;color:#8A8F99;font-size:13px">加载中…</div>';
+  try {
+    const r = await fetch('/api/links', { credentials: 'same-origin' });
+    const j = await r.json();
+    window.LINKS = { categories: j.categories || [], links: j.links || [], can_edit: !!j.can_edit };
+  } catch (e) {
+    if (wrap) wrap.innerHTML = '<div style="padding:16px;color:#C0392B;font-size:13px">读取常用网站失败，请刷新重试</div>';
+    return;
+  }
+  const nb = document.getElementById('links-new');
+  if (nb) nb.style.display = window.LINKS.can_edit ? '' : 'none';
+  window.linksRender();
+};
+
+window.linksRender = function () {
+  const wrap = document.getElementById('links-wrap');
+  if (!wrap) return;
+  const kw = (document.getElementById('links-search')?.value || '').trim().toLowerCase();
+  const all = window.LINKS.links || [];
+  const hit = all.filter(l => !kw ||
+    (l.name || '').toLowerCase().includes(kw) ||
+    (l.desc || '').toLowerCase().includes(kw) ||
+    (l.url || '').toLowerCase().includes(kw) ||
+    (l.category || '').toLowerCase().includes(kw));
+
+  const cnt = document.getElementById('links-count');
+  if (cnt) cnt.textContent = kw ? ('匹配 ' + hit.length + ' / ' + all.length) : ('共 ' + all.length + ' 个');
+
+  if (!all.length) {
+    wrap.innerHTML = '<div style="padding:20px;color:#8A8F99;font-size:13px">暂无网站，管理员可在本页右上角新增</div>';
+    return;
+  }
+  if (!hit.length) {
+    wrap.innerHTML = '<div style="padding:20px;color:#8A8F99;font-size:13px">没有匹配「' + kw + '」的网站</div>';
+    return;
+  }
+
+  // 按分类分组（分类顺序先用服务端给的顺序，未知分类追加在后）
+  const order = (window.LINKS.categories || []).slice();
+  hit.forEach(l => { if (!order.includes(l.category)) order.push(l.category); });
+
+  let html = '';
+  order.forEach(cat => {
+    const items = hit.filter(l => l.category === cat);
+    if (!items.length) return;
+    html += '<div style="margin:0 0 18px">'
+         +   '<div style="display:flex;align-items:center;gap:8px;margin:0 0 10px">'
+         +     '<span style="font-size:13px;font-weight:650">' + window.linksEsc(cat) + '</span>'
+         +     '<span style="font-size:11.5px;color:#8A8F99">' + items.length + ' 个</span>'
+         +   '</div>'
+         +   '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px">';
+    items.forEach(l => {
+      const hiddenTag = l.hidden
+        ? '<span style="font-size:11px;color:#B07400;border:1px solid #F0C36D;border-radius:4px;padding:0 5px;margin-left:6px">已隐藏</span>'
+        : '';
+      const adminBar = window.LINKS.can_edit
+        ? '<div style="display:flex;gap:10px;margin-top:10px;padding-top:9px;border-top:1px dashed #EBEDF0">'
+          +   '<a href="javascript:linksEdit(\'' + l.id + '\')" style="font-size:12px;color:#1E56D6;text-decoration:none">编辑</a>'
+          +   '<a href="javascript:linksDelete(\'' + l.id + '\')" style="font-size:12px;color:#C0392B;text-decoration:none">删除</a>'
+          + '</div>'
+        : '';
+      html += '<div style="border:1px solid #E8E9EB;border-radius:10px;padding:14px 16px;background:#fff;display:flex;flex-direction:column">'
+           +    '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px">'
+           +      '<div style="font-size:14px;font-weight:650;flex:1;line-height:1.45">' + window.linksEsc(l.name) + hiddenTag + '</div>'
+           +    '</div>'
+           +    '<div style="font-size:12.5px;color:#5C5F66;line-height:1.7;flex:1">' + window.linksEsc(l.desc || '—') + '</div>'
+           +    '<div style="margin-top:12px;display:flex;align-items:center;gap:10px">'
+           +      '<a href="' + window.linksEsc(l.url) + '" target="_blank" rel="noopener noreferrer" '
+           +        'style="display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:#1E56D6;text-decoration:none;'
+           +        'border:1px solid #BBD0F7;border-radius:6px;padding:3px 10px">打开</a>'
+           +      '<span style="font-size:11.5px;color:#A0A4AB;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+           +        window.linksEsc((l.url || '').replace(/^https?:\/\//, '').replace(/\/$/, '')) + '</span>'
+           +    '</div>'
+           +    adminBar
+           +  '</div>';
+    });
+    html += '</div></div>';
+  });
+  wrap.innerHTML = html;
+};
+
+window.linksEsc = function (s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+};
+
+window.linksEdit = function (id) {
+  const cur = id ? (window.LINKS.links || []).find(l => l.id === id) : null;
+  const cats = window.LINKS.categories || [];
+  const opt = cats.map(c => '<option value="' + window.linksEsc(c) + '"' + (cur && cur.category === c ? ' selected' : '') + '>'
+    + window.linksEsc(c) + '</option>').join('');
+  const old = document.getElementById('links-modal'); if (old) old.remove();
+  const m = document.createElement('div');
+  m.id = 'links-modal';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(20,22,26,.45);display:flex;align-items:center;justify-content:center;z-index:9999';
+  m.innerHTML =
+    '<div style="background:#fff;border-radius:12px;width:460px;max-width:92vw;padding:20px 22px;box-shadow:0 18px 48px rgba(0,0,0,.18)">'
+    + '<div style="font-size:15px;font-weight:700;margin-bottom:14px">' + (id ? '编辑网站' : '新增网站') + '</div>'
+    + '<div style="font-size:12.5px;color:#5C5F66;margin-bottom:4px">分类</div>'
+    + '<select id="lk-cat" style="width:100%;padding:7px 9px;border:1px solid #DCDFE5;border-radius:7px;font-size:13px;margin-bottom:10px">' + opt + '</select>'
+    + '<div style="font-size:12.5px;color:#5C5F66;margin-bottom:4px">名称</div>'
+    + '<input id="lk-name" value="' + window.linksEsc(cur ? cur.name : '') + '" placeholder="如 ChatGPT" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #DCDFE5;border-radius:7px;font-size:13px;margin-bottom:10px">'
+    + '<div style="font-size:12.5px;color:#5C5F66;margin-bottom:4px">一句话介绍</div>'
+    + '<input id="lk-desc" value="' + window.linksEsc(cur ? (cur.desc || '') : '') + '" placeholder="如 通用对话助手，适合长文分析" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #DCDFE5;border-radius:7px;font-size:13px;margin-bottom:10px">'
+    + '<div style="font-size:12.5px;color:#5C5F66;margin-bottom:4px">网址</div>'
+    + '<input id="lk-url" value="' + window.linksEsc(cur ? cur.url : '') + '" placeholder="https://" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #DCDFE5;border-radius:7px;font-size:13px;margin-bottom:6px">'
+    + '<div id="lk-err" style="font-size:12px;color:#C0392B;min-height:16px"></div>'
+    + '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px">'
+    +   '<button onclick="document.getElementById(\'links-modal\').remove()" style="padding:6px 16px;border:1px solid #DCDFE5;background:#fff;border-radius:7px;font-size:13px;cursor:pointer">取消</button>'
+    +   '<button onclick="linksSave(' + (id ? "'" + id + "'" : 'null') + ')" style="padding:6px 16px;border:none;background:#2468F2;color:#fff;border-radius:7px;font-size:13px;cursor:pointer">保存</button>'
+    + '</div></div>';
+  document.body.appendChild(m);
+};
+
+window.linksSave = async function (id) {
+  const name = (document.getElementById('lk-name').value || '').trim();
+  const url = (document.getElementById('lk-url').value || '').trim();
+  const desc = (document.getElementById('lk-desc').value || '').trim();
+  const category = document.getElementById('lk-cat').value;
+  const errEl = document.getElementById('lk-err');
+  if (!name || !url) { errEl.textContent = '名称与网址必填'; return; }
+  if (!/^https?:\/\//i.test(url)) { errEl.textContent = '网址需以 http:// 或 https:// 开头'; return; }
+  const r = await fetch(id ? ('/api/admin/links/' + id) : '/api/admin/links', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, url, desc, category })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { errEl.textContent = j.error || ('保存失败（' + r.status + '）'); return; }
+  document.getElementById('links-modal').remove();
+  await window.linksLoad();
+};
+
+window.linksDelete = async function (id) {
+  const l = (window.LINKS.links || []).find(x => x.id === id);
+  if (!confirm('确定删除「' + (l ? l.name : id) + '」？')) return;
+  const r = await fetch('/api/admin/links/' + id, { method: 'DELETE', credentials: 'same-origin' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.error || ('删除失败（' + r.status + '）')); return; }
+  await window.linksLoad();
+};
 </script>
 </body>
 </html>
