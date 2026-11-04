@@ -382,6 +382,13 @@ svg{flex:0 0 auto}
 
 /* 2026-11-03：调用记录与原始日志已由「轨迹」取代（信息全部进事件流），界面隐藏、DOM 保留便于恢复 */
 #resPreview,#termCard,#resultCard>.card-head{display:none!important}
+  /* 标题行：房间名称 + 房间号徽章（2026-11-04，与现场台统一） */
+  .objhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .obj-name{display:none}
+  .obj-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:700;
+    letter-spacing:.5px;color:var(--brand-ink);background:var(--brand-tint);
+    border:1px solid var(--brand-line);border-radius:6px;padding:1px 7px;white-space:nowrap}
+  .objhead.no-room .obj-name,.objhead.no-room .obj-code{display:none}
 /* 二线台同步（2026-11-03）：新建房间弹窗底栏固定 + 原始日志并入调用记录 */
 #fldNrMask .card-body{overflow-y:auto;min-height:0;padding:12px 14px}
 #fldNrMask .nr-foot{flex:0 0 auto;padding:10px 14px 16px;border-top:1px solid var(--line);background:var(--surface)}
@@ -511,6 +518,37 @@ svg{flex:0 0 auto}
 /* 自由模式（2026-10-27）：只留对话框；诊断结论与 AI 判读在其它模式里已有 */
 body[data-mode="ai"] #conclCard,
 body[data-mode="ai"] #aiReadCard { display: none !important; }
+/* 防自动填充满：readonly 状态下外观与正常一致 */
+#aiIn[readonly],#imText[readonly]{background:#fff;color:var(--text,#1B2432);cursor:text}
+#aiIn[readonly]::placeholder,#imText[readonly]::placeholder{color:#A8AFBC}
+/* 2026-11-04：防止浏览器把登录用户名自动填进问答/消息框（Chrome 会把输入框染成浅蓝色，
+   看起来像被预填了账号）。这里关掉自动填充并覆盖自动填充底色。 */
+#aiIn:-webkit-autofill,#imText:-webkit-autofill,#q:-webkit-autofill,
+#fldJrQ:-webkit-autofill,#fldNrOrg:-webkit-autofill{
+  -webkit-box-shadow:0 0 0 40px #fff inset !important;
+  -webkit-text-fill-color:var(--text,#1B2432) !important;
+  transition:background-color 9999s ease-out 0s;
+}
+#aiIn::placeholder,#imText::placeholder{color:#A8AFBC}
+
+/* 左下角版本标签（2026-11-04，现场台/二线台同款） */
+.vertag{position:fixed;left:14px;bottom:10px;z-index:40;pointer-events:none;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;letter-spacing:.3px;
+  color:var(--text-3,#8A92A3);opacity:.85;user-select:none}
+@media print{.vertag{display:none}}
+
+/* AI 提议卡片（2026-11-04） */
+.ai-prop{margin:8px 0;border:1px solid var(--brand-line);border-radius:10px;background:var(--brand-tint);overflow:hidden}
+.ai-prop-head{display:flex;align-items:center;gap:8px;padding:8px 11px;background:#fff;border-bottom:1px solid var(--brand-line)}
+.ai-prop-tag{font-size:11.5px;font-weight:600;color:var(--brand-ink);border:1px solid var(--brand-line);
+  background:var(--brand-tint);border-radius:999px;padding:1px 8px}
+.ai-prop-act{font-weight:650;font-size:13px;color:var(--text)}
+.ai-prop-body{padding:8px 11px;display:grid;gap:3px;font-size:12.5px}
+.ai-prop-body span{color:var(--text-2);display:inline-block;min-width:38px}
+.ai-prop-body b{font-weight:600;color:var(--text)}
+.ai-prop-foot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 11px;
+  border-top:1px dashed var(--brand-line);background:#fff}
+
 body[data-mode="ai"] #aiChatInner .ai-msgs { min-height: calc(100vh - 420px) !important; max-height: none !important; }
 body[data-mode="ai"] #aiChatInner .card-body { min-height: 0; }
 body[data-mode="ai"] #aiChatInner .card-body { display: flex; flex-direction: column; }
@@ -680,13 +718,13 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
 <header class="top">
   <div class="brand">
     <span class="mark" id="logoMark"></span>
-    <span>Nexpert<small>二线控制台 · 证据复核 · 远程协助 · 下发</small></span>
+    <span>Nexpert<small>二线控制台</small></span>
   </div>
   <nav class="nav">
-    <a class="on" href="/expert">二线控制台</a>
+    <!-- 2026-11-04：与现场台统一——当前页不再用顶栏标签重复标注，只在品牌行「二线控制台」-->
   </nav>
   <span class="spacer"></span>
-  <span class="badge brand" id="buildTag">—</span>
+  <span class="badge brand" id="buildTag" style="display:none">—</span><!-- 2026-11-04：版本号移到左下角 -->
   <span class="badge" id="demoBadge">演示数据</span>
   <span class="pill" id="pill" data-st="idle"><span class="dot"></span><span>待连接</span></span>
   <span class="pill" id="mePill" title="账号菜单（修改密码 / 退出登录）" style="cursor:pointer">
@@ -715,10 +753,14 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
     <div id="leftCol">
     <!-- 作业对象层 -->
     <section class="card" id="roomCard">
-      <div class="card-head" style="padding:10px 14px 0"><span class="card-title">当前接管房间</span></div>
+      <div class="card-head objhead" style="padding:10px 14px 0">
+        <span class="card-title">当前接管房间</span>
+        <!-- 2026-11-04：与现场作业台统一——房间名称退到悬停提示、房间号改徽章 -->
+        <span class="obj-name" id="oRoomName">—</span>
+        <span class="obj-code num" id="oRoom">未加入</span>
+      </div>
       <div class="card-body">
         <div class="objbar">
-          <div class="kv"><span>房间号</span><b class="num" id="oRoom">—</b></div>
           <div class="kv"><span>SN</span><b class="num" id="oSn">—</b></div>
           <div class="kv"><span>机型</span><b id="oModel">—</b></div>
           <div class="kv"><span>客户</span><b id="oCust">—</b></div>
@@ -767,12 +809,14 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
       <div class="card-head">
         <span class="card-title" id="worksTitle">现场作业项</span>
         <div class="tabs" id="tabs" style="margin-left:12px">
+          <!-- 2026-11-04：页签与现场台统一口径——预设模式 / 自由模式，OS log 抓取排到最后 -->
+          <button data-tab="tools" title="现成的诊断卡片，点一张即展开执行计划">预设模式</button>
+          <button class="on" data-tab="ai" title="预设没解决时，带着已有证据与 AI 深入诊断">自由模式</button>
           <button data-tab="collect" title="抓取客户机 OS 日志包，按需上传 IDG 深入分析">OS log 抓取</button>
-          <button class="on" data-tab="ai" title="带着已有证据与 AI 深入诊断">AI 诊断</button>
         </div>
 
         <span class="spacer"></span>
-        <input class="input" id="q" placeholder="搜索预设作业项" type="search"
+        <input class="input" id="q" name="np-search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="搜索预设作业项" type="search"
                name="nexpert-tool-search" autocomplete="off" autocorrect="off" autocapitalize="off"
                spellcheck="false" readonly style="width:190px;height:28px" title="点一下即可输入">
         <!-- 2026-11-03：操作轨迹入口（与现场台同步） -->
@@ -838,10 +882,10 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
         <span class="badge" id="aiChatState">未连接</span></div>
       <div class="card-body tight">
         <div id="aiMsgs" class="ai-msgs">
-          <div class="ai-msg bot">我是二线诊断 AI 助手，可以结合本房间现场采集的证据帮你复核问题、判断根因并给出处置建议。</div>
+          <div class="ai-msg bot">我是二线复核搭档：能基于现场已采证据交叉核对、必要时再向客户机补采，判断根因后给你可选的处置方向——确认后我再动手。</div>
         </div>
         <div class="row" id="aiInputRow" style="gap:6px">
-          <input class="input" id="aiIn" placeholder="输入问题，回车发送" style="flex:1">
+          <input class="input" id="aiIn" name="np-ai-question" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="输入问题，回车发送" style="flex:1" data-noautofill readonly>
           <button class="btn primary sm" id="aiSend">发送</button>
         </div>
       </div>
@@ -858,7 +902,6 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
           <aside class="ai-col-side" id="shotPanel">
             <div class="shot-tabs" id="shotTabs">
               <button class="on" data-st="live">远程桌面观察</button>
-              <button data-st="shot">高清截图</button>
               <button data-st="im">协作<span class="tab-badge hidden" id="imBadgeExpert"></span></button>
               <span class="spacer" style="flex:1"></span>
               <span class="badge" id="shotState">待观察</span>
@@ -868,6 +911,8 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
             <!-- 观察：低清帧，约 2 秒一帧，只看不控 -->
             <div id="livePane">
               <div class="shot-stage" id="liveStage">
+                <!-- 2026-11-04：桥接器阶段提示（首次抓屏下载抓屏组件等），常驻可见 -->
+                <div id="shotNotice" class="small" style="display:none;margin:6px 0 0;padding:6px 9px;border-radius:7px;background:var(--brand-tint);border:1px solid var(--brand-line);color:#173A8A;font-size:12px"></div>
                 <div class="shot-empty" id="liveEmpty">
                   <div class="fd-line">尚未开始观察</div>
                   <button class="btn primary" id="liveBtn">开始观察</button>
@@ -878,6 +923,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
               <div class="row" id="liveBar" style="margin-top:8px;gap:6px;flex-wrap:wrap;align-items:center;display:none">
                 <button class="btn sm" id="liveToggle">暂停</button>
                 <button class="btn sm ghost" id="liveShot">截高清图</button>
+                <button class="btn sm ghost" id="liveQ" title="观察画面清晰度：流畅 1280 / 清晰 1920">画质：清晰</button>
                 <span class="small faint" id="liveMeta"></span>
               </div>
             </div>
@@ -892,13 +938,14 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
             <div id="shotPane" class="hidden">
               <div class="shot-stage" id="shotStage">
                 <div class="shot-empty" id="shotEmpty">
-                  <div class="fd-line">还没有截图</div>
+                  <div class="fd-line">还没有高清截图</div>
                   <button class="btn primary" id="shotBtn">高清截图</button>
                   <div class="small faint">原始像素（不清零缩放）· 只读操作</div>
                 </div>
                 <img id="shotImg" alt="客户机桌面截图" style="display:none">
               </div>
               <div class="row" id="shotBar" style="margin-top:8px;gap:6px;flex-wrap:wrap;align-items:center;display:none">
+                <button class="btn sm ghost" id="shotBack">← 返回观察</button>
                 <button class="btn sm" id="shotAgain">重新截图</button>
                 <button class="btn sm ghost" id="shotFull">全屏查看</button>
                 <a class="btn sm ghost" id="shotDl" href="#" download>下载</a>
@@ -919,7 +966,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
                 <div class="im-upload hidden" id="imUpload"></div>
                 <div class="im-input">
                   <button class="im-pick" id="imPick" title="上传文件/图片（也可拖进来或 Ctrl+V 粘贴）">📎</button>
-                  <textarea id="imText" rows="1" placeholder="输入消息，Enter 发送"></textarea>
+                  <textarea id="imText" name="np-im-text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" rows="1" placeholder="输入消息，Enter 发送" data-noautofill readonly></textarea>
                   <button class="btn primary sm" id="imSend">发送</button>
                 </div>
                 <span class="small faint hidden" id="imReadonly">房间已归档 · 仅可查看</span>
@@ -1871,7 +1918,7 @@ window.NP_DATA =[
   ],
   "duration": "约 3 分钟",
   "impact": "改写主板 DMI",
-  "confirmExtra": "双人工号 + 全程录屏",
+  "confirmExtra": "",
   "desc": "动作：校验机型与工具链 · 推送写入工具到客户机 · 写入 SN 与 MTM"
  },
  {
@@ -2082,8 +2129,8 @@ window.NP_TIERS = {
   "label": "刷写",
   "risk": "高风险",
   "change": "改写主板 DMI / 固件",
-  "note": "写入固件/DMI，失败可能导致设备无法启动，需双人工号确认 + 全程录屏",
-  "exec": "双人工号 + 录屏"
+  "note": "写入固件/DMI，失败可能导致设备无法启动，请核对机型与 SN/MTM",
+  "exec": "工号确认 + 快照"
  }
 };
 
@@ -2194,7 +2241,7 @@ window.NP_TIERS = {
   const DATA = window.NP_DATA || [];
   const TIERS = window.NP_TIERS || {};
   const KEY = 'nexpert_v03';
-  const BUILD = 'v0.13.3 · 2026-11-03 · 实用工具：整包结果就地渲染 + OA3 端点修正 + 去掉接收文件到客户机'
+  const BUILD = 'v0.16.7 · 2026-11-04 · 修观察模式残留提示「正在抓取客户机画面」'
   const DEMO = location.protocol === 'file:';
 
   const PHASES = [
@@ -2354,9 +2401,19 @@ window.NP_TIERS = {
   /* 分组精简为两大类：诊断类 → 快捷诊断；动手类 → 实用工具 */
   const BUCKET = { '系统诊断': '快捷诊断', '硬件诊断': '快捷诊断', '外设网络': '快捷诊断',
                    '实用工具': '实用工具', '驱动管理': '实用工具', '刷写与激活': '实用工具',
-                   /* 2026-11-03：与现场台一致——快捷诊断只保留 4 张故障卡，其余归档不显示 */
-                   '归档': '归档' };
+                   /* 2026-11-04：二线台恢复全部诊断卡片（现场台仍只保留 4 张故障卡）——
+                      二线需要完整的诊断能力，不能只有现场那 4 张；'归档' 分组归回「快捷诊断」 */
+                   '归档': '快捷诊断' };
   function bucketOf(g) { return BUCKET[g] || '快捷诊断'; }
+  /* 2026-11-04 主人点名的 9 项「不是本设计场景」的卡片，二线台不显示。
+     只在二线台前端过滤，不动 quick_diagnoses.json 与卡片定义，现场台/其它入口不受影响。 */
+  const HIDDEN_KEYS = new Set(['sfc', 'adware', 'hw_winlogs', 'hw_dump', 'raid',
+                               'activation', 'hw_sio', 'hw_tslog', 'data',
+                               'oa3_activate', 'driver_install']);   // 2026-11-04：删掉 OA3 密钥激活、驱动安装/升级
+  // 卡片渲染代码在另一个 <script> 块里，跨块只能经 NP 访问（下面 NP 组装时导出）
+  function itemsVisible(plat) {
+    return NP.items(plat).filter(a => !HIDDEN_KEYS.has(a.key));
+  }
   function byKey(k) { return DATA.find(a => a.key === k) || null; }
   function tierOf(a) { return TIERS[a.tier] || { label: a.tier, risk: '', note: '' }; }
 
@@ -2410,8 +2467,7 @@ window.NP_TIERS = {
       if (!RE.test(values.op || '')) return { ok: false, msg: '操作人工号格式应为 LN + 4 位数字' };
     } else if (a.tier === 'flash') {
       if (!RE.test(values.op || '')) return { ok: false, msg: '操作人工号格式应为 LN + 4 位数字' };
-      if (!RE.test(values.rv || '')) return { ok: false, msg: '复核人工号格式应为 LN + 4 位数字' };
-      if (values.op === values.rv) return { ok: false, msg: '两个工号必须不同' };
+      if (values.rv && !RE.test(values.rv)) return { ok: false, msg: '复核人工号格式应为 LN + 4 位数字' };
     }
     closeGate(values);
     return { ok: true };
@@ -2550,7 +2606,8 @@ window.NP_TIERS = {
   }
   function preflight(action, opts) {
     opts = opts || {};
-    if (action.tier === 'read') return runAction(action, Object.assign({}, opts));
+    // 2026-11-04 主人明确要求：刷写类不要再弹「操作人工号」门禁，直接执行（快照与轨迹照旧）
+    if (action.tier === 'read' || action.tier === 'flash' || action.tier === 'write') return runAction(action, Object.assign({}, opts));
     return openGate(action).then(values => {
       if (!values) { audit('未确认，已终止：' + action.title, 'err'); return null; }
       return runAction(action, Object.assign({}, opts, { values: values }));
@@ -2795,14 +2852,67 @@ window.NP_TIERS = {
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(new Error(e.error || ('HTTP ' + r.status)))))
       .then(js => {
         BRIDGE.info = js;
+        // 2026-11-04：用服务端返回补全房间名称/客户（左栏标题行）
+        try {
+          if (js && NP.state && NP.state.room) {
+            if (js.room_name) NP.state.room.name = js.room_name;
+            if (js.client_org) NP.state.room.cust = js.client_org;
+            if (js.sn) NP.state.room.sn = js.sn;
+            if (js.machine_model) NP.state.room.model = js.machine_model;
+            paintTop();
+          }
+        } catch (e) { }
         openBridgeWatch();
         emit('bridge-info', js);
         return js;
       })
       .catch(e => { audit('获取连接信息失败：' + (e.message || e), 'err'); throw e; });
   }
+  /* 2026-11-04：进页面即用服务端数据补全左栏（SN/机型/客户/房间名称），
+     不再依赖 localStorage 缓存或点「连接客户机」才填 */
+  window.__hydrateRoom = function (code) {
+    if (!code) return;
+    fetch('/api/room_connect/' + encodeURIComponent(code), { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(js => {
+        if (!js || !NP.state.room || NP.state.room.code !== code) return;
+        const r = NP.state.room;
+        if (js.sn) r.sn = js.sn;
+        if (js.machine_model) r.model = js.machine_model;
+        if (js.client_org) r.cust = js.client_org;
+        if (js.ticket_no) r.order = js.ticket_no;
+        if (js.room_name) r.name = js.room_name;
+        // 直接写 DOM（paintTop 在另一个 IIFE 作用域内，跨块调用拿不到）
+        const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        setT('oRoom', r.code);
+        setT('oSn', r.sn || '—');
+        setT('oModel', r.model || '—');
+        setT('oCust', r.cust || '—');
+        setT('oOrder', r.order || '—');
+        const eh = document.querySelector('.objhead');
+        if (eh) {
+          eh.classList.remove('no-room');
+          const nm = document.getElementById('oRoomName');
+          if (nm) nm.textContent = r.name || '—';
+          eh.title = r.name || '';
+        }
+      })
+      .catch(() => { });
+  };
+
   function handleWs(rawData) {
     let m = {}; try { m = JSON.parse(rawData); } catch (e) { return; }
+    // 2026-11-04：桥接器阶段提示（首次抓屏要下载 ~6MB 抓屏组件等），直接显示在观察区，
+    //   用户不看命令行也知道后台在干活，不会以为页面卡死。
+    if (m.type === 'bridge_notice') {
+      // 注意跨 <script> 块只能经 window 访问（踩过一次：直接调用被 try 吞掉）
+      if (typeof window.onBridgeNotice === 'function') {
+        window.onBridgeNotice(m.code || '', m.text || '', !!m.done);
+      } else {
+        console.warn('[bridge_notice] 处理函数未就绪', m.code);
+      }
+      return;
+    }
       if (m.bridge_connected !== undefined) {
         const _was = BRIDGE.online, _now = !!m.bridge_connected;
         BRIDGE.online = _now;
@@ -3013,7 +3123,7 @@ window.NP_TIERS = {
     DEMO, BUILD, PHASES, ORDER, TIERS, DATA,
     get state() { return S; }, reset, save, subscribe, emit,
     icon, esc, md, hhmm, hhmmss,
-    items, byKey, tierOf, bucketOf,
+    items, itemsVisible, byKey, tierOf, bucketOf,
     label, canRun, connect, disconnect, setPhase,
     openPlan, toggleStep, allChecked, closePlan,
     get gateState() { return GATE; }, gateSubmit, gateCancel,
@@ -3044,7 +3154,12 @@ window.NP_TIERS = {
   const GROUP_MAX = 8;   // 非推荐分组默认只铺 8 张
   document.getElementById('logoMark').innerHTML = NP.icon('spark', 15);
   const _bt = document.getElementById('buildTag');
-  if (_bt) _bt.textContent = (NP.BUILD || '').split(' · ')[0] + ' · 正式';
+  const _ver = (NP.BUILD || '').split(' · ')[0] + ' · 正式';
+  if (_bt) _bt.textContent = _ver;          // 元素已隐藏，仅保留给旧引用
+  (function () {                            // 2026-11-04：版本号统一放到左下角
+    const el = document.getElementById('verTag');
+    if (el) el.textContent = _ver;
+  })();
   function roleLabel(r) { return r === 'admin' ? '管理员' : r === 'expert' ? '二线' : r === 'field' ? '上门工程师' : '工程师'; }
   function paintMe() {
     const me = NP.state.me, el = $('#mePill');
@@ -3087,9 +3202,14 @@ window.NP_TIERS = {
     }
     if (!_hasRoom) {
       objText('#oRoom', '未创建'); objText('#oSn', '—'); objText('#oModel', '—');
+      document.querySelector('.objhead')?.classList.add('no-room');
       objText('#oCust', '—'); objText('#oOrder', '—'); objText('#oBridge', '—');
     } else {
       objText('#oRoom', r.code); objText('#oSn', r.sn); objText('#oModel', r.model);
+      (function(){ const eh=document.querySelector('.objhead'); if(!eh) return;
+        eh.classList.remove('no-room');
+        const nm = r.name || r.room_name || '';
+        objText('#oRoomName', nm || '—'); eh.title = nm || ''; })();
       objText('#oCust', r.cust); objText('#oOrder', r.order);
       objText('#oBridge', s.bridge.online
         ? ('已连接' + (s.bridge.latency != null ? ' · ' + s.bridge.latency + ' ms' : ''))
@@ -3257,7 +3377,7 @@ window.NP_TIERS = {
     }).filter(Boolean);
   }
   function visibleItems() {
-    const all = NP.items(NP.state.room.plat);
+    const all = NP.itemsVisible(NP.state.room.plat);
     if (keyword) return all.filter(a => (a.title + a.group).toLowerCase().includes(keyword.toLowerCase()));
     if (group === '推荐' || group === '常用') return recommended();
     const list = all.filter(a => group === '全部' || NP.bucketOf(a.group) === group);
@@ -3269,8 +3389,8 @@ window.NP_TIERS = {
     $('#grid').classList.toggle('rec', group === '推荐' || group === '常用');
     const note = $('#groupNote');
     if (note) {
-      if (group === '实用工具') { note.classList.remove('hidden'); note.innerHTML = '<b>实用工具</b>：驱动、刷写、激活类操作，多数为写操作，执行前需工号确认并自动创建快照；只读项（官方驱动清单、本机已装驱动）免确认。'; }
-      else { note.classList.add('hidden'); note.innerHTML = ''; }
+      // 2026-11-04：按主人要求删掉「实用工具」那段啰嗦说明，只留分组本身
+      note.classList.add('hidden'); note.innerHTML = '';
     }
     const tip = $('#offlineTip');
     if (tip) {
@@ -3280,9 +3400,9 @@ window.NP_TIERS = {
       tip.style.display = (_noRoom || conn) ? 'none' : 'flex';
       if (!_noRoom && !conn && !tip.dataset.init) { tip.dataset.init = '1'; $('#offlineIcon').innerHTML = NP.icon('clock', 14); }
     }
-    const allCount = NP.items(NP.state.room.plat).length;
+    const allCount = NP.itemsVisible(NP.state.room.plat).length;
     const groupTotal = keyword ? items.length : ((group === '推荐' || group === '常用') ? REC.length
-      : NP.items(NP.state.room.plat).filter(a => group === '全部' || NP.bucketOf(a.group) === group).length);
+      : NP.itemsVisible(NP.state.room.plat).filter(a => group === '全部' || NP.bucketOf(a.group) === group).length);
     $('#itemCount').textContent = (keyword ? items.length + ' 项匹配'
       : (items.length < groupTotal ? items.length + ' / ' + groupTotal + ' 项' : groupTotal + ' 项'));
     $('#grid').innerHTML = items.map(a => {
@@ -3373,6 +3493,115 @@ window.NP_TIERS = {
   }
 
   /* ---------------- 计划弹层 ---------------- */
+  /* 步骤结构化结果表（2026-11-04）：有 rows 就铺真表格，没有就只显示摘要 */
+  function iplTable(s) {
+    if (!s || !s.rows || !s.rows.length) return '';
+    const key = String(s.index) + '|' + (s.label || '');
+    const open = !!(STEP_STATE.expanded && STEP_STATE.expanded[key]);
+    const max = open ? s.rows.length : 6;
+    const cols = (s.fields && s.fields.length) ? s.fields.slice(0, 6)
+      : Object.keys(s.rows[0] || {}).slice(0, 6);
+    const head = '<tr>' + cols.map(c => '<th>' + NP.esc(String(c)) + '</th>').join('') + '</tr>';
+    const body = s.rows.slice(0, max).map(r =>
+      '<tr>' + cols.map(c => {
+        let v = (r && typeof r === 'object') ? (r[c] == null ? '' : r[c]) : '';
+        if (typeof v === 'object') v = JSON.stringify(v);
+        v = String(v);
+        return '<td title="' + NP.esc(v) + '">' + NP.esc(v.length > 120 ? v.slice(0, 120) + '…' : v) + '</td>';
+      }).join('') + '</tr>').join('');
+    const more = s.rows.length > 6
+      ? '<button class="btn sm ghost" data-iplmore="' + NP.esc(key) + '" style="margin-top:5px;height:24px;font-size:11.5px">'
+        + (open ? '收起' : ('展开全部 ' + s.rows.length + ' 条')) + '</button>'
+      : '';
+    return '<div class="ipl-tblwrap" style="margin-top:5px;max-height:' + (open ? '340px' : '190px')
+      + ';overflow:auto;border:1px solid var(--line,#E3E7EE);border-radius:7px">'
+      + '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+      + '<thead style="position:sticky;top:0;background:#F7F9FC">' + head + '</thead><tbody>' + body + '</tbody></table></div>'
+      + more;
+  }
+
+  document.addEventListener('click', function (e) {
+    const b = e.target && e.target.closest ? e.target.closest('[data-iplmore]') : null;
+    if (!b) return;
+    const k = b.getAttribute('data-iplmore');
+    STEP_STATE.expanded = STEP_STATE.expanded || {};
+    STEP_STATE.expanded[k] = !STEP_STATE.expanded[k];
+    renderInlinePlan();
+  });
+
+  /* SN/MTM 写入工具表单（2026-11-04）：照搬原来 exe 工具的用法——手填 SN/MTM，点写入，看回读 */
+  function snmtmForm(a) {
+    const rc = ((NP.state && NP.state.room) || {}).code || '';
+    return '<div class="ipl">' +
+      '<div class="ipl-head">' + NP.icon(a.icon || 'zap', 15) + '<span>SN / MTM 写入</span>' +
+        '<span class="badge flash">写入类</span><span style="flex:1"></span>' +
+        '<span class="small faint">' + (rc ? ('房间 ' + NP.esc(rc)) : '未加入房间') + '</span></div>' +
+      '<div style="padding:12px 12px 4px">' +
+        '<div class="field"><label class="small faint">机型（产线路由）</label>' +
+          '<select class="input" id="sntmModel" style="width:100%;margin:4px 0 10px">' +
+            '<option value="">正在读取已适配机型…</option></select>' +
+          '<div class="small faint" id="sntmHint" style="margin:-4px 0 10px"></div></div>' +
+        '<div class="field"><label class="small faint">序列号 SN</label>' +
+          '<input class="input" id="sntmSn" maxlength="32" autocomplete="off" placeholder="13 位或 8 位 SN" style="width:100%;margin:4px 0 10px"></div>' +
+        '<div class="field"><label class="small faint">机型型号 MTM</label>' +
+          '<input class="input" id="sntmMtm" maxlength="32" autocomplete="off" placeholder="如 30FAS0LR00" style="width:100%;margin:4px 0 10px"></div>' +
+        '<div class="warnbox" style="margin-bottom:10px">写入会改写主板 DMI，写入后无法撤销；请核对 SN / MTM 后再执行，过程中勿断电。</div>' +
+      '</div>' +
+      '<div class="ipl-foot">' +
+        '<span class="small faint">写入后自动 WMI 回读校验，不一致会标红</span><span style="flex:1"></span>' +
+        '<button class="btn sm" id="sntmClose">收起</button>' +
+        '<button class="btn primary sm" id="sntmRun"' + (rc ? '' : ' disabled title="需先加入房间"') + '>写入 SN / MTM</button>' +
+      '</div>' +
+      '<div id="sntmResult" style="padding:0 12px 12px"></div>' +
+    '</div>';
+  }
+  function snmtmBind(a) {
+    $('#sntmClose').onclick = () => { $('#inlinePlan').innerHTML = ''; };
+    const sel = $('#sntmModel');
+    fetch('/api/tools/snmtm/models', { credentials: 'same-origin' }).then(r => r.json()).then(j => {
+      const ms = (j && j.models) || [];
+      sel.innerHTML = '<option value="">请选择机型</option>' +
+        ms.map(m => '<option value="' + NP.esc(m.name) + '">' + NP.esc(m.name) + '</option>').join('') +
+        '<option value="__na" disabled>其他机型 — 暂未适配（仅 ThinkStation 产线支持）</option>';
+      if (ms.length === 1) { sel.value = ms[0].name; }
+      $('#sntmHint').textContent = '已适配 ' + ms.length + ' 个 ThinkStation 机型；其他机型未适配。';
+    }).catch(() => { sel.innerHTML = '<option value="">机型读取失败</option>'; });
+    $('#sntmRun').onclick = async () => {
+      const rc = ((NP.state && NP.state.room) || {}).code || '';
+      const model = $('#sntmModel').value, sn = $('#sntmSn').value.trim(), mtm = $('#sntmMtm').value.trim();
+      const out = $('#sntmResult');
+      if (!model) { out.innerHTML = '<div class="note danger">请选择机型</div>'; return; }
+      if (!sn || !mtm) { out.innerHTML = '<div class="note danger">SN 与 MTM 都要填写</div>'; return; }
+      const btn = $('#sntmRun'); btn.disabled = true; btn.textContent = '写入中…';
+      out.innerHTML = '<div class="note info">正在推送写入工具并执行，请勿断电…</div>';
+      try {
+        const r = await fetch('/api/tools/snmtm/flash', { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ room_code: rc, model: model, sn: sn, mtm: mtm }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.ok === false) {
+          out.innerHTML = '<div class="note danger">写入失败：' + NP.esc(j.error || ('HTTP ' + r.status)) + '</div>';
+        } else {
+          // 后端契约：status = ok / warning（warning 表示回读未匹配，见 hint）
+          const okv = String(j.status || '') === 'ok';
+          out.innerHTML =
+            '<div class="note ' + (okv ? 'ok' : 'danger') + '" style="margin-bottom:8px">' +
+              (okv ? '✔ 写入完成，WMI 回读一致' : '⚠ 写入已执行，但回读未匹配——请勿交付') + '</div>' +
+            '<div class="small" style="line-height:1.9">机型：<b>' + NP.esc(j.model || model) + '</b>　' +
+              '写入 SN：<b>' + NP.esc(j.sn || sn) + '</b>　写入 MTM：<b>' + NP.esc(j.mtm || mtm) + '</b></div>' +
+            (j.hint ? '<div class="note warn" style="margin-top:8px">' + NP.esc(j.hint) + '</div>' : '') +
+            (j.verify_output ? '<details style="margin-top:8px"><summary class="small faint">回读原文（点击展开）</summary>' +
+              '<pre class="small" style="white-space:pre-wrap;max-height:180px;overflow:auto;margin-top:6px">' +
+              NP.esc(String(j.verify_output).slice(0, 1200)) + '</pre></details>' : '');
+          if (window.NP && NP.ev) NP.ev('tool.result', { tool: 'SN/MTM 写入', key: 'snmtm_write', status: j.status || '' });
+        }
+      } catch (e) {
+        out.innerHTML = '<div class="note danger">写入请求失败：' + NP.esc(e.message || String(e)) + '</div>';
+      }
+      btn.disabled = false; btn.textContent = '写入 SN / MTM';
+    };
+  }
+
   function paintPlan() {
     // 2026-10-22：预设模式改成"点标签在下方展开计划"，不再弹模态
     if (window.__INLINE_PLAN !== false) { try { renderInlinePlan(); } catch (e) { console.warn(e); } return; }
@@ -3394,7 +3623,7 @@ window.NP_TIERS = {
         (offline ? '<div class="note warn" style="margin-bottom:9px">当前未连接客户机：计划可以查看，执行需先连接。</div>' : '') +
         '<div class="meta"><span>风险等级 <b>' + t.risk + '</b></span><span>变更类型 <b>' + NP.esc(t.change) + '</b></span>' +
         '<span>预计时长 <b>' + NP.esc(a.duration) + '</b></span><span>执行方式 <b>' + t.exec + '</b></span></div>' +
-        (a.tier === 'flash' ? '<div class="warnbox">刷写会改写主板 DMI，过程中请勿断电；失败可能导致设备无法启动。执行前请确认已备份，且全程录屏。</div>' : '') +
+        (a.tier === 'flash' ? '<div class="warnbox">刷写会改写主板 DMI，过程中请勿断电；失败可能导致设备无法启动。执行前请确认已备份。</div>' : '') +
         '<ul class="steps">' + a.plan.map((s, i) => {
           const ok = done || (plan.stepIndex >= i + 1);
           return '<li class="step ' + (ok ? 'done' : '') + '">' +
@@ -3443,16 +3672,45 @@ window.NP_TIERS = {
   function renderPack(p) {
     if (!p) return '';
     if (p.error) return '<div class="note danger" style="margin:0 12px 8px">执行失败：' + NP.esc(p.error) + '</div>';
+    // 2026-11-04：官方驱动清单原来只输出 name|version|os 纯文本，下载地址（d.url）被丢掉，
+    //   所以用户看不到下载入口。这里改成真表格，最后一列是官方下载链接。
+    const _drv = (p.data && p.data.kind === 'drivers' && Array.isArray(p.data.drivers)) ? p.data.drivers : null;
+    if (_drv && _drv.length) {
+      const _rows = (_drv || []).map((d, i) => {
+        const nm = NP.esc(d.name || '—');
+        const ver = NP.esc(d.version || '—');
+        const os = NP.esc((d.os_tags || []).join(' / ') || '—');
+        // 2026-11-04：下载直链带时效 token，缓存里不存。点「下载」时按 SN/MT 实时签发（服务端 302）
+        const _key = (p.data && p.data.machine && (p.data.machine.search_key || p.data.machine.sn || p.data.machine.model)) || '';
+        const _q = _key ? ('/api/tools/drivers/sign?search_key=' + encodeURIComponent(_key) +
+                           '&name=' + encodeURIComponent(d.name || '') +
+                           '&version=' + encodeURIComponent(d.version || '')) : '';
+        const dl = _q
+          ? '<a class="btn sm ghost" href="' + _q + '" target="_blank" rel="noopener" ' +
+            'style="height:24px;font-size:11.5px;white-space:nowrap">官方下载</a>'
+          : '<span class="faint small">—</span>';
+        return '<tr><td>' + (i + 1) + '</td><td>' + nm + '</td><td class="num">' + ver + '</td><td>' + os + '</td><td>' + dl + '</td></tr>';
+      }).join('');
+      return '<div class="ipl-pack">' +
+        '<div class="ipl-pack-head">执行结果<span class="faint">· ' + _drv.length + ' 个官方驱动</span>' +
+          '<span style="flex:1"></span></div>' +
+        '<div style="max-height:320px;overflow:auto;border:1px solid var(--line,#E3E7EE);border-radius:7px;margin:6px 12px">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:11.5px">' +
+            '<thead style="position:sticky;top:0;background:#F7F9FC"><tr>' +
+              '<th style="width:34px">#</th><th>驱动名称</th><th>版本</th><th>适用系统</th><th style="width:92px">下载</th>' +
+            '</tr></thead><tbody>' + _rows + '</tbody></table></div></div>';
+    }
+    // 2026-11-04：不再截断——全部内容一次铺完（容器内滚动），避免 SMART 这类多盘结果只露第一块
     const lines = String(p.text || '').split('\n');
-    const head = lines.slice(0, p.max || 18);
-    const rest = lines.length - head.length;
+    const head = lines;
+    const rest = 0;
     return '<div class="ipl-pack">' +
       '<div class="ipl-pack-head">执行结果' +
         (p.rows ? '<span class="faint">· ' + p.rows + ' 条</span>' : '') +
         '<span style="flex:1"></span>' +
         (rest > 0 ? '<button class="btn sm" id="pkToggle">展开全部 ' + lines.length + ' 行</button>' : '') +
       '</div>' +
-      '<pre class="ipl-pack-body">' + NP.esc((p.expanded ? lines : head).join('\n')) + '</pre>' +
+      '<pre class="ipl-pack-body" style="max-height:420px;overflow:auto">' + NP.esc((p.expanded ? lines : head).join('\n')) + '</pre>' +
     '</div>';
   }
 
@@ -3502,7 +3760,38 @@ window.NP_TIERS = {
         }).catch(() => { });
     }
 
+    // 2026-11-04：SN/MTM 写入按主人要求不摆执行计划——直接给工具表单（手动填 SN/MTM 后刷写）
+    if (a && a.key === 'snmtm_write') {
+      $('#inlinePlan').innerHTML = snmtmForm(a);
+      snmtmBind(a);
+      return;
+    }
+    // 2026-11-04：BIOS 信息读取不摆执行计划——点开直接采集并输出结果
+    if (a && a.key === 'bio') {
+      $('#inlinePlan').innerHTML = '<div class="ipl"><div class="ipl-head">' +
+        NP.icon(a.icon || 'shield', 15) + '<span>BIOS 信息读取</span><span class="badge read">只读</span>' +
+        '<span style="flex:1"></span><button class="btn sm" id="bioClose">收起</button></div>' +
+        '<div id="bioBody" style="padding:10px 12px 12px"><div class="note info">正在读取客户机 BIOS 信息…</div></div></div>';
+      const _bc = document.getElementById('bioClose');
+      if (_bc) _bc.onclick = () => { window.__bioRunning = false; $('#inlinePlan').innerHTML = ''; };
+      // 2026-11-04：面板会被多次重绘，必须只触发一次；否则并发采集 → 服务端回「已有作业在执行」
+      if (window.__bioRunning) return;
+      window.__bioRunning = true;
+      NP.preflight(a).then(res => {
+        const body = document.getElementById('bioBody');
+        if (!body) return;
+        const text = (res && (res.text || res.log)) || '（无输出）';
+        body.innerHTML = '<pre class="small" style="white-space:pre-wrap;line-height:1.85;margin:0">' +
+          NP.esc(String(text).slice(0, 8000)) + '</pre>';
+      }).catch(e => {
+        window.__bioRunning = false;
+        const body = document.getElementById('bioBody');
+        if (body) body.innerHTML = '<div class="note danger">读取失败：' + NP.esc(e.message || String(e)) + '</div>';
+      }).then(() => { window.__bioRunning = false; });
+      return;
+    }
     const stTxt = { wait: '待执行', running: '正在核实…', done: '已调查', err: '失败' };
+    STEP_STATE.expanded = STEP_STATE.expanded || {};
     const _html =
       '<div class="ipl">' +
         '<div class="ipl-head">' + NP.icon(a.icon, 15) + '<span>' + NP.esc(a.title) + ' · 执行计划</span>' +
@@ -3522,6 +3811,7 @@ window.NP_TIERS = {
               '<span class="ipl-idx">' + (i + 1) + '</span>' +
               '<span class="ipl-txt">' + NP.esc(s.label) +
                 (s.summary ? '<span class="ipl-sum" title="' + NP.esc(s.summary) + '">' + NP.esc(s.summary) + '</span>' : '') +
+                iplTable(s) +
               '</span>' +
               '<span class="ipl-st">' + (stTxt[s.st] || '') + '</span>' +
             '</div>').join('') +
@@ -3574,7 +3864,10 @@ window.NP_TIERS = {
         const first = String(text).split('\n')[0].slice(0, 90);
         STEP_STATE.steps.forEach(s => { s.st = 'done'; s.summary = first; });
         const rows = (res && res.data && Array.isArray(res.data.drivers)) ? res.data.drivers.length : 0;
-        STEP_STATE.pack = { text: String(text).slice(0, 20000), rows: rows, expanded: false };
+        // 2026-11-04：整包类工具原来只保留 text，把结构化 data（含驱动下载直链）丢了，
+        //   导致执行结果只能出纯文本、没有下载入口。这里把 data 一起带上。
+        STEP_STATE.pack = { text: String(text).slice(0, 20000), rows: rows, expanded: false,
+                            data: (res && res.data) ? res.data : null };
         STEP_STATE.done = true;
         if (window.NP && NP.ev) NP.ev('tool.result', { tool: a.title, key: a.key, chars: String(text).length,
                                                        rows: rows, ms: Date.now() - t0 });
@@ -3602,6 +3895,10 @@ window.NP_TIERS = {
           STEP_STATE.error = s.label + ' 失败：' + s.summary;
         } else {
           s.st = 'done'; s.summary = j.summary || '（无输出）'; s.raw = j.output || '';
+          // 2026-11-04：结构化结果要真的铺出来，否则用户只看到「查到 12 条」一行摘要
+          s.rows = Array.isArray(j.rows) ? j.rows : [];
+          s.fields = Array.isArray(j.fields) ? j.fields : [];
+          s.count = j.count || s.rows.length;
           parts.push('【' + s.label + '】' + "\n" + (j.output || j.summary || ''));
         }
       } catch (e) {
@@ -3751,17 +4048,15 @@ window.NP_TIERS = {
     $('#gateTitle').textContent = t.label + '确认 · ' + a.title;
     $('#gateNote').textContent = t.note + (a.impact ? '（' + a.impact + '）' : '');
     $('#gateFields').innerHTML =
-      '<div class="field"><label>操作人工号</label><input class="input num" id="gOp" placeholder="现场工号" autocomplete="off"></div>' +
-      (a.tier === 'flash'
-        ? '<div class="field" style="margin-top:9px"><label>复核人工号</label><input class="input num" id="gRv" placeholder="复核人工号" autocomplete="off"></div>' +
-          '<div class="note danger" style="margin-top:9px">两个工号必须不同；本次操作全程录屏并留痕。</div>'
-        : '<div class="note warn" style="margin-top:9px">执行前将自动创建快照，可在留痕中回滚。</div>');
+      // 2026-11-04：按主人要求取消双人工号 + 录屏，只确认操作人工号
+      '<div class="field"><label>操作人工号</label><input class="input num" id="gOp" placeholder="请输入本人工号" autocomplete="off"></div>' +
+      '<div class="note warn" style="margin-top:9px">执行前将自动创建快照，可在留痕中回滚。</div>';
     $('#gateAck').checked = false;
     $('#gateOk').disabled = true;
     $('#gateErr').classList.add('hidden');
     const refresh = () => {
       const op = ($('#gOp') || {}).value || '', rv = ($('#gRv') || {}).value || '';
-      const ok = $('#gateAck').checked && /^LN\d{4}$/.test(op) && (a.tier !== 'flash' || /^LN\d{4}$/.test(rv));
+      const ok = $('#gateAck').checked && /^LN\d{4}$/.test(op);
       $('#gateOk').disabled = !ok;
     };
     ['#gOp', '#gRv'].forEach(sel => { const el = $(sel); if (el) el.addEventListener('input', refresh); });
@@ -3969,15 +4264,113 @@ window.NP_TIERS = {
       (c.missing ? '<div class="small faint">缺失：' + NP.esc(c.missing) + '</div>' : '') +
       '<div class="small faint" style="margin-top:4px">来源：服务端模型基于本房间证据生成 · 判读参考</div>';
   }
+  /* 2026-11-04：回答等待期分阶段提示（原为一句静态"正在…回答"） */
+  function aiProgress(ph) {
+    if (!ph) return function () { };
+    const stages = [[0, '（正在读取本房间已采证据…）'], [6000, '（正在采集客户机数据…）'],
+                    [16000, '（数据已回传，正在分析…）'], [30000, '（采集较慢，仍在等进行中…）']];
+    const t0 = Date.now();
+    const timer = setInterval(function () {
+      const el = Date.now() - t0;
+      let txt = stages[0][1];
+      stages.forEach(function (s) { if (el >= s[0]) txt = s[1]; });
+      if (ph.isConnected) ph.textContent = txt;
+    }, 1500);
+    return function () { clearInterval(timer); };
+  }
+
+  /* 2026-11-04：把 AI 输出的【提议】块渲染成可操作卡片（让 AI 去做 / 采纳 / 不采纳 / 复制） */
+  const PROP_RE = /【提议】([\s\S]*?)(?=\n\s*\n|【结论卡】|$)/;
+  function parseProposal(text) {
+    const m = String(text || '').match(PROP_RE);
+    if (!m) return null;
+    const body = m[1];
+    const get = function (k) { const r = body.match(new RegExp(k + '=([^；;\n]*)')); return r ? r[1].trim() : ''; };
+    const act = get('动作');
+    if (!act) return null;
+    return { action: act, impact: get('影响'), risk: get('风险'), rollback: get('回退') };
+  }
+  function proposalCard(p) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-prop';
+    const readOnly = /采集|读取|查询|导出|日志|清单|信息|核对/.test(p.action);
+    wrap.innerHTML =
+      '<div class="ai-prop-head"><span class="ai-prop-tag">AI 提议动作</span>' +
+        '<span class="ai-prop-act">' + NP.esc(p.action) + '</span></div>' +
+      '<div class="ai-prop-body">' +
+        (p.impact ? '<div><span>影响</span><b>' + NP.esc(p.impact) + '</b></div>' : '') +
+        (p.risk ? '<div><span>风险</span><b>' + NP.esc(p.risk) + '</b></div>' : '') +
+        (p.rollback ? '<div><span>回退</span><b>' + NP.esc(p.rollback) + '</b></div>' : '') +
+      '</div>' +
+      '<div class="ai-prop-foot">' +
+        (readOnly ? '<button class="btn primary sm" data-a="run">让 AI 现在去做</button>' : '') +
+        '<button class="btn sm" data-a="accept">采纳并记录</button>' +
+        '<button class="btn sm ghost" data-a="reject">不采纳</button>' +
+        '<button class="btn sm ghost" data-a="copy">复制动作</button>' +
+        (readOnly ? '' : '<span class="small faint">写操作需现场工号确认；采纳后按步骤执行或让二线下发</span>') +
+      '</div>';
+    const runBtn = wrap.querySelector('[data-a="run"]');
+    if (runBtn) runBtn.addEventListener('click', function () {
+      this.disabled = true; this.textContent = '已交给 AI…';
+      if (window.NP && NP.ev) NP.ev('proposal.executed', { action: p.action, mode: 'ai' });
+      aiAsk('请现在执行你上一条提议里的只读动作：' + p.action + '。做完把结果和下一步选项给我。');
+    });
+    wrap.querySelector('[data-a="accept"]').addEventListener('click', function () {
+      if (window.NP && NP.ev) NP.ev('proposal.accepted', { action: p.action, risk: p.risk || '' });
+      this.disabled = true; this.textContent = '已采纳';
+      if (window.NP && NP.toast) NP.toast('已采纳并记录到轨迹', 'ok');
+    });
+    wrap.querySelector('[data-a="reject"]').addEventListener('click', function () {
+      if (window.NP && NP.ev) NP.ev('proposal.rejected', { action: p.action });
+      wrap.remove();
+      if (window.NP && NP.toast) NP.toast('已忽略该提议');
+    });
+    wrap.querySelector('[data-a="copy"]').addEventListener('click', function () {
+      const txt = p.action + (p.impact ? '（影响：' + p.impact + '）' : '');
+      if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () {
+        if (window.NP && NP.toast) NP.toast('动作已复制', 'ok');
+      }).catch(function () { });
+    });
+    return wrap;
+  }
+
+
+  // 便于自测与复用：把提议解析/渲染挂到 window
+  window.__aiProp = { parse: parseProposal, card: proposalCard };
+
+  /* 2026-11-04：彻底挡住浏览器密码自动填充——readonly 期间 Chrome 不填充，
+     聚焦时解锁、失焦且为空时重新上锁，并清掉可能已填充的值。 */
+  (function noautofillGuard() {
+    function guard(el) {
+      if (!el) return;
+      const unlock = () => { try { el.removeAttribute('readonly'); } catch (e) { } };
+      const relock = () => { if (!el.value) el.setAttribute('readonly', 'readonly'); };
+      // 只认「用户真的在点/敲」，程序化 focus 不解锁（否则自动填充又能填进来）
+      el.addEventListener('pointerdown', unlock);
+      el.addEventListener('touchstart', unlock);
+      el.addEventListener('keydown', unlock);
+      el.addEventListener('blur', relock);
+      // 进页面清掉浏览器已填的内容（登录用户名之类）
+      setTimeout(() => { if (el.value && !el.dataset.userTyped) { el.value = ''; el.setAttribute('readonly', 'readonly'); } }, 200);
+      setTimeout(() => { if (el.value && !el.dataset.userTyped) { el.value = ''; } }, 1200);
+      el.addEventListener('input', () => { el.dataset.userTyped = '1'; });
+    }
+    guard(document.getElementById('aiIn'));
+    guard(document.getElementById('imText'));
+  })();
+
+
   function aiAsk(q) {
     if (aiChatRunning) { toast('AI 正在回答，请稍候', 'warn'); return; }
     if (!NP.bridgeOnline()) { aiMsg('bot', '桥接器未连接：AI 需要读取本房间已采集的数据。请先让客户机运行桥接器，并至少执行一项采集。'); return; }
     aiMsg('me', q);
-    const ph = aiMsg('bot', '（正在基于本房间证据回答…）');
+    const ph = aiMsg('bot', '（正在读取本房间已采证据…）');
+    const stopProg = aiProgress(ph);
     aiChatRunning = true; aiChatBuf = '';
     NP.audit('现场 AI 提问：' + q.slice(0, 60));
     NP.apiPost('/api/ai_qa', { room_code: NP.state.room.code, question: q })
       .then(js => {
+        try { stopProg(); } catch (e) { }
         const rawAnswer = String(js.answer || '').trim() || '（AI 未返回内容）';
         aiChatBuf = rawAnswer;
         const answer = rawAnswer.replace(/【结论卡】[\s\S]*$/, '').trim() || rawAnswer;
@@ -3993,6 +4386,9 @@ window.NP_TIERS = {
         }
         const rc = parseConclusion(aiChatBuf);
         if (rc) paintConclusion(rc);
+        // 2026-11-04：AI 提议 → 可操作卡片（让 AI 去做 / 采纳 / 不采纳）
+        const _prop = parseProposal(aiChatBuf);
+        if (_prop && ph) { try { ph.insertAdjacentElement('afterend', proposalCard(_prop)); } catch (e) { } }
         const _tu = (js.tools_used || []);
         // 2026-10-27：还有没采完的项 → 给一个「继续采集」按钮，点了接着采
         const _pending = (js.pending_tools || []);
@@ -4781,7 +5177,7 @@ window.NP_TIERS = {
     // 区块标题跟着模式走（2026-10-22）
     { const wt = document.getElementById('worksTitle');
       if (wt) wt.textContent = tab === 'collect' ? 'OS log 抓取与上传'
-        : (tab === 'ai' ? 'AI 诊断对话' : (tab === 'files' ? '房间文件互传' : '现场作业项')); }
+        : (tab === 'ai' ? '自由模式' : (tab === 'files' ? '房间文件互传' : '现场作业项')); }
 
     $('#paneCollect').classList.toggle('hidden', tab !== 'collect');
     const pfa = $('#paneFiles'); if (pfa) pfa.classList.toggle('hidden', tab !== 'files');
@@ -4890,6 +5286,7 @@ window.NP_TIERS = {
       model: sp.get('model') || cached.model || '',
       cust: cached.cust || '',
       engineer: cached.engineer || '',
+      name: cached.name || '',        // 2026-11-04：房间名称（标题行悬停提示用）
       plat: 'windows',
       real: true
     };
@@ -4898,6 +5295,10 @@ window.NP_TIERS = {
     NP.state.artifacts = [];
     NP.state.ai = { ready: false, text: '' };
   })();
+  // 延后一拍：桥接块（定义 __hydrateRoom）在后续脚本块里执行，直接调用会拿不到
+  setTimeout(function () {
+    try { if (window.__hydrateRoom) window.__hydrateRoom(NP.state.room && NP.state.room.code); } catch (e) { }
+  }, 300);
   paintAll();
   if (window.NP.loadMe) NP.loadMe().then(() => { paintMe(); paintTop(); }).catch(() => {});
   if (window.NP.loadAssignments) setInterval(() => { if (NP.isReal && NP.isReal()) NP.loadAssignments().then(() => paintTickets()).catch(() => {}); }, 8000);
@@ -4974,7 +5375,7 @@ window.NP_TIERS = {
     const rc = roomCode(), on = bridgeOnline();
     [document.getElementById('shotBtn'), document.getElementById('shotAgain'),
      document.getElementById('liveBtn'), document.getElementById('liveToggle'),
-     document.getElementById('liveShot')].forEach(btn => {
+     document.getElementById('liveShot'), document.getElementById('liveQ')].forEach(btn => {
       if (!btn) return;
       const dis = !rc || !on;
       btn.disabled = dis;
@@ -5061,12 +5462,16 @@ window.NP_TIERS = {
     if (btn) { btn.disabled = true; btn.textContent = '截取中…'; }
     if (again) { again.disabled = true; again.textContent = '截取中…'; }
     setState('截取中…', 'write');
+    // 2026-11-04：大图回传受客户机上行带宽限制，8 秒后给一句解释，避免看起来"卡死"
+    const _slowTip = setTimeout(function () {
+      try { setState('大图回传中…', 'write'); } catch (e) { }
+    }, 8000);
 
     fetch('/api/tools/screenshot', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(preview ? { room_code: rc, preview: true, max_width: 1280, quality: 55 }
-                                   : { room_code: rc, preview: false })
+      body: JSON.stringify(preview ? { room_code: rc, preview: true, max_width: LIVEQ().w, quality: LIVEQ().q }
+                                   : { room_code: rc, preview: false, format: 'jpg', quality: 92 })
     }).then(r => r.json().then(j => {
       if (!r.ok) {
         const e = new Error(j.error || ('HTTP ' + r.status));
@@ -5082,6 +5487,7 @@ window.NP_TIERS = {
       showErr(e.message, e.hint || '', { raw: e.raw, probe: e.probe, stage1Ok: e.stage1Ok });
       setState('截图失败', 'write');
     }).finally(() => {
+      try { clearTimeout(_slowTip); } catch (e) { }
       busy = false;
       if (btn) { btn.disabled = false; btn.textContent = oldTxt; }
       if (again) { again.disabled = false; again.textContent = '重新截屏'; }
@@ -5114,11 +5520,16 @@ window.NP_TIERS = {
     fetch('/api/tools/screenshot', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room_code: rc, preview: true, max_width: 1280, quality: 55 })
+      body: JSON.stringify({ room_code: rc, preview: true, max_width: LIVEQ().w, quality: LIVEQ().q })
     }).then(r => r.json().then(j => {
       if (!r.ok) { const e = new Error(j.error || ('HTTP ' + r.status)); e.raw = j.raw; e.probe = j.probe; throw e; }
       return j;
     })).then(js => {
+      // 收到帧就清掉「正在抓取/准备画面」类提示
+      try {
+        const _n = document.getElementById('liveNotice') || document.getElementById('shotNotice');
+        if (_n && /正在抓取|准备画面|下载抓屏组件/.test(_n.textContent || '')) { _n.textContent = ''; _n.style.display = 'none'; }
+      } catch (e) { }
       const img = $('#liveImg');
       if (img) { img.src = js.url; img.style.display = 'block'; }
       // 放大层开着时跟着刷新
@@ -5137,6 +5548,18 @@ window.NP_TIERS = {
     }).finally(() => { LIVE.busy = false; });
   }
   function liveStart() {
+    // 首帧看门狗：6 秒还没出图就提示可能在下载抓屏组件（老客户端不上报 notice 时的兜底）
+    try { clearTimeout(window.__liveFirstTip); } catch (e) { }
+    window.__liveFirstTip = setTimeout(function () {
+      if (!LIVE.on) return;
+      const img = document.getElementById('liveImg');
+      const has = img && img.src && img.style.display !== 'none';
+      if (!has) {
+        setState('准备画面…', 'write');
+        const meta = document.getElementById('liveMeta');
+        if (meta) meta.textContent = '首次抓屏可能需要下载抓屏组件（约 6MB），请稍候…';
+      }
+    }, 6000);
     if (LIVE.on) return;
     LIVE.on = true; LIVE.frames = 0; LIVE.startedAt = Date.now();
     const b = $('#liveBtn'); if (b) b.textContent = '开始观察';
@@ -5154,12 +5577,63 @@ window.NP_TIERS = {
     const t = $('#liveToggle'); if (t) t.textContent = '继续观察';
     if (!LIVE.frames) setState('待观察', '');
   }
+  /* 2026-11-04：观察画质档位。原来固定 1280 宽 + JPEG q55，用户反馈"太模糊"。
+     清晰档 1920 宽 + q80（单帧约 200~350KB，2 秒一帧），流畅档维持原参数省带宽。 */
+  function LIVEQ() {
+    const mode = (function () { try { return localStorage.getItem('np_live_q') || 'hd'; } catch (e) { return 'hd'; } })();
+    if (mode === 'smooth') return { w: 1280, q: 55, name: '流畅' };
+    // 清晰档：按"实际显示尺寸 × 像素密度"取宽度，避免高分屏上被放大而发虚（帧宽 < 显示像素时必然模糊）
+    let w = 1920;
+    try {
+      const box = document.querySelector('#shotPane .live-wrap img, #liveImg, .live-img');
+      const cssW = (box && box.clientWidth) || (document.getElementById('liveImg') && document.getElementById('liveImg').clientWidth) || 0;
+      const dpr = window.devicePixelRatio || 1;
+      if (cssW) w = Math.round(cssW * dpr);
+    } catch (e) { }
+    w = Math.max(1280, Math.min(2560, w));
+    return { w: w, q: 80, name: '清晰' };
+  }
+  function liveQToggle() {
+    const cur = (function () { try { return localStorage.getItem('np_live_q') || 'hd'; } catch (e) { return 'hd'; } })();
+    const next = cur === 'smooth' ? 'hd' : 'smooth';
+    try { localStorage.setItem('np_live_q', next); } catch (e) { }
+    const b = document.getElementById('liveQ');
+    if (b) b.textContent = '画质：' + LIVEQ().name;
+    if (LIVE.on) { liveStop(); liveStart(); }   // 立刻用新画质重开
+  }
+  /* 桥接器阶段提示 → 观察区状态与说明文字（2026-11-04） */
+  window.onBridgeNotice = function (code, text, done) {
+    const meta = document.getElementById('liveMeta');
+    const note = document.getElementById('shotNotice');
+    const showNote = (t) => {
+      if (!note) return;
+      note.textContent = t || '';
+      note.style.display = t ? 'block' : 'none';
+    };
+    if (code === 'shot_helper_download') {
+      if (!done) {
+        setState('下载抓屏组件…', 'write');
+        const msg = text || '客户机首次抓屏：正在下载抓屏组件（约 6MB），完成前画面会稍等';
+        if (meta) meta.textContent = msg;
+        showNote(msg);
+      } else {
+        if (meta) meta.textContent = text || '';
+        showNote(text && /失败|错误/.test(text) ? text : '');
+        setState(LIVE.on ? '观察中' : '待观察', '');
+      }
+    } else if (code === 'shot_capture' && !done) {
+      // 2026-11-04：观察模式下每 2 秒就来一条，若显示会一直挂着不清 → 只在单张高清截图时提示
+      if (!LIVE.on) { setState('抓取中…', 'write'); showNote('正在抓取客户机画面…'); }
+    }
+  };
+
   function liveToggle() { LIVE.on ? liveStop() : liveStart(); }
 
   try { if (window.NP) NP.__live = () => ({ on: LIVE.on, frames: LIVE.frames, busy: LIVE.busy, timer: !!LIVE.timer }); } catch (e) { }
   const lb = $('#liveBtn'); if (lb) lb.addEventListener('click', liveStart);
   const lt = $('#liveToggle'); if (lt) lt.addEventListener('click', liveToggle);
   const ls = $('#liveShot'); if (ls) ls.addEventListener('click', () => { shotTab('shot'); shoot(false, false); });
+  const lq = $('#liveQ'); if (lq) { lq.textContent = '画质：' + LIVEQ().name; lq.addEventListener('click', liveQToggle); }
 
   /* 观察帧放大（2026-11-02）：点击画面 → 全屏看细节；Esc 或点空白关闭 */
   function liveZoomOpen() {
@@ -5193,6 +5667,15 @@ window.NP_TIERS = {
   }
   const st = $('#shotTabs');
   if (st) st.querySelectorAll('button[data-st]').forEach(b => b.addEventListener('click', () => shotTab(b.dataset.st)));
+  // 2026-11-04：取消「高清截图」独立页签——截图后在观察区内展示，并提供「返回观察」
+  (function bindShotBack() {
+    const b = $('#shotBack');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      shotTab('live');
+      if (LIVE.on) liveStart();     // 原来停止观察的，回到观察则恢复
+    });
+  })();
   // 页面切到后台时暂停观察，回到前台不自动恢复（避免偷偷抓屏）
   document.addEventListener('visibilitychange', () => { if (document.hidden) liveStop(); });
   window.addEventListener('beforeunload', liveStop);
@@ -5245,16 +5728,44 @@ window.NP_TIERS = {
     <div class="card-head" style="flex:0 0 auto"><span class="card-title">新建房间</span><span class="spacer"></span>
       <button class="btn sm ghost" id="fldNrClose">关闭</button></div>
     <div class="card-body">
-      <label class="small faint">SN（必填）</label>
-      <input class="input" id="fldNrSn" style="width:100%;margin:4px 0 10px">
-      <label class="small faint">工单号（必填）</label>
-      <input class="input" id="fldNrTicket" style="width:100%;margin:4px 0 10px">
-      <label class="small faint">机型（选填）</label>
-      <input class="input" id="fldNrModel" style="width:100%;margin:4px 0 10px">
+      <!-- 2026-10-30：手动只填「客户单位」+「SN」；工单号与机型改为自动识别（可手动接管） -->
+      <label class="small faint">客户单位名称 <b style="color:#B91C1C">*</b></label>
+      <input class="input" id="fldNrOrg" name="np-org" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="" style="width:100%;margin:4px 0 10px">
+
+      <label class="small faint">SN 序列号 <b style="color:#B91C1C">*</b></label>
+      <input class="input" id="fldNrSn" placeholder="" style="width:100%;margin:4px 0 10px">
+
+      <div class="row" style="align-items:center;gap:6px;margin-bottom:4px">
+        <label class="small faint" style="margin:0">工单号</label>
+        <span class="badge hidden" id="fldNrTicketTag"></span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn sm ghost nr-auto" id="fldNrTicketAuto" disabled title="先填 SN">自动识别</button>
+        <label class="small faint" style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0">
+          <input type="checkbox" id="fldNrTicketManual"> 手动填写
+        </label>
+      </div>
+      <input class="input" id="fldNrTicket" disabled placeholder="先填 SN，再点右侧「自动识别」" style="width:100%;margin:0 0 10px">
+
+      <div class="row" style="align-items:center;gap:6px;margin-bottom:4px">
+        <label class="small faint" style="margin:0">机器型号</label>
+        <span class="badge hidden" id="fldNrModelTag"></span>
+        <span class="spacer" style="flex:1"></span>
+        <button class="btn sm ghost nr-auto" id="fldNrModelAuto" disabled title="先填 SN">自动识别</button>
+        <label class="small faint" style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0">
+          <input type="checkbox" id="fldNrModelManual"> 手动填写
+        </label>
+      </div>
+      <input class="input" id="fldNrModel" disabled placeholder="先填 SN，再点右侧「自动识别」" style="width:100%;margin:0 0 10px">
+
       <label class="small faint">客户机系统</label>
       <select class="input" id="fldNrOs" style="width:100%;margin:4px 0 12px">
         <option value="windows">Windows</option><option value="linux">Linux</option>
       </select>
+
+      <div class="nr-preview">
+        <span class="nr-preview-k">房间名称</span>
+        <span class="nr-preview-v" id="fldNrNamePrev">—</span>
+      </div>
 
       <!-- 2026-10-22：连接文件类型显式选择，不再"默认下一种让人猜" -->
       <label class="small faint">连接文件</label>
@@ -5270,7 +5781,7 @@ window.NP_TIERS = {
       </div>
 
       </div><!-- /字段区（可滚动） -->
-      <div class="nr-foot"><!-- 按钮与提示固定在底部，内容再长也不会被裁（2026-11-03） -->
+      <div class="nr-foot"><!-- 按钮与提示固定在底部，内容再长也不会被裁（2026-11-02） -->
       <div class="row" style="margin-top:0">
         <button class="btn primary" id="fldNrOk" style="flex:1;white-space:nowrap">创建并下载 exe 版</button>
         <button class="btn ghost" id="fldNrCancel" style="flex:1">取消</button>
@@ -5287,7 +5798,7 @@ window.NP_TIERS = {
     <div class="card-head"><span class="card-title">加入房间</span><span class="spacer"></span>
       <button class="btn sm ghost" id="fldJrClose">关闭</button></div>
     <div class="card-body">
-      <input class="input" id="fldJrQ" placeholder="按 房间码 / SN / 工单 / 机型 过滤" style="width:100%;margin-bottom:10px">
+      <input class="input" id="fldJrQ" name="np-roomfilter" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="按 房间码 / SN / 工单 / 机型 过滤" style="width:100%;margin-bottom:10px">
       <div id="fldJrList" style="max-height:320px;overflow:auto"></div>
       <div class="small faint" style="margin-top:8px">二线账号可加入他人房间；工程师只能加入自己参与的房间。</div>
     </div>
@@ -5569,40 +6080,180 @@ window.NP_TIERS = {
   syncBatKind();
 
   const nrMask = $('#fldNrMask');
-  const showNR = v => { if (nrMask) nrMask.style.display = v ? 'flex' : 'none'; if (v) { $('#fldNrMsg').textContent = ''; $('#fldNrSn').focus(); } };
+  const showNR = v => {
+    if (nrMask) nrMask.style.display = v ? 'flex' : 'none';
+    if (v) {
+      $('#fldNrMsg').textContent = '';
+      const o = $('#fldNrOrg'); if (o) { o.value = ''; }
+      const s = $('#fldNrSn'); if (s) s.value = '';
+      const t = $('#fldNrTicketManual'), m = $('#fldNrModelManual');
+      if (t) { t.checked = false; t.dispatchEvent(new Event('change')); }
+      if (m) { m.checked = false; m.dispatchEvent(new Event('change')); }
+      ['#fldNrTicketTag', '#fldNrModelTag'].forEach(s => { const e = $(s); if (e) { e.textContent = ''; e.className = 'badge hidden'; } });
+      if (typeof nrSyncAutoButtons === 'function') nrSyncAutoButtons();
+      paintNrName();
+      if (o) o.focus(); else if (s) s.focus();
+    }
+  };
   ['#fldNewRoom', '#noRoomNew', '#emptyNewBtn'].forEach(s => $(s) && $(s).addEventListener('click', () => showNR(true)));
   ['#fldNrClose', '#fldNrCancel'].forEach(s => $(s) && $(s).addEventListener('click', () => showNR(false)));
+  /* 2026-10-30：工单号 / 机型 默认「自动识别」，勾选手动填写才能输入；房间名实时预览 */
+  function bindNrManual(chkId, inputId, tagId) {
+    const chk = $('#' + chkId), inp = $('#' + inputId), tag = $('#' + tagId);
+    if (!chk || !inp) return;
+    const sync = () => {
+      inp.disabled = !chk.checked;
+      if (tag) {
+        tag.textContent = chk.checked ? '手动填写' : '自动识别';
+        tag.className = 'badge' + (chk.checked ? ' write' : '');
+      }
+      if (!chk.checked) inp.value = '';
+      paintNrName();
+    };
+    chk.addEventListener('change', sync);
+    inp.addEventListener('input', paintNrName);
+    sync();
+  }
+  function paintNrName() {
+    const el = $('#fldNrNamePrev');
+    if (!el) return;
+    const org = ($('#fldNrOrg') && $('#fldNrOrg').value.trim()) || '未填单位';
+    const md = ($('#fldNrModel') && $('#fldNrModel').value.trim()) || '未识别机型';
+    const sn = ($('#fldNrSn') && $('#fldNrSn').value.trim()) || 'SN';
+    const now = new Date();
+    const mmdd = String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
+    el.textContent = org + '-' + md + '-' + sn + '-' + mmdd;
+  }
+  bindNrManual('fldNrTicketManual', 'fldNrTicket', 'fldNrTicketTag');
+  bindNrManual('fldNrModelManual', 'fldNrModel', 'fldNrModelTag');
+
+  /* 2026-10-30：自动识别（演示版）——填完 SN 即可点，不依赖房间/桥接器。
+     底层目前返回演示数据，接口接好后把 mock 换成真实请求即可。 */
+  const NR_DEMO_MODELS = ['P3 Tower', 'K3 Pro', 'P5 Tower', 'M90t Gen 3'];
+  function nrDemoDetect(kind) {
+    const snInput = $('#fldNrSn');
+    const sn = (snInput && snInput.value.trim()) || '';
+    if (!sn) return;
+    const isTicket = kind === 'ticket';
+    const inp = isTicket ? $('#fldNrTicket') : $('#fldNrModel');
+    const btn = isTicket ? $('#fldNrTicketAuto') : $('#fldNrModelAuto');
+    const tag = isTicket ? $('#fldNrTicketTag') : $('#fldNrModelTag');
+    const manual = isTicket ? $('#fldNrTicketManual') : $('#fldNrModelManual');
+    if (!inp || !btn) return;
+    if (manual && manual.checked) {   // 手动模式下不覆盖用户输入
+      tag && (tag.textContent = '手动填写');
+      return;
+    }
+    btn.classList.add('busy'); btn.textContent = '识别中…'; btn.disabled = true;
+    setTimeout(() => {
+      const now = new Date();
+      const md = String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
+      const tail = sn.slice(-3).toUpperCase();
+      let val;
+      if (isTicket) {
+        // 演示：联想工单号 18 位 = 日期(YYYYMMDD) + 服务站编号(6) + 排序号(4)
+        const ymd = now.getFullYear() + md;
+        const station = '317001';                            // 演示服务站编号（后续可按账号/配置取）
+        let h2 = 0; for (const ch of sn) h2 = (h2 * 37 + ch.charCodeAt(0)) % 9000;
+        const seq = String(1000 + h2);                       // 演示排序号（按 SN 稳定）
+        val = ymd + station + seq;
+      } else {
+        let h = 0; for (const ch of sn) h = (h * 31 + ch.charCodeAt(0)) % 9973;
+        val = NR_DEMO_MODELS[h % NR_DEMO_MODELS.length];      // 演示：按 SN 稳定取一个机型
+      }
+      inp.value = val;
+      if (tag) { tag.textContent = '演示数据'; tag.className = 'badge write'; }
+      btn.classList.remove('busy'); btn.textContent = '自动识别'; btn.disabled = false;
+      paintNrName();
+    }, 550);
+  }
+  function nrSyncAutoButtons() {
+    const sn = (($('#fldNrSn') && $('#fldNrSn').value) || '').trim();
+    ['#fldNrTicketAuto', '#fldNrModelAuto'].forEach(s => {
+      const b = $(s); if (!b) return;
+      b.disabled = !sn;
+      b.title = sn ? '按 SN 自动识别（当前为演示数据）' : '先填 SN';
+    });
+  }
+  ['#fldNrTicketAuto', '#fldNrModelAuto'].forEach(s => {
+    const b = $(s); if (b) b.addEventListener('click', () => nrDemoDetect(s.indexOf('Ticket') >= 0 ? 'ticket' : 'model'));
+  });
+  { const snEl = $('#fldNrSn'); if (snEl) snEl.addEventListener('input', nrSyncAutoButtons); }
+  nrSyncAutoButtons();
+  ['#fldNrOrg', '#fldNrSn', '#fldNrModel'].forEach(s => { const e = $(s); if (e) e.addEventListener('input', paintNrName); });
+  paintNrName();
+
   if ($('#fldNrOk')) $('#fldNrOk').addEventListener('click', () => {
-    const sn = $('#fldNrSn').value.trim(), tk = $('#fldNrTicket').value.trim();
-    const md = $('#fldNrModel').value.trim(), os = $('#fldNrOs').value;
-    if (!sn || !tk) { $('#fldNrMsg').textContent = 'SN 与工单号都是必填'; return; }
+    const org = ($('#fldNrOrg').value || '').trim();
+    const sn = $('#fldNrSn').value.trim();
+    const tk = $('#fldNrTicket').disabled ? '' : $('#fldNrTicket').value.trim();
+    const md = $('#fldNrModel').disabled ? '' : $('#fldNrModel').value.trim();
+    const os = $('#fldNrOs').value;
+    if (!org) { $('#fldNrMsg').textContent = '客户单位名称必填'; return; }
+    if (!sn) { $('#fldNrMsg').textContent = 'SN 序列号必填'; return; }
     const btn = $('#fldNrOk'); btn.disabled = true; $('#fldNrMsg').textContent = '创建中…';
-    api('/api/rooms', { sn, ticket_no: tk, machine_model: md, os })
+    api('/api/rooms', { sn, ticket_no: tk, machine_model: md, os, client_org: org })
       .then(j => {
         const code = j.room_code;
-        // 2026-10-22：按弹窗里选的类型下载，文件名与提示都标明版本
-        const kind = curBatKind();           // exe | ps | none
+        const kind = curBatKind();
+        // 2026-11-04：下载不再依赖"程序化点击"（浏览器常把这种自动下载拦掉）。
+        //   先在弹窗里给出明确的成功态与下载按钮（真实用户手势），再自动进房间。
         try {
+          const isPs = kind === 'ps';
+          const dlName = (isPs ? 'connect-ps-' : 'connect-') + code + '.bat';
+          const dlHref = (isPs ? '/api/room_bat_ps/' : '/api/room_bat/') + encodeURIComponent(code);
           if (kind === 'none') {
-            $('#fldNrMsg').textContent = '房间已创建（未下载连接文件，可在「连接客户机」里再选）';
+            $('#fldNrMsg').textContent = '房间已创建：' + code;
           } else {
-            const isPs = kind === 'ps';
-            const a = document.createElement('a');
-            a.href = (isPs ? '/api/room_bat_ps/' : '/api/room_bat/') + encodeURIComponent(code);
-            a.download = (isPs ? 'connect-ps-' : 'connect-') + code + '.bat';
-            a.style.display = 'none';
-            document.body.appendChild(a); a.click(); a.remove();
-            $('#fldNrMsg').textContent = '房间已创建，' + (isPs ? 'PowerShell 版' : 'exe 版')
-              + '连接文件正在下载（' + a.download + '）…';
+            $('#fldNrMsg').innerHTML =
+              '✔ 房间已创建：<b>' + NP.esc(code) + '</b>　' +
+              '<a class="btn sm primary" id="nrDlBtn" href="' + dlHref + '" download="' + dlName + '" ' +
+              'style="margin-left:6px">下载连接文件</a>' +
+              '<a class="btn sm ghost" id="nrGoBtn" style="margin-left:4px" ' +
+              'href="/expert?room=' + encodeURIComponent(code) + '&sn=' + encodeURIComponent(sn) +
+              '&ticket=' + encodeURIComponent(tk) + '&created=' + encodeURIComponent(kind) + '">进入房间</a>' +
+              '<div class="small faint" style="margin-top:5px">若浏览器没有自动下载，点上面按钮；文件名 ' + NP.esc(dlName) + '</div>';
+            // 先尝试自动下载（允许就省一步），失败也不影响用户手动点
+            try {
+              const a = document.createElement('a');
+              a.href = dlHref; a.download = dlName; a.style.display = 'none';
+              document.body.appendChild(a); a.click(); a.remove();
+            } catch (e) { }
+            // 用户点了下载按钮就留在弹窗，不自动跳走
+            const dlBtn = document.getElementById('nrDlBtn');
+            if (dlBtn) dlBtn.addEventListener('click', () => { clearTimeout(window.__nrNavTimer); });
           }
+          window.__nrNavTimer = setTimeout(() => {
+            if (!document.body.contains($('#fldNrMsg'))) return;
+            location.href = '/expert?room=' + encodeURIComponent(code)
+              + '&sn=' + encodeURIComponent(sn) + '&ticket=' + encodeURIComponent(tk)
+              + '&created=' + encodeURIComponent(kind);
+          }, kind === 'none' ? 800 : 4000);
         } catch (e) { }
-        setTimeout(() => {
-          location.href = '/expert?room=' + encodeURIComponent(code)
-            + '&sn=' + encodeURIComponent(sn) + '&ticket=' + encodeURIComponent(tk)
-            + '&created=' + encodeURIComponent(kind);   // exe / ps / none
-        }, 800);
       })
-      .catch(e => { $('#fldNrMsg').textContent = '创建失败：' + e.message; btn.disabled = false; });
+      .catch(async e => {
+        const msg = (e && e.message) || String(e);
+        const netErr = /fetch|network|abort|timeout/i.test(msg);
+        // 网络中断自愈：请求可能已到达服务端并建成房间，先查一次同 SN 的房间，避免"其实建成了却报失败"
+        if (netErr) {
+          try {
+            const list = await api('/api/my_rooms');
+            const roomsArr = (list && (list.rooms || list)) || [];
+            const hit = roomsArr.find(r => String(r.sn || '') === String(sn));
+            if (hit && (hit.room_code || hit.code)) {
+              const code2 = hit.room_code || hit.code;
+              $('#fldNrMsg').innerHTML = '⚠ 网络中断，但房间实际已建成：<b>' + NP.esc(code2) + '</b>　' +
+                '<a class="btn sm primary" href="/api/room_bat/' + encodeURIComponent(code2) + '" download>下载连接文件</a>' +
+                '<a class="btn sm ghost" style="margin-left:4px" href="/expert?room=' + encodeURIComponent(code2) + '">进入房间</a>';
+              btn.disabled = false;
+              return;
+            }
+          } catch (_) { }
+        }
+        $('#fldNrMsg').textContent = '创建失败：' + msg +
+          (netErr ? '（网络中断，请检查网络后重试；房间可能未创建成功）' : '');
+        btn.disabled = false;
+      });
   });
 
   /* ---------- 加入房间 ---------- */
@@ -5836,5 +6487,9 @@ window.NP_TIERS = {
   <div id="switchRecent"></div>
 </div>
 
+<div id="verTag" class="vertag">—</div>
+<script>/* 2026-11-04：左下角版本号（脚本在 body 末尾，确保元素已存在） */
+(function(){try{var b=(window.NP&&NP.BUILD)||"";var v=b.split(" · ")[0];
+document.getElementById("verTag").textContent=(v||"")+ (v?" · 正式":"正式");}catch(e){}})();</script>
 </body>
 </html>

@@ -21,6 +21,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -36,19 +37,55 @@ func screenshotCaps() []string {
 // shotDir 截图落盘目录（与脚本推送目录一致，便于排查）
 func shotDir() string { return filepath.Join(os.TempDir(), "clouddiag") }
 
-// cleanupOldShots 清掉 24 小时前的历史截图，避免临时目录膨胀
-func cleanupOldShots(dir string) {
+// cleanupShots 控制临时截图目录体积。
+//
+// 2026-11-04 修复：原来只清理 "nexpert-shot-" 前缀，而实时观察帧的名字是
+// "nexpert-preview-"，于是每 2 秒一帧、每帧约 110KB 的观察帧从来不会被删——
+// 一小时 ~200MB、一天 ~4.9GB，全堆在客户机 %TEMP%\clouddiag 里。
+// 现在的口径：
+//   - 观察帧（preview）：只保留最新 3 帧（≈6 秒），其余立刻删；
+//   - 高清截图（shot）：保留 24 小时，方便服务器回传或人工复查。
+func cleanupShots(dir string) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	cutoff := time.Now().Add(-24 * time.Hour)
+	type item struct {
+		name string
+		mod  time.Time
+	}
+	var previews, shots []item
 	for _, e := range ents {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "nexpert-shot-") {
+		if e.IsDir() {
 			continue
 		}
-		if info, err := e.Info(); err == nil && info.ModTime().Before(cutoff) {
-			os.Remove(filepath.Join(dir, e.Name()))
+		n := e.Name()
+		if !strings.HasPrefix(n, "nexpert-") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(n, "nexpert-preview-"):
+			previews = append(previews, item{n, info.ModTime()})
+		case strings.HasPrefix(n, "nexpert-shot-"):
+			shots = append(shots, item{n, info.ModTime()})
+		}
+	}
+	// 观察帧：新的在前，保留 3 个
+	sort.Slice(previews, func(i, j int) bool { return previews[i].mod.After(previews[j].mod) })
+	for i, p := range previews {
+		if i >= 3 {
+			os.Remove(filepath.Join(dir, p.name))
+		}
+	}
+	// 高清截图：超过 24 小时清掉
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, s := range shots {
+		if s.mod.Before(cutoff) {
+			os.Remove(filepath.Join(dir, s.name))
 		}
 	}
 }
@@ -228,7 +265,7 @@ func (c *Client) handleScreenshot(msg map[string]interface{}) {
 		c.sendNow(reply)
 		return
 	}
-	go cleanupOldShots(dir)
+	go cleanupShots(dir)
 
 	bb := img.Bounds()
 	reply["ok"] = true

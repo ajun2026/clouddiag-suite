@@ -23,7 +23,7 @@ import (
 )
 
 // Version 桥接器版本号（构建时可用 -ldflags 覆盖）
-var Version = "1.4.2"
+var Version = "1.4.3"
 
 // 抓屏助手模式参数（2026-11-02）
 var (

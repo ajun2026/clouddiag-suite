@@ -5,6 +5,9 @@ from typing import Optional
 from fastapi.responses import JSONResponse
 from detectors import detect_encoding, iter_evtx_cached
 from analyzers.dump_parser import parse_single_dump
+import logging
+import presurvey as _ps
+logger = logging.getLogger("chat")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
@@ -386,7 +389,31 @@ async def _call_deepseek(messages: list) -> dict:
     _all_empty = bool(errors) and all("空回复" in e for e in errors)
     _tip = TIP_MODEL_NO_TOOLCALL if _all_empty else ""
     raise RuntimeError(f"AI 分析所有通道均失败: {'; '.join(errors)}{_tip}")
-async def _chat_function_calling(job_id: str, user_message: str, tslog):
+
+# 预调查注入（2026-11-04 · 主人确认）：每个会话只在首轮注入一次预调查事实，
+# 让 AI 首答就基于机器/系统/驱动/异常事件/蓝盘 dump 的真实数据，而不是先问用户。
+_ps_injected: set = set()
+
+
+def _maybe_inject_presurvey(job_id: str, tslog) -> None:
+    if job_id in _ps_injected or job_id not in chat_sessions:
+        return
+    try:
+        d = _ps.get_cached(job_id)
+        if not d:
+            _ps.ensure_async(job_id, tslog)      # 后台建，下一轮生效
+            return
+        txt = _ps.as_prompt_text(d)
+        if not txt:
+            return
+        # 追加进第一条 system，避免历史裁剪（保留首条 + 最近 20 条）时被丢掉
+        chat_sessions[job_id][0]["content"] = CHAT_SYSTEM_PROMPT + "\n\n" + txt
+        _ps_injected.add(job_id)
+        logger.info(f"[presurvey] 已注入 AI 首轮上下文 job={job_id} len={len(txt)}")
+    except Exception as e:
+        logger.warning(f"[presurvey] 注入失败 job={job_id}: {e}")
+
+async def _chat_function_calling(job_id: str, user_message: str, tslog, presurvey_on: bool = True):
     """Function Calling mode for Windows/Linux logs"""
 
     # Get or create chat session
@@ -394,6 +421,10 @@ async def _chat_function_calling(job_id: str, user_message: str, tslog):
         chat_sessions[job_id] = [
             {"role": "system", "content": CHAT_SYSTEM_PROMPT}
         ]
+
+    # 预调查上下文注入（首轮一次；无缓存则不阻塞，改在后台构建）
+    if presurvey_on:
+        _maybe_inject_presurvey(job_id, tslog)
 
     # Add user message
     chat_sessions[job_id].append({"role": "user", "content": user_message})
@@ -461,10 +492,11 @@ async def _chat_function_calling(job_id: str, user_message: str, tslog):
             # Only on success, update the real session
             chat_sessions[job_id] = messages
 
-            return JSONResponse({"reply": reply})
+            return JSONResponse({"reply": reply,
+                                 "presurvey_injected": job_id in _ps_injected})
 
         # Too many tool call rounds — give partial summary
-        return JSONResponse({"reply": "分析轮次已达上限。请尝试更具体的问题，例如：\n• 「解析 osdump/053126-7937-01.dmp」指定单个 dump\n• 「查 System.evtx 的 Event 1001」查询事件日志\n• 「先运行 Dump 分析」生成完整报告后再问我"})
+        return JSONResponse({"presurvey_injected": job_id in _ps_injected, "reply": "分析轮次已达上限。请尝试更具体的问题，例如：\n• 「解析 osdump/053126-7937-01.dmp」指定单个 dump\n• 「查 System.evtx 的 Event 1001」查询事件日志\n• 「先运行 Dump 分析」生成完整报告后再问我"})
 
     except httpx.HTTPStatusError as e:
         return JSONResponse({"error": f"API 调用失败: {e.response.status_code} - {e.response.text[:200]}"},

@@ -1318,7 +1318,7 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.5.4"
+APP_VERSION = "1.6.5"
 
 app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -1984,15 +1984,28 @@ async def admin_reset_password(request: Request, username: str):
 
 
 AI_QA_SYSTEM = (
-    "你是联想售后现场诊断助手（Nexpert 现场作业台的 AI 协助）。\n"
-    "【说话规则】\n"
-    "1) 寒暄、身份、追问、抱怨（例如「在吗」「你是谁」「你咋变笨了」）→ 正常对话，一两句回，不要罗列证据、不要套诊断模板。\n"
-    "2) 问机器状态/故障/该查什么 → 先看已有证据；证据不够就直接用工具去采（见下），采完再说结论。\n"
-    "3) 只讲证据里有的和工具返回的，禁止编造读数；证据不够要说「证据不足」并说明缺什么。\n"
-    "4) 不下维修/换件结论，只给判读方向与下一步核查建议。\n"
-    "5) 中文，简洁，能用列表就用列表，别写长篇。\n"
-    "【工具能力】你可以调用只读采集工具（不会改动客户机）。需要数据时直接调用，不要只让用户自己去点。\n"
-    "【结论卡】只有当确实形成实质判读时，最后单独一行输出：\n"
+    "你是联想售后现场工程师的排障搭档（Nexpert 现场作业台 AI）。你的用户是正在客户现场的人，"
+    "他要的是**你替他把问题查清楚、给出下一步选项**，不是要一份证据清单。\n"
+    "【每次回答的固定结构】\n"
+    "1) **一句结论/进展**：直接说你的判断或你刚查到了什么（有新发现就写发现，没进展就直说）。\n"
+    "2) **依据（最多 3 条）**：只列支撑结论的关键数据，带真实读数；不要把工具返回逐条复述。\n"
+    "3) **下一步选项（必须有）**：给 1~3 个可执行选项，每个写清「做什么 · 预期 · 代价/风险」，"
+    "并标出你推荐哪个。能由你直接采集的就写「我来采」，需要现场动手的写清动作。\n"
+    "4) **一句提问收尾**：例如「要我先把 A 采出来吗？」——等你确认后再做，不要一次抛完所有步骤。\n"
+    "【硬规则】\n"
+    "- 寒暄、身份、抱怨（「在吗」「你是谁」「你咋这么笨」）→ 一两句正常对话，不要套模板。\n"
+    "- 用户说「先不管 / 忽略 / 不重要」的事，**本轮之后不再提**，不要在每轮重复。\n"
+    "- 设备身份与工单不一致：**最多主动提一次**，用户表示忽略后永久闭嘴。\n"
+    "- 工具采集失败或输出被限：先自己重试或换别的工具取数，最多在回答里用一句「某项采集受限，已改用 X」说明；"
+    "**禁止把工具报错、截断、内部日志当作回答主体**。\n"
+    "- 只讲证据里有的和工具返回的，禁止编造读数；真缺数据就说缺什么、怎么补。\n"
+    "- 不下换件/维修结论（那是现场与二线的决定），但**必须给判读方向**并说明置信度。\n"
+    "- 中文，简短；能列表就别写长段落；不要重复已确认过的事实。\n"
+    "【工具能力】你可以直接调用只读采集工具（不改动客户机）。需要数据就自己去采，不要让用户去点。\n"
+    "【提议动手（可选）】如果你认为需要执行「有副作用的动作」（改设置、装/卸驱动、重启服务等），"
+    "不要自己动手，也不要只说空话——用下面格式给出提议，让用户点确认后由前端走审批与门禁执行：\n"
+    "【提议】动作=<一句话动作名>；影响=<会发生什么>；风险=<低/中/高 + 原因>；回退=<怎么恢复>\n"
+    "【结论卡】只有确实形成实质判读时才输出：\n"
     "【结论卡】结论=<一句话>；置信度=<0-100>；依据=<要点>；缺失=<要点>"
 )
 
@@ -2072,12 +2085,78 @@ async def _ai_run_tool(room_code: str, tool_key: str, internal_token: str, usern
             js = {"raw": resp.text[:1500]}
         if resp.status_code != 200:
             return f"[{tool_key} 采集失败 HTTP {resp.status_code}] {str(js)[:300]}"
-        out = js.get("log") or js.get("raw") or js.get("sysinfo") or js.get("table") or js.get("report") or js
-        txt = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
-        txt = re.sub(r"\n{3,}", "\n\n", txt)
-        return txt[:4000]
+        return _ai_digest_tool_output(tool_key, js)
     except Exception as e:
         return f"[{tool_key} 调用异常] {e}"
+
+
+
+_GPU_HINT = re.compile(r"(nvidia|geforce|quadro|rtx|gtx|radeon|intel\(r\) .*graphics|arc\(tm\)|"
+                       r"display adapter|virtual display|idd|miracast|oray|basic display)", re.I)
+
+
+def _ai_digest_tool_output(tool_key: str, js) -> str:
+    """把采集结果压成「模型真正用得上的摘要」，而不是粗暴截断前 4000 字。
+
+    2026-11-04：原来 `txt[:4000]` 把驱动清单在第 147 行切断，显示适配器永远进不了模型视野，
+    导致 AI 反复抱怨「证据被截断」。现在按工具语义做结构化摘要 + 关键项前置。
+    """
+    def _s(x, n=200):
+        return str(x if x is not None else "")[:n]
+
+    try:
+        # ── 驱动清单：显示适配器/异常设备优先，其余只给分类计数 ──
+        if tool_key == "drivers_installed" and isinstance(js, dict) and isinstance(js.get("drivers"), list):
+            rows = js["drivers"]
+            gpu = [r for r in rows if _GPU_HINT.search(str(r.get("name") or ""))]
+            bad = [r for r in rows if str(r.get("status") or "").lower() not in ("", "ok", "unknown")
+                   or str(r.get("error") or "") not in ("", "0", "None")]
+            lines = [f"已安装驱动：共 {len(rows)} 项（原始行 {js.get('raw_count') or len(rows)}）"]
+            if gpu:
+                lines.append("显示适配器（关键）：")
+                for r in gpu[:8]:
+                    lines.append(f"  - {_s(r.get('name'),80)} | 厂商 {_s(r.get('manufacturer'),40)}"
+                                 f" | 版本 {_s(r.get('version'),40)} | 日期 {_s(r.get('date'),24)}")
+            else:
+                lines.append("显示适配器：**未找到**（可能未安装显卡驱动或采集受限，需另行确认）")
+            if bad:
+                lines.append("异常/非 OK 设备：")
+                for r in bad[:6]:
+                    lines.append(f"  - {_s(r.get('name'),70)} | 状态 {_s(r.get('status'),24)}")
+            for kw, label in (("chipset", "芯片组"), ("ethernet|wi-fi|wireless|wlan", "网卡"),
+                              ("audio|realtek high|sound", "音频"), ("storage|nvme|sata|raid", "存储控制器")):
+                hit = [r for r in rows if re.search(kw, str(r.get("name") or ""), re.I)][:3]
+                if hit:
+                    lines.append(f"{label}（前 {len(hit)} 项）：" +
+                                 "；".join(f"{_s(x.get('name'),50)} {_s(x.get('version'),24)}" for x in hit))
+            return "\n".join(lines)
+
+        # ── SMART：只给健康与关键属性 ──
+        if tool_key == "smart" and isinstance(js, dict):
+            disks = js.get("disks") or js.get("items") or []
+            if isinstance(disks, list) and disks:
+                lines = [f"磁盘健康：共 {len(disks)} 块"]
+                for x in disks[:6]:
+                    lines.append(f"  - {_s(x.get('model') or x.get('name'),60)} | 健康 {_s(x.get('health'),20)}"
+                                 f" | 温度 {_s(x.get('temperature'),10)} | 通电 {_s(x.get('power_on_hours'),12)}h"
+                                 f" | 重映射 {_s(x.get('reallocated'),10)} | 待定 {_s(x.get('pending'),10)}")
+                return "\n".join(lines)
+
+        # ── 其余工具：优先取文本字段，超长时保留头尾（尾部常含判读结论）──
+        out = (js.get("log") or js.get("raw") or js.get("sysinfo") or js.get("table")
+               or js.get("report") or js) if isinstance(js, dict) else js
+        txt = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
+        txt = re.sub(r"\n{3,}", "\n\n", txt)
+        if len(txt) <= 4000:
+            return txt
+        return (txt[:2600] + f"\n\n…（中间省略 {len(txt) - 3600} 字，已按需精简）…\n\n" + txt[-1000:])
+    except Exception as e:
+        return f"[{tool_key} 摘要异常] {e}；原始前 800 字：{str(js)[:800]}"
+
+
+# 2026-11-04：房间级「用户已确认忽略」话题（如设备身份不一致），避免 AI 每轮重复唠叨
+_AI_MUTE: dict = {}   # room_code -> set(topic)
+_MUTE_RE = re.compile(r"先不管|先不管它|不用管|别管|忽略|不重要|先别提|测试阶段|无所谓")
 
 
 def _ai_history(room_code: str, limit: int = 6) -> list:
@@ -2157,7 +2236,15 @@ async def ai_qa(request: Request):
                                 stream=f"room:{room_code}")
     except Exception:
         pass
-    messages = [{"role": "system", "content": AI_QA_SYSTEM}, * _ai_history(room_code),
+    # 用户已明确表示忽略的话题 → 写入房间级静音表，并在本轮 prompt 里强制约束
+    _q_text = str(question or "")
+    if _MUTE_RE.search(_q_text):
+        _AI_MUTE.setdefault(room_code, set()).add("identity")
+    _sys_extra = ""
+    if "identity" in _AI_MUTE.get(room_code, set()):
+        _sys_extra = ("\n【本轮硬约束】用户已确认「设备身份与工单不一致」不用管（可能在测试阶段），"
+                      "本轮及以后**禁止**再提这件事，直接回答技术问题本身。")
+    messages = [{"role": "system", "content": AI_QA_SYSTEM + _sys_extra}, * _ai_history(room_code),
                 {"role": "user", "content": ctx + "\n\n【我的问题】" + question}]
 
     internal = _issue_internal_token(user["username"], user.get("role", "engineer"), ttl=900)
@@ -3045,17 +3132,64 @@ def _conclude_reboot(o):
 
 
 def _conclude_startup(o):
+    """开机自启动结论：只认真实解析结果，取不到就说取不到（2026-11-04 重写）。
+
+    旧实现三个坑：① 正则数文本行，把表头分隔线/重复项算进去（14 项 vs 实际 12 项）；
+    ② 启动耗时乱匹配数字（2.0 秒 vs 实测 112.6 秒）；③ 无数据也给结论，属于编。
+    解析统一走 _struct_step_output —— 桥接器会在输出尾部追加 "[exit_code] 0"，
+    直接 json.loads 会报 Extra data，必须用同一个宽松解析器。
+    """
     reg = o.get("注册表启动项", "") or ""
     bt = o.get("启动耗时（BootTime）", "") or ""
-    n = _cnt(reg, r"^(?!Name).+\s{2,}") or len([x for x in reg.splitlines() if x.strip()]) - 1
-    n = max(n, 0)
-    ms = re.findall(r"(\d{4,6})\s*(?:ms)?\b", bt)
-    facts = [{"k": "启动项", "v": f"{n} 项" if n else "未取到"}]
-    if ms:
-        facts.append({"k": "启动耗时", "v": f"{int(ms[0]) / 1000:.1f} 秒"})
-    if n > 12:
+
+    items, seen = [], set()
+    try:
+        st = _struct_step_output(reg)
+        for it in (st.get("rows") or []):
+            if not isinstance(it, dict) or it.get("error"):
+                continue
+            nm = str(it.get("Name") or "").strip()
+            cmd = str(it.get("Command") or "").strip()
+            if not nm and not cmd:
+                continue
+            key = nm + "|" + cmd
+            if key in seen:          # 同一项常同时出现在多个 Run 键下，去重
+                continue
+            seen.add(key)
+            items.append({"Name": nm, "Command": cmd,
+                          "Location": str(it.get("Location") or ""), "User": str(it.get("User") or "")})
+    except Exception:
+        items = []
+
+    boot_s = None
+    try:
+        stb = _struct_step_output(bt)
+        for it in (stb.get("rows") or []):
+            if isinstance(it, dict):
+                msv = str(it.get("bootMs") or "").strip()
+                if msv.isdigit() and int(msv) > 0:
+                    boot_s = int(msv) / 1000.0
+                    break            # 事件按时间倒序，取最近一次开机
+    except Exception:
+        boot_s = None
+
+    n = len(items)
+    facts = [{"k": "启动项", "v": (f"{n} 项" if n else "未取到")}]
+    if boot_s:
+        facts.append({"k": "最近开机耗时", "v": f"{boot_s:.1f} 秒"})
+    if not n:
+        return {"level": "nodata", "headline": "未取到启动项（采集无返回）", "facts": facts}
+    slow_boot = bool(boot_s and boot_s >= 60)
+    many = n > 12
+    if many and slow_boot:
+        return {"level": "warn", "headline": f"启动项偏多（{n} 项）且最近开机耗时 {boot_s:.0f} 秒，建议精简启动项",
+                "facts": facts}
+    if slow_boot:
+        return {"level": "warn", "headline": f"启动项数量正常（{n} 项），但最近开机耗时 {boot_s:.0f} 秒偏长",
+                "facts": facts}
+    if many:
         return {"level": "warn", "headline": f"启动项偏多（{n} 项），可能拖慢开机", "facts": facts}
-    return {"level": "ok", "headline": "启动项数量正常", "facts": facts}
+    return {"level": "ok", "headline": f"启动项 {n} 项，未见过多", "facts": facts}
 
 
 def _conclude_system(o):
@@ -3633,6 +3767,59 @@ async def room_files_zip(room_code: str = "", request: Request = None):
 
 _LAST_BRIDGE_CONN = {}   # room_code -> 上次记录 bridge.connect 的时刻（去重用）
 
+# ── 截图文件保留策略（2026-11-04）────────────────────────────────────────────
+# 问题：桥接器每 2 秒回传一帧观察画面，服务端把每次 file transfer 都落到
+#   static/downloads/，于是帧文件永久堆积（实测 772 个 / 94MB）。
+# 策略：观察帧只保留每个房间最新 N 帧；高清截图保留 SHOT_RETENTION_DAYS 天。
+PREVIEW_KEEP = int(os.getenv("PREVIEW_KEEP", "3") or 3)
+SHOT_RETENTION_DAYS = int(os.getenv("SHOT_RETENTION_DAYS", "7") or 7)
+
+
+def _prune_shot_files(dl_dir, just_saved: str = ""):
+    """清理 static/downloads 里的截图文件：观察帧留最新 PREVIEW_KEEP 帧，截图按天数保留。"""
+    try:
+        files = list(dl_dir.glob("nexpert-*"))
+    except Exception:
+        return
+    by_room = {}
+    cutoff = time.time() - SHOT_RETENTION_DAYS * 86400
+    removed = 0
+    for fp in files:
+        if not fp.is_file():
+            continue
+        nm = fp.name
+        if nm.startswith("nexpert-preview-"):
+            # nexpert-preview-<room>-<ts>.jpg
+            parts = nm.split("-")
+            room = parts[2] if len(parts) > 2 else "_"
+            by_room.setdefault(room, []).append(fp)
+        else:
+            try:
+                if fp.stat().st_mtime < cutoff:
+                    fp.unlink()
+                    removed += 1
+            except Exception:
+                pass
+    for room, lst in by_room.items():
+        lst.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+        keep = max(1, PREVIEW_KEEP)
+        if just_saved:      # 刚写入的那一帧一定保留
+            keep_names = {os.path.basename(just_saved)}
+        else:
+            keep_names = set()
+        for i, fp in enumerate(lst):
+            if i < keep or fp.name in keep_names:
+                continue
+            try:
+                fp.unlink()
+                removed += 1
+            except Exception:
+                pass
+    if removed:
+        run_logger.info(f"[shots] 清理临时截图 {removed} 个")
+    return removed
+
+
 EVENTS_RETENTION_DAYS = int(os.getenv("EVENTS_RETENTION_DAYS", "180") or 180)
 
 
@@ -3687,6 +3874,10 @@ async def _room_files_purge_loop():
                     pass
         except Exception as e:
             run_logger.warning(f"[file] 清理任务异常：{e}")
+        try:
+            _prune_shot_files(static_dir / "downloads")
+        except Exception:
+            pass
         await asyncio.sleep(3600)
 
 
@@ -4261,6 +4452,9 @@ async def room_connect(room_code: str, request: Request):
         "machine_model": row["machine_model"] or "",
         "os": row["os"] if "os" in row.keys() else "",
         "engineer_username": row["engineer_username"] or "",
+        # 2026-11-04：房间名称一并返回（二线台左栏与现场台统一展示需要）
+        "room_name": (row["room_name"] if "room_name" in row.keys() else "") or "",
+        "client_org": (row["client_org"] if "client_org" in row.keys() else "") or "",
         "created_at": row["created_at"] or "",
         "expires_at": row["expires_at"] if "expires_at" in row.keys() else None,
         "days_left": room_days_left(row["expires_at"]) if "expires_at" in row.keys() else None,
@@ -7435,6 +7629,47 @@ async def _fetch_lenovo_drivers(search_key: str):
     return drivers, os_options
 
 
+@app.get("/api/tools/drivers/sign")
+async def tools_drivers_sign(request: Request, search_key: str = "", name: str = "", version: str = ""):
+    """按 SN/MT 实时签发某个驱动的官网下载直链（302 跳转）。
+
+    为什么必须实时签：联想 CDN 的下载直链带时效 token（driverdl2025...?token=...），
+    缓存里的链接当天就会 403。所以清单接口只下发元数据，点「下载」时才现取链接。
+    """
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    key = (search_key or "").strip()
+    want_name = (name or "").strip()
+    want_ver = (version or "").strip()
+    if not key:
+        return JSONResponse({"error": "缺少 search_key（SN 或机型）"}, status_code=400)
+    if not want_name:
+        return JSONResponse({"error": "缺少驱动名称"}, status_code=400)
+    try:
+        drivers, _ = await _fetch_lenovo_drivers(key)
+    except Exception as e:
+        run_logger.warning(f"[drivers/sign] 实时取链失败 key={key} name={want_name}: {e}")
+        return JSONResponse({"error": f"联想官网接口请求失败：{e}"}, status_code=502)
+
+    def _norm(s: str) -> str:
+        return "".join(str(s or "").lower().split())
+
+    cand = [x for x in drivers if _norm(x.get("name")) == _norm(want_name)]
+    if not cand:
+        cand = [x for x in drivers if _norm(want_name) and _norm(want_name) in _norm(x.get("name"))]
+    if want_ver:
+        same_ver = [x for x in cand if str(x.get("version") or "").strip() == want_ver]
+        if same_ver:
+            cand = same_ver
+    hit = next((x for x in cand if str(x.get("url") or "").startswith("http")), None)
+    if not hit:
+        # 有话直说：不是"无直链"这种含糊文案，而是官网确实没给这个驱动的下载文件
+        return JSONResponse({"error": "联想官网该机型未返回这个驱动的下载地址（可能该版本已下架，请在官网按机型手动查找）"},
+                            status_code=404)
+    return RedirectResponse(hit["url"], status_code=302)
+
+
 @app.post("/api/tools/drivers/fetch")
 async def tools_drivers_fetch(request: Request):
     """📥 驱动获取：识别机器（SN/MT）→ 联想官网 API → 官方驱动清单（当天缓存）。"""
@@ -8902,7 +9137,13 @@ async def tools_screenshot(request: Request):
         _q = int(body.get("quality") or (55 if _preview else 90))
     except Exception:
         _q = 55 if _preview else 90
-    _fmt = "jpg" if _preview else "png"
+    # 2026-11-04：高清截图默认改 JPEG（PNG 无损在 2560×1440/4K 下 3~8MB，
+    #   经客户机上联+服务器回传要几十秒，实测用户体感"卡在截取中"）。
+    #   需要逐像素比对时才传 format=png。
+    if _preview:
+        _fmt = "jpg"
+    else:
+        _fmt = "png" if str(body.get("format") or "jpg").lower() == "png" else "jpg"
     _sub = "preview" if _preview else "shots"
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -9650,6 +9891,7 @@ _UI_EVENT_KINDS = {
     "file.uploaded", "file.deleted",
     "report.viewed", "report.archived",
     "op.error", "ui.note", "tool.result",
+    "proposal.accepted", "proposal.rejected", "proposal.executed",
 }
 
 
@@ -10050,8 +10292,10 @@ ACTION_STEP_SPECS = {
     ],
     # 开机自启动
     "startup": [
-        {"label": "注册表启动项", "cmd": 'powershell -NoProfile -Command "Get-CimInstance Win32_StartupCommand | Select-Object Name,Command,Location,User | Format-Table -AutoSize"'},
-        {"label": "启动耗时（BootTime）", "cmd": 'wevtutil qe "Microsoft-Windows-Diagnostics-Performance/Operational" /q:"*[System[(EventID=100)]]" /c:5 /rd:true /f:text'},
+        # 2026-11-04 修：原命令是「双层 powershell 包装 + Format-Table」，输出无结构且中文变 GBK 乱码，
+        #   解析层拿不到行（rows=0），页面只能糊一坨文本。改成单层 PowerShell + ConvertTo-Json。
+        {"label": "注册表启动项", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-CimInstance Win32_StartupCommand|Select-Object Name,Command,Location,User;if($x){$x|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "启动耗时（BootTime）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Diagnostics-Performance/Operational';Id=100} -MaxEvents 5;if($e){$e|ForEach-Object{$m=$_.Message;$bt='';$mm=[regex]::Match($m,'(?i)(?:BootTime|\u542f\u52a8\u8017\u65f6|Boot Duration)[^0-9]{0,20}(\d{3,7})\s*ms');if($mm.Success){$bt=$mm.Groups[1].Value}else{$mm2=[regex]::Match($m,'(\d{3,7})\s*ms');if($mm2.Success){$bt=$mm2.Groups[1].Value}};[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');bootMs=$bt}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
     ],
     # 系统问题（系统信息与激活）
     "system": [
@@ -10787,6 +11031,9 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                                 target = dl_dir / safe_name
                                 target.write_bytes(raw)
                                 saved = f"/static/downloads/{safe_name}"
+                                # 截图类文件写入后立刻剪枝，避免每 2 秒一帧长期堆积
+                                if safe_name.startswith("nexpert-"):
+                                    _prune_shot_files(dl_dir, safe_name)
                                 run_logger.info(f"[{room_code}] file saved to {target} ({len(raw)} bytes)")
                             except Exception as e:
                                 run_logger.error(f"[{room_code}] file save failed: {e}")
@@ -10886,6 +11133,19 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                     conn.close()
                 except Exception:
                     pass
+
+            elif msg_data.get("type") == "notice":
+                # 2026-11-04：桥接器主动上报阶段性提示（如首次抓屏要下载 6MB 抓屏组件），
+                #   转发给房间内所有在线浏览器，前端据此显示"在处理中"，避免用户以为卡死。
+                _code = str(msg_data.get("code") or "")[:40]
+                _text = str(msg_data.get("text") or "")[:200]
+                _done = bool(msg_data.get("done"))
+                if _code:
+                    run_logger.info(f"[{room_code}] bridge notice {_code} done={_done} {_text}")
+                    # 复用 IM 广播（browser_clients 里存的是 {ws,username,role} 字典，
+                    # 不是 socket 本身——之前直接 send 会静默失败）
+                    await _im_broadcast(room_code, {"type": "bridge_notice", "code": _code,
+                                                    "text": _text, "done": _done})
 
             elif msg_data.get("type") == "heartbeat":
                 # 必须回复，否则客户端 75s 读超时会断开重连（导致状态反复切换）

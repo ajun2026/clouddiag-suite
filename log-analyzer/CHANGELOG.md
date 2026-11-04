@@ -1,3 +1,40 @@
+## v1.3.0 — 2026-11-04（预调查前置 + 注入 AI 首轮上下文）
+
+> 日志包上传后，进 AI 分析页先看到**预调查摘要**：机器/系统/显卡/磁盘、硬件告警、
+> 蓝屏与内存转储，全部由本地规则解析得出（不调 AI、不花额度、结果确定性可复现）；
+> 摘要同时注入 AI 首轮上下文，首答即基于真实数据，不再先反问用户。
+
+### 🆕 `presurvey.py`（新增模块）
+- `build()` 复用现有 `analyze_overview` / `analyze_system_diagnostics` / `analyze_dump`，聚合成 6 段：
+  `machine` / `system` / `gpu` / `disks` / `events` / `dump`（+ `bugcheck`）
+- 结果缓存 `reports/{job}_presurvey.json`（带 `version`，结构变更自动失效）；实测首次构建 **76 秒**，二次打开秒出
+- `_verdict()` 生成一句话初判 + 依据（bad/warn/ok/nodata 四级），**无数据一律 nodata，不猜**
+- `as_prompt_text()` 压成 ≤1600 字注入块（实测 898 字），带"规则解析、与工具结果冲突时以工具为准"的约束
+
+### 🆕 接口
+- `GET /api/presurvey/{job_id}`：有缓存直接返回；无缓存后台线程构建并返回 `status=building`，前端轮询
+- 鉴权沿用 `_check_owner`（未登录 401、非本任务 403）
+
+### 🆕 注入 AI 首轮上下文
+- `_chat_function_calling(presurvey_on=...)`：会话首轮把预调查追加进**第一条 system**
+  （追加而非插入，避免历史裁剪「保留首条 + 最近 20 条」时被丢掉）
+- 开关：前端勾选状态 → 请求体 `no_presurvey`；服务端据此跳过注入
+- 响应新增 `presurvey_injected` 字段，实测：关→False、开→True
+- 无缓存时不阻塞对话（后台构建，下一轮生效）
+
+### 🆕 前端（AI 分析页顶部折叠面板）
+- 等级徽章（未发现异常/需要关注/发现故障/数据不足）+ 一句话结论 + 依据条
+- 资产网格：机器/BIOS/CPU/内存/系统/装机与启动/显卡与驱动/分辨率/磁盘
+- 双栏：事件与硬件告警（含 WHEA 明细、System 高频事件 ID）/ 蓝屏与内存转储
+- 底部：注入开关（localStorage 记忆）+ 生成时间与构建耗时；构建中显示"正在做初步调查…"并 5 秒轮询
+- 踩坑：页面初始化早于脚本块执行 → `let psPollTimer` 触发 TDZ（Cannot access before initialization），改 `var` 修复
+
+### 已知边界
+- 软件清单与全量驱动版本**不在本版**（依赖采集侧 `wmic → Get-CimInstance`，见主仓待办 T6）
+- Linux 包目前只做 `linux_overview` 的基础字段
+
+---
+
 ## v3.11 — 2026-09-20（AI 逻辑对齐 + 端口可配 + 依赖补全）
 
 > 来源：其它服务器部署 v3.10 时的反馈——包内混入"比现网旧"的文件，且 AI 逻辑只改了一半。

@@ -499,6 +499,37 @@ input.input:disabled{background:#F5F6F8;color:var(--text-3);cursor:not-allowed}
 /* 自由模式（2026-10-27）：只留对话框；诊断结论与 AI 判读在其它模式里已有 */
 body[data-mode="ai"] #conclCard,
 body[data-mode="ai"] #aiReadCard { display: none !important; }
+/* 防自动填充满：readonly 状态下外观与正常一致 */
+#aiIn[readonly],#imText[readonly]{background:#fff;color:var(--text,#1B2432);cursor:text}
+#aiIn[readonly]::placeholder,#imText[readonly]::placeholder{color:#A8AFBC}
+/* 2026-11-04：防止浏览器把登录用户名自动填进问答/消息框（Chrome 会把输入框染成浅蓝色，
+   看起来像被预填了账号）。这里关掉自动填充并覆盖自动填充底色。 */
+#aiIn:-webkit-autofill,#imText:-webkit-autofill,#q:-webkit-autofill,
+#fldJrQ:-webkit-autofill,#fldNrOrg:-webkit-autofill{
+  -webkit-box-shadow:0 0 0 40px #fff inset !important;
+  -webkit-text-fill-color:var(--text,#1B2432) !important;
+  transition:background-color 9999s ease-out 0s;
+}
+#aiIn::placeholder,#imText::placeholder{color:#A8AFBC}
+
+/* 左下角版本标签（2026-11-04，现场台/二线台同款） */
+.vertag{position:fixed;left:14px;bottom:10px;z-index:40;pointer-events:none;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;letter-spacing:.3px;
+  color:var(--text-3,#8A92A3);opacity:.85;user-select:none}
+@media print{.vertag{display:none}}
+
+/* AI 提议卡片（2026-11-04） */
+.ai-prop{margin:8px 0;border:1px solid var(--brand-line);border-radius:10px;background:var(--brand-tint);overflow:hidden}
+.ai-prop-head{display:flex;align-items:center;gap:8px;padding:8px 11px;background:#fff;border-bottom:1px solid var(--brand-line)}
+.ai-prop-tag{font-size:11.5px;font-weight:600;color:var(--brand-ink);border:1px solid var(--brand-line);
+  background:var(--brand-tint);border-radius:999px;padding:1px 8px}
+.ai-prop-act{font-weight:650;font-size:13px;color:var(--text)}
+.ai-prop-body{padding:8px 11px;display:grid;gap:3px;font-size:12.5px}
+.ai-prop-body span{color:var(--text-2);display:inline-block;min-width:38px}
+.ai-prop-body b{font-weight:600;color:var(--text)}
+.ai-prop-foot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 11px;
+  border-top:1px dashed var(--brand-line);background:#fff}
+
 body[data-mode="ai"] #aiChatInner .ai-msgs { min-height: calc(100vh - 420px) !important; max-height: none !important; }
 body[data-mode="ai"] #aiChatInner .card-body { min-height: 0; }
 body[data-mode="ai"] #aiChatInner .card-body { display: flex; flex-direction: column; }
@@ -677,7 +708,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
     <a id="dash-nav-link" href="/dashboard" style="display:none">工作台</a>
   </nav>
   <span class="spacer"></span>
-  <span class="badge brand" id="buildTag">—</span>
+  <span class="badge brand" id="buildTag" style="display:none">—</span><!-- 2026-11-04：版本号移到左下角 -->
   <span class="badge" id="demoBadge">演示数据</span>
   <span class="pill" id="pill" data-st="idle"><span class="dot"></span><span>待连接</span></span>
   <span class="pill" id="mePill" title="账号菜单（修改密码 / 退出登录）" style="cursor:pointer">
@@ -769,7 +800,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
         </div>
 
         <span class="spacer"></span>
-        <input class="input" id="q" placeholder="搜索预设作业项" type="search"
+        <input class="input" id="q" name="np-search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="搜索预设作业项" type="search"
                name="nexpert-tool-search" autocomplete="off" autocorrect="off" autocapitalize="off"
                spellcheck="false" readonly style="width:190px;height:28px" title="点一下即可输入">
         <!-- 2026-11-02：操作轨迹入口（P0 只读页：谁在什么时候做了什么、命令与输出） -->
@@ -833,16 +864,16 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
         <span class="badge" id="aiChatState">未连接</span></div>
       <div class="card-body tight">
         <div id="aiMsgs" class="ai-msgs">
-          <div class="ai-msg bot">我是现场诊断 AI 助手，可以结合本房间已采集的数据帮你判读问题、给修复方案。</div>
+          <div class="ai-msg bot">我是你的排障搭档：能直接在客户机上采集证据，查清问题后给你几个可执行的下一步——你说执行我再动手。</div>
         </div>
         <div class="row" id="aiQuick" style="flex-wrap:wrap;gap:6px;margin:8px 0 6px">
-          <button class="btn sm" data-q="目前这些证据说明了什么？">证据说明什么</button>
-          <button class="btn sm" data-q="下一步应该查什么？">下一步查什么</button>
-          <button class="btn sm" data-q="建议的修复方案是什么？">修复方案</button>
-          <button class="btn sm" data-q="按这个方案修完怎么验证？">怎么验证</button>
+          <button class="btn sm" data-q="根据现有证据，最可能的原因是什么？">最可能的原因</button>
+          <button class="btn sm" data-q="下一步我该做什么？给我几个选项。">下一步做什么</button>
+          <button class="btn sm" data-q="如果按你说的方向处理，具体怎么操作？">怎么处理</button>
+          <button class="btn sm" data-q="处理完怎么验证问题解决了没？">怎么验证</button>
         </div>
         <div class="row" id="aiInputRow" style="gap:6px">
-          <input class="input" id="aiIn" placeholder="输入问题，回车发送" style="flex:1">
+          <input class="input" id="aiIn" name="np-ai-question" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="输入问题，回车发送" style="flex:1" data-noautofill readonly>
           <button class="btn primary sm" id="aiSend">发送</button>
         </div>
       </div>
@@ -868,7 +899,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
             <div class="im-upload hidden" id="imUpload"></div>
             <div class="im-input">
               <button class="im-pick" id="imPick" title="上传文件/图片（也可拖进来或 Ctrl+V 粘贴）">📎</button>
-              <textarea id="imText" rows="1" placeholder="输入消息，Enter 发送 / Shift+Enter 换行"></textarea>
+              <textarea id="imText" name="np-im-text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" rows="1" placeholder="输入消息，Enter 发送 / Shift+Enter 换行" data-noautofill readonly></textarea>
               <button class="btn primary sm" id="imSend">发送</button>
             </div>
             <input type="file" id="imFileInput" multiple style="display:none">
@@ -2140,7 +2171,7 @@ window.NP_TIERS = {
   const DATA = window.NP_DATA || [];
   const TIERS = window.NP_TIERS || {};
   const KEY = 'nexpert_v03';
-  const BUILD = 'v0.13.6 · 2026-11-03 · 实用工具：整包结果就地渲染 + OA3 端点修正 + 去掉接收文件到客户机'
+  const BUILD = 'v0.13.10 · 2026-11-04 · 建房弹窗去掉「例：」占位示例'
   const DEMO = location.protocol === 'file:';
 
   const PHASES = [
@@ -2991,7 +3022,12 @@ window.NP_TIERS = {
   const GROUP_MAX = 8;   // 非推荐分组默认只铺 8 张
   document.getElementById('logoMark').innerHTML = NP.icon('spark', 15);
   const _bt = document.getElementById('buildTag');
-  if (_bt) _bt.textContent = (NP.BUILD || '').split(' · ')[0] + ' · 正式';
+  const _ver = (NP.BUILD || '').split(' · ')[0] + ' · 正式';
+  if (_bt) _bt.textContent = _ver;          // 元素已隐藏，仅保留给旧引用
+  (function () {                            // 2026-11-04：版本号统一放到左下角
+    const el = document.getElementById('verTag');
+    if (el) el.textContent = _ver;
+  })();
   function roleLabel(r) {
     return ({ admin: '管理员', expert: '二线工程师', field: '渠道工程师', cc: 'CC 工程师' })[r] || '工程师';
   }
@@ -3957,15 +3993,113 @@ window.NP_TIERS = {
       (c.missing ? '<div class="small faint">缺失：' + NP.esc(c.missing) + '</div>' : '') +
       '<div class="small faint" style="margin-top:4px">来源：服务端模型基于本房间证据生成 · 判读参考</div>';
   }
+  /* 2026-11-04：回答等待期分阶段提示（原为一句静态"正在…回答"） */
+  function aiProgress(ph) {
+    if (!ph) return function () { };
+    const stages = [[0, '（正在读取本房间已采证据…）'], [6000, '（正在采集客户机数据…）'],
+                    [16000, '（数据已回传，正在分析…）'], [30000, '（采集较慢，仍在等进行中…）']];
+    const t0 = Date.now();
+    const timer = setInterval(function () {
+      const el = Date.now() - t0;
+      let txt = stages[0][1];
+      stages.forEach(function (s) { if (el >= s[0]) txt = s[1]; });
+      if (ph.isConnected) ph.textContent = txt;
+    }, 1500);
+    return function () { clearInterval(timer); };
+  }
+
+  /* 2026-11-04：把 AI 输出的【提议】块渲染成可操作卡片（让 AI 去做 / 采纳 / 不采纳 / 复制） */
+  const PROP_RE = /【提议】([\s\S]*?)(?=\n\s*\n|【结论卡】|$)/;
+  function parseProposal(text) {
+    const m = String(text || '').match(PROP_RE);
+    if (!m) return null;
+    const body = m[1];
+    const get = function (k) { const r = body.match(new RegExp(k + '=([^；;\n]*)')); return r ? r[1].trim() : ''; };
+    const act = get('动作');
+    if (!act) return null;
+    return { action: act, impact: get('影响'), risk: get('风险'), rollback: get('回退') };
+  }
+  function proposalCard(p) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ai-prop';
+    const readOnly = /采集|读取|查询|导出|日志|清单|信息|核对/.test(p.action);
+    wrap.innerHTML =
+      '<div class="ai-prop-head"><span class="ai-prop-tag">AI 提议动作</span>' +
+        '<span class="ai-prop-act">' + NP.esc(p.action) + '</span></div>' +
+      '<div class="ai-prop-body">' +
+        (p.impact ? '<div><span>影响</span><b>' + NP.esc(p.impact) + '</b></div>' : '') +
+        (p.risk ? '<div><span>风险</span><b>' + NP.esc(p.risk) + '</b></div>' : '') +
+        (p.rollback ? '<div><span>回退</span><b>' + NP.esc(p.rollback) + '</b></div>' : '') +
+      '</div>' +
+      '<div class="ai-prop-foot">' +
+        (readOnly ? '<button class="btn primary sm" data-a="run">让 AI 现在去做</button>' : '') +
+        '<button class="btn sm" data-a="accept">采纳并记录</button>' +
+        '<button class="btn sm ghost" data-a="reject">不采纳</button>' +
+        '<button class="btn sm ghost" data-a="copy">复制动作</button>' +
+        (readOnly ? '' : '<span class="small faint">写操作需现场工号确认；采纳后按步骤执行或让二线下发</span>') +
+      '</div>';
+    const runBtn = wrap.querySelector('[data-a="run"]');
+    if (runBtn) runBtn.addEventListener('click', function () {
+      this.disabled = true; this.textContent = '已交给 AI…';
+      if (window.NP && NP.ev) NP.ev('proposal.executed', { action: p.action, mode: 'ai' });
+      aiAsk('请现在执行你上一条提议里的只读动作：' + p.action + '。做完把结果和下一步选项给我。');
+    });
+    wrap.querySelector('[data-a="accept"]').addEventListener('click', function () {
+      if (window.NP && NP.ev) NP.ev('proposal.accepted', { action: p.action, risk: p.risk || '' });
+      this.disabled = true; this.textContent = '已采纳';
+      if (window.NP && NP.toast) NP.toast('已采纳并记录到轨迹', 'ok');
+    });
+    wrap.querySelector('[data-a="reject"]').addEventListener('click', function () {
+      if (window.NP && NP.ev) NP.ev('proposal.rejected', { action: p.action });
+      wrap.remove();
+      if (window.NP && NP.toast) NP.toast('已忽略该提议');
+    });
+    wrap.querySelector('[data-a="copy"]').addEventListener('click', function () {
+      const txt = p.action + (p.impact ? '（影响：' + p.impact + '）' : '');
+      if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () {
+        if (window.NP && NP.toast) NP.toast('动作已复制', 'ok');
+      }).catch(function () { });
+    });
+    return wrap;
+  }
+
+
+  // 便于自测与复用：把提议解析/渲染挂到 window
+  window.__aiProp = { parse: parseProposal, card: proposalCard };
+
+  /* 2026-11-04：彻底挡住浏览器密码自动填充——readonly 期间 Chrome 不填充，
+     聚焦时解锁、失焦且为空时重新上锁，并清掉可能已填充的值。 */
+  (function noautofillGuard() {
+    function guard(el) {
+      if (!el) return;
+      const unlock = () => { try { el.removeAttribute('readonly'); } catch (e) { } };
+      const relock = () => { if (!el.value) el.setAttribute('readonly', 'readonly'); };
+      // 只认「用户真的在点/敲」，程序化 focus 不解锁（否则自动填充又能填进来）
+      el.addEventListener('pointerdown', unlock);
+      el.addEventListener('touchstart', unlock);
+      el.addEventListener('keydown', unlock);
+      el.addEventListener('blur', relock);
+      // 进页面清掉浏览器已填的内容（登录用户名之类）
+      setTimeout(() => { if (el.value && !el.dataset.userTyped) { el.value = ''; el.setAttribute('readonly', 'readonly'); } }, 200);
+      setTimeout(() => { if (el.value && !el.dataset.userTyped) { el.value = ''; } }, 1200);
+      el.addEventListener('input', () => { el.dataset.userTyped = '1'; });
+    }
+    guard(document.getElementById('aiIn'));
+    guard(document.getElementById('imText'));
+  })();
+
+
   function aiAsk(q) {
     if (aiChatRunning) { toast('AI 正在回答，请稍候', 'warn'); return; }
     if (!NP.bridgeOnline()) { aiMsg('bot', '桥接器未连接：AI 需要读取本房间已采集的数据。请先让客户机运行桥接器，并至少执行一项采集。'); return; }
     aiMsg('me', q);
-    const ph = aiMsg('bot', '（正在基于本房间证据回答…）');
+    const ph = aiMsg('bot', '（正在读取本房间已采证据…）');
+    const stopProg = aiProgress(ph);
     aiChatRunning = true; aiChatBuf = '';
     NP.audit('现场 AI 提问：' + q.slice(0, 60));
     NP.apiPost('/api/ai_qa', { room_code: NP.state.room.code, question: q })
       .then(js => {
+        try { stopProg(); } catch (e) { }
         const rawAnswer = String(js.answer || '').trim() || '（AI 未返回内容）';
         aiChatBuf = rawAnswer;
         const answer = rawAnswer.replace(/【结论卡】[\s\S]*$/, '').trim() || rawAnswer;
@@ -3981,6 +4115,9 @@ window.NP_TIERS = {
         }
         const rc = parseConclusion(aiChatBuf);
         if (rc) paintConclusion(rc);
+        // 2026-11-04：AI 提议 → 可操作卡片（让 AI 去做 / 采纳 / 不采纳）
+        const _prop = parseProposal(aiChatBuf);
+        if (_prop && ph) { try { ph.insertAdjacentElement('afterend', proposalCard(_prop)); } catch (e) { } }
         const _tu = (js.tools_used || []);
         // 2026-10-27：还有没采完的项 → 给一个「继续采集」按钮，点了接着采
         const _pending = (js.pending_tools || []);
@@ -4944,10 +5081,10 @@ window.NP_TIERS = {
     <div class="card-body">
       <!-- 2026-10-30：手动只填「客户单位」+「SN」；工单号与机型改为自动识别（可手动接管） -->
       <label class="small faint">客户单位名称 <b style="color:#B91C1C">*</b></label>
-      <input class="input" id="fldNrOrg" placeholder="例：深圳思腾云科技" style="width:100%;margin:4px 0 10px">
+      <input class="input" id="fldNrOrg" name="np-org" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="" style="width:100%;margin:4px 0 10px">
 
       <label class="small faint">SN 序列号 <b style="color:#B91C1C">*</b></label>
-      <input class="input" id="fldNrSn" placeholder="例：PC123456" style="width:100%;margin:4px 0 10px">
+      <input class="input" id="fldNrSn" placeholder="" style="width:100%;margin:4px 0 10px">
 
       <div class="row" style="align-items:center;gap:6px;margin-bottom:4px">
         <label class="small faint" style="margin:0">工单号</label>
@@ -5012,7 +5149,7 @@ window.NP_TIERS = {
     <div class="card-head"><span class="card-title">加入房间</span><span class="spacer"></span>
       <button class="btn sm ghost" id="fldJrClose">关闭</button></div>
     <div class="card-body">
-      <input class="input" id="fldJrQ" placeholder="按 房间码 / SN / 工单 / 机型 过滤" style="width:100%;margin-bottom:10px">
+      <input class="input" id="fldJrQ" name="np-roomfilter" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="按 房间码 / SN / 工单 / 机型 过滤" style="width:100%;margin-bottom:10px">
       <div id="fldJrList" style="max-height:320px;overflow:auto"></div>
       <div class="small faint" style="margin-top:8px">二线账号可加入他人房间；工程师只能加入自己参与的房间。</div>
     </div>
@@ -5409,29 +5546,65 @@ window.NP_TIERS = {
     api('/api/rooms', { sn, ticket_no: tk, machine_model: md, os, client_org: org })
       .then(j => {
         const code = j.room_code;
-        // 2026-10-22：按弹窗里选的类型下载，文件名与提示都标明版本
-        const kind = curBatKind();           // exe | ps | none
+        const kind = curBatKind();
+        // 2026-11-04：下载不再依赖"程序化点击"（浏览器常把这种自动下载拦掉）。
+        //   先在弹窗里给出明确的成功态与下载按钮（真实用户手势），再自动进房间。
         try {
+          const isPs = kind === 'ps';
+          const dlName = (isPs ? 'connect-ps-' : 'connect-') + code + '.bat';
+          const dlHref = (isPs ? '/api/room_bat_ps/' : '/api/room_bat/') + encodeURIComponent(code);
           if (kind === 'none') {
-            $('#fldNrMsg').textContent = '房间已创建（未下载连接文件，可在「连接客户机」里再选）';
+            $('#fldNrMsg').textContent = '房间已创建：' + code;
           } else {
-            const isPs = kind === 'ps';
-            const a = document.createElement('a');
-            a.href = (isPs ? '/api/room_bat_ps/' : '/api/room_bat/') + encodeURIComponent(code);
-            a.download = (isPs ? 'connect-ps-' : 'connect-') + code + '.bat';
-            a.style.display = 'none';
-            document.body.appendChild(a); a.click(); a.remove();
-            $('#fldNrMsg').textContent = '房间已创建，' + (isPs ? 'PowerShell 版' : 'exe 版')
-              + '连接文件正在下载（' + a.download + '）…';
+            $('#fldNrMsg').innerHTML =
+              '✔ 房间已创建：<b>' + NP.esc(code) + '</b>　' +
+              '<a class="btn sm primary" id="nrDlBtn" href="' + dlHref + '" download="' + dlName + '" ' +
+              'style="margin-left:6px">下载连接文件</a>' +
+              '<a class="btn sm ghost" id="nrGoBtn" style="margin-left:4px" ' +
+              'href="/field?room=' + encodeURIComponent(code) + '&sn=' + encodeURIComponent(sn) +
+              '&ticket=' + encodeURIComponent(tk) + '&created=' + encodeURIComponent(kind) + '">进入房间</a>' +
+              '<div class="small faint" style="margin-top:5px">若浏览器没有自动下载，点上面按钮；文件名 ' + NP.esc(dlName) + '</div>';
+            // 先尝试自动下载（允许就省一步），失败也不影响用户手动点
+            try {
+              const a = document.createElement('a');
+              a.href = dlHref; a.download = dlName; a.style.display = 'none';
+              document.body.appendChild(a); a.click(); a.remove();
+            } catch (e) { }
+            // 用户点了下载按钮就留在弹窗，不自动跳走
+            const dlBtn = document.getElementById('nrDlBtn');
+            if (dlBtn) dlBtn.addEventListener('click', () => { clearTimeout(window.__nrNavTimer); });
           }
+          window.__nrNavTimer = setTimeout(() => {
+            if (!document.body.contains($('#fldNrMsg'))) return;
+            location.href = '/field?room=' + encodeURIComponent(code)
+              + '&sn=' + encodeURIComponent(sn) + '&ticket=' + encodeURIComponent(tk)
+              + '&created=' + encodeURIComponent(kind);
+          }, kind === 'none' ? 800 : 4000);
         } catch (e) { }
-        setTimeout(() => {
-          location.href = '/field?room=' + encodeURIComponent(code)
-            + '&sn=' + encodeURIComponent(sn) + '&ticket=' + encodeURIComponent(tk)
-            + '&created=' + encodeURIComponent(kind);   // exe / ps / none
-        }, 800);
       })
-      .catch(e => { $('#fldNrMsg').textContent = '创建失败：' + e.message; btn.disabled = false; });
+      .catch(async e => {
+        const msg = (e && e.message) || String(e);
+        const netErr = /fetch|network|abort|timeout/i.test(msg);
+        // 网络中断自愈：请求可能已到达服务端并建成房间，先查一次同 SN 的房间，避免"其实建成了却报失败"
+        if (netErr) {
+          try {
+            const list = await api('/api/my_rooms');
+            const roomsArr = (list && (list.rooms || list)) || [];
+            const hit = roomsArr.find(r => String(r.sn || '') === String(sn));
+            if (hit && (hit.room_code || hit.code)) {
+              const code2 = hit.room_code || hit.code;
+              $('#fldNrMsg').innerHTML = '⚠ 网络中断，但房间实际已建成：<b>' + NP.esc(code2) + '</b>　' +
+                '<a class="btn sm primary" href="/api/room_bat/' + encodeURIComponent(code2) + '" download>下载连接文件</a>' +
+                '<a class="btn sm ghost" style="margin-left:4px" href="/field?room=' + encodeURIComponent(code2) + '">进入房间</a>';
+              btn.disabled = false;
+              return;
+            }
+          } catch (_) { }
+        }
+        $('#fldNrMsg').textContent = '创建失败：' + msg +
+          (netErr ? '（网络中断，请检查网络后重试；房间可能未创建成功）' : '');
+        btn.disabled = false;
+      });
   });
 
   /* ---------- 加入房间 ---------- */
@@ -5652,5 +5825,9 @@ window.NP_TIERS = {
   <div id="switchRecent"></div>
 </div>
 
+<div id="verTag" class="vertag">—</div>
+<script>/* 2026-11-04：左下角版本号（脚本在 body 末尾，确保元素已存在） */
+(function(){try{var b=(window.NP&&NP.BUILD)||"";var v=b.split(" · ")[0];
+document.getElementById("verTag").textContent=(v||"")+ (v?" · 正式":"正式");}catch(e){}})();</script>
 </body>
 </html>

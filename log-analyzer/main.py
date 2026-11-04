@@ -33,6 +33,7 @@ jobs = {}
 chat_sessions = {}
 
 # Inject globals into submodules that reference them
+import presurvey
 import chat.function_call as _fc
 _fc.jobs = jobs
 _fc.chat_sessions = chat_sessions
@@ -168,7 +169,7 @@ def _clean_name(s: str) -> str:
 
 # 2026-09-27 新增（P3-4）：健康检查端点——与 clouddiag-server 接口命名保持一致，
 # 便于统一监控与部署自检（deploy/doctor.sh 可做端到端断言）。
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.3.0"
 
 
 @app.get("/api/health")
@@ -696,6 +697,25 @@ async def download_file(request: Request, job_id: str):
     return JSONResponse({"error": "文件不存在或已被删除"}, status_code=404)
 
 
+
+@app.get("/api/presurvey/{job_id}")
+async def presurvey_api(request: Request, job_id: str):
+    """预调查摘要：确定性规则解析（不调 AI）。无缓存时后台构建并返回 building，前端轮询。"""
+    user, err = await _check_owner(request, job_id)
+    if err:
+        return JSONResponse({"error": err}, status_code=403 if "无权" in err else 401)
+    if job_id not in jobs:
+        return JSONResponse({"error": "任务不存在"}, status_code=404)
+    tslog = _get_tslog(job_id)
+    if not tslog:
+        return JSONResponse({"error": "日志目录不存在，请重新上传"}, status_code=404)
+    state = presurvey.ensure_async(job_id, tslog)
+    data = presurvey.get_cached(job_id)
+    if data:
+        return {"status": "done", "job_id": job_id, "presurvey": data}
+    return {"status": state, "job_id": job_id, "presurvey": None}
+
+
 @app.post("/api/chat/{job_id}")
 async def chat_endpoint(job_id: str, request: Request):
     user, err = await _check_owner(request, job_id)
@@ -723,7 +743,8 @@ async def chat_endpoint(job_id: str, request: Request):
         return await _chat_context_inject(job_id, user_message, tslog, os_type)
 
     # === Windows / Linux: Function Calling mode ===
-    return await _chat_function_calling(job_id, user_message, tslog)
+    return await _chat_function_calling(job_id, user_message, tslog,
+                                         presurvey_on=not bool(body.get("no_presurvey")))
 
 
 # ─── Hermes Agent Bridge ──────────────────────────────

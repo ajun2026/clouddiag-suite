@@ -292,6 +292,39 @@
             <div class="modal-body"><pre id="modal-content">加载中...</pre></div>
         </div>
     </div>
+    <style>
+        /* 预调查面板（2026-11-04） */
+        .ps-panel { padding: 10px 16px 0; }
+        .ps-card { border:1px solid var(--border,#E5E8EF); border-radius:10px; background:#fff; overflow:hidden; }
+        .ps-card > summary { display:flex; align-items:center; gap:9px; padding:9px 12px; cursor:pointer;
+            list-style:none; font-size:13px; background:#FAFBFD; }
+        .ps-card > summary::-webkit-details-marker { display:none; }
+        .ps-tag { font-size:11.5px; font-weight:600; border:1px solid; border-radius:999px; padding:1px 8px; }
+        .ps-head { font-weight:600; color:var(--text,#1B2432); }
+        .ps-spacer { flex:1; }
+        .ps-sub { font-size:11.5px; color:var(--text2,#5A6478); }
+        .ps-body { padding:10px 12px 12px; }
+        .ps-reasons { font-size:12px; color:#8A5A00; background:#FFF9EC; border:1px solid #F3E3BF;
+            border-radius:7px; padding:6px 9px; margin-bottom:9px; }
+        .ps-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:6px 16px; }
+        .ps-kv { display:flex; gap:8px; font-size:12.5px; align-items:baseline; min-width:0; }
+        .ps-kv > span { color:var(--text2,#5A6478); flex:0 0 76px; }
+        .ps-kv > b { font-weight:600; color:var(--text,#1B2432); word-break:break-all; }
+        .ps-cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:12px; }
+        .ps-cols h4 { font-size:12.5px; margin:0 0 5px; color:var(--text2,#5A6478); font-weight:600; }
+        .ps-line { font-size:12.5px; }
+        .ps-detail { font-size:12px; color:#3A4354; margin-top:4px; line-height:1.6; word-break:break-all; }
+        .ps-dim { font-size:11.5px; color:#8A92A3; margin-top:4px; }
+        .ps-foot { display:flex; align-items:center; gap:10px; margin-top:12px; padding-top:9px;
+            border-top:1px dashed var(--border,#E5E8EF); font-size:12px; }
+        .ps-switch { display:flex; align-items:center; gap:6px; cursor:pointer; color:#3A4354; }
+        .ps-building { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#5A6478;
+            border:1px dashed #D8DEE9; border-radius:9px; padding:9px 12px; background:#FAFBFD; }
+        .ps-spin { width:13px; height:13px; border:2px solid #D8DEE9; border-top-color:#2468F2;
+            border-radius:50%; display:inline-block; animation: psspin .8s linear infinite; }
+        @keyframes psspin { to { transform: rotate(360deg); } }
+        @media (max-width:900px){ .ps-cols{grid-template-columns:1fr} }
+    </style>
     <script>
         const urlParts = window.location.pathname.split('/');
         const jobId = '{{ job_id }}';
@@ -1244,6 +1277,95 @@
             html += '</div>';
             el.innerHTML = html;
         }
+
+        /* ═══ 预调查（2026-11-04）：本地规则解析，不调 AI；注入 AI 上下文可开关 ═══ */
+        var PS_LEVEL = { ok:['未发现异常','#0E9F6E','#E7F7F0'], warn:['需要关注','#C77700','#FFF6E5'],
+                           bad:['发现故障','#D64545','#FDECEC'], nodata:['数据不足','#5A6478','#F2F4F8'] };
+        var psPollTimer = window.__psPollTimer || null;
+        function psInjectOn() { return localStorage.getItem('np_ps_inject') !== '0'; }
+        function psToggleInject() {
+            localStorage.setItem('np_ps_inject', psInjectOn() ? '0' : '1');
+            loadPresurvey();
+        }
+        async function loadPresurvey() {
+            const box = document.getElementById('ps-panel');
+            if (!box) return;
+            if (psPollTimer) { clearTimeout(psPollTimer); psPollTimer = null; }
+            try {
+                const r = await fetch('/log-analyzer/api/presurvey/' + jobId, { credentials: 'same-origin' });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) { box.innerHTML = ''; return; }
+                if (j.status !== 'done' || !j.presurvey) {
+                    box.innerHTML = `<div class="ps-building"><span class="ps-spin"></span>
+                        正在做初步调查（解析系统日志，约 30–90 秒，只需一次）…</div>`;
+                    psPollTimer = setTimeout(loadPresurvey, 5000);
+                    return;
+                }
+                renderPresurvey(j.presurvey);
+            } catch (e) { box.innerHTML = ''; }
+        }
+        function psEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g,
+            c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+        function psRow(k, v) { return v ? `<div class="ps-kv"><span>${k}</span><b>${psEsc(v)}</b></div>` : ''; }
+        function renderPresurvey(d) {
+            const box = document.getElementById('ps-panel');
+            if (!box) return;
+            const s = d.sections || {}, m = s.machine || {}, sy = s.system || {}, g = s.gpu || {},
+                  ev = s.events || {}, bc = s.bugcheck || {}, dp = s.dump || {},
+                  v = d.verdict || {}, lv = PS_LEVEL[v.level] || PS_LEVEL.nodata;
+            const disks = (s.disks || []).map(x => `${x.model}（${x.serial || '—'}）`).join('、');
+            const hw = (ev.hardware_errors || []).slice(0, 5)
+                .map(x => `${psEsc(x.description)}（事件${x.id} · ${psEsc(x.provider)} · ${String(x.time).slice(0, 19)}）`).join('<br>');
+            const dumps = (dp.items || []).slice(0, 3)
+                .map(x => `${psEsc(x.file)} · ${psEsc(x.code)} ${psEsc(x.desc)}${x.drivers && x.drivers.length ? ' · 驱动 ' + psEsc(x.drivers.join(',')) : ''}`).join('<br>');
+            const topSys = Object.entries(ev.system_top_ids || {}).slice(0, 6)
+                .map(([k, n]) => `${k}×${n}`).join('、');
+            box.innerHTML = `
+              <details class="ps-card" ${localStorage.getItem('np_ps_open') === '0' ? '' : 'open'}>
+                <summary>
+                  <span class="ps-tag" style="color:${lv[1]};background:${lv[2]};border-color:${lv[1]}44">${lv[0]}</span>
+                  <span class="ps-head">${psEsc(v.headline || '预调查')}</span>
+                  <span class="ps-spacer"></span>
+                  <span class="ps-sub">预调查 · 本地规则解析，不消耗 AI 额度</span>
+                </summary>
+                <div class="ps-body">
+                  ${(v.reasons || []).length ? `<div class="ps-reasons">依据：${psEsc((v.reasons || []).join('；'))}</div>` : ''}
+                  <div class="ps-grid">
+                    ${psRow('机器', [m.manufacturer, m.model].filter(Boolean).join(' ') || '—')}
+                    ${psRow('BIOS', m.bios)}
+                    ${psRow('CPU', m.cpu)}
+                    ${psRow('内存', m.memory_total ? m.memory_total + ' MB（可用 ' + (m.memory_available || '—') + ' MB）' : '')}
+                    ${psRow('系统', [sy.os_name, sy.os_version].filter(Boolean).join(' '))}
+                    ${psRow('装机 / 启动', [sy.install_date, sy.boot_time].filter(Boolean).join(' · '))}
+                    ${psRow('显卡', [g.name, g.driver_version ? '驱动 ' + g.driver_version : ''].filter(Boolean).join(' · '))}
+                    ${psRow('分辨率', g.current_mode)}
+                    ${psRow('磁盘', disks)}
+                  </div>
+                  <div class="ps-cols">
+                    <div><h4>事件与硬件告警</h4>
+                      <div class="ps-line">蓝屏 <b>${ev.bugcheck_count || 0}</b> 次 · 非正常关机 <b>${ev.unexpected_shutdowns || 0}</b> 次 ·
+                        硬件告警 <b>${ev.hardware_error_count || 0}</b> 条 · LiveKernelEvent <b>${ev.lke_count || 0}</b> 个</div>
+                      ${hw ? `<div class="ps-detail">${hw}</div>` : '<div class="ps-dim">无硬件类告警</div>'}
+                      ${topSys ? `<div class="ps-dim">System 高频事件ID：${topSys}</div>` : ''}
+                    </div>
+                    <div><h4>蓝屏 / 内存转储</h4>
+                      ${bc.count ? `<div class="ps-line">蓝屏事件 <b>${bc.count}</b> 次</div>` : '<div class="ps-dim">无 1001 蓝屏事件</div>'}
+                      ${dumps ? `<div class="ps-detail">${dumps}</div>` : `<div class="ps-dim">无 dump 文件</div>`}
+                    </div>
+                  </div>
+                  <div class="ps-foot">
+                    <label class="ps-switch"><input type="checkbox" ${psInjectOn() ? 'checked' : ''}
+                      onchange="psToggleInject()"> 把预调查注入 AI 首轮上下文</label>
+                    <span class="ps-spacer"></span>
+                    <span class="ps-dim">生成时间 ${psEsc(d.generated_at || '')}${d.build_seconds ? ' · 构建 ' + d.build_seconds + 's' : ''}</span>
+                  </div>
+                </div>
+              </details>`;
+            const det = box.querySelector('details');
+            if (det) det.addEventListener('toggle', () =>
+                localStorage.setItem('np_ps_open', det.open ? '1' : '0'));
+        }
+
         // ═══ Chat functions ═══
         function renderChat(mode) { mode = mode || 'api';
             // Save current chat before switching away
@@ -1251,6 +1373,7 @@
             document.getElementById('page-title').textContent = (mode === 'hermes' ? '🔬 深度分析' : '🤖 AI 分析');
             const el = document.getElementById('tab-content');
             el.innerHTML = `
+                <div class="ps-panel" id="ps-panel"></div>
                 <div class="chat-container">
                     <div class="chat-messages" id="chat-messages">
                     </div>
@@ -1267,6 +1390,7 @@
             }
             document.getElementById('chat-input').focus();
             setChatMode(mode);
+            loadPresurvey();
         }
         function onChatKey(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -1291,7 +1415,7 @@
                 const resp = await fetch('../api/chat/' + jobId, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({message: msg})
+                    body: JSON.stringify({message: msg, no_presurvey: !psInjectOn()})
                 });
                 removeTyping();
                 const data = await resp.json();
@@ -1535,7 +1659,7 @@ function chipifyHtml(html) {
             fetch('../api/chat/' + jobId, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({message: msg})
+                body: JSON.stringify({message: msg, no_presurvey: !psInjectOn()})
             })
             .then(function(r) { return r.json(); })
             .then(function(data) {
