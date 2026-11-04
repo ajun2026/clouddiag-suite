@@ -98,9 +98,22 @@ xcopy>nul 2>nul %SystemRoot%\Minidump\* %workpath%\osdump /E/C
 @set date_str=%date:~,4%%date:~5,2%%date:~8,2%
 @set time_str=%time:~,2%%time:~3,2%%time:~6,2%
 @set name=%date_str%%time_str%
-%cd%\tools\7-Zip\7z.exe a %cd%\%name%.7z %workpath%\
-@rd /S/Q "%workpath%"
-@rd /S/Q "%cd%\tools"
-@del %cd%\dump.zip
-@del %cd%\storcli.log
-@del %0
+@set name=%name: =0%
+rem ---- 2026-11-03 修复：7z 缺失/被杀软拦截时改用系统 tar 打 zip；打包失败不删采集数据 ----
+@set PACKED=
+@if exist "%cd%\tools\7-Zip\7z.exe" (
+    "%cd%\tools\7-Zip\7z.exe" a -t7z "%cd%\%name%.7z" "%workpath%\"
+    @if exist "%cd%\%name%.7z" set PACKED=%cd%\%name%.7z
+)
+@if not defined PACKED (
+    @echo PACK_7Z_UNAVAILABLE_TRY_TAR
+    tar.exe -a -c -f "%cd%\%name%.zip" -C "%workpath%" .
+    @if exist "%cd%\%name%.zip" set PACKED=%cd%\%name%.zip
+)
+@if defined PACKED (echo PACK_OK %PACKED%) else (echo PACK_FAIL)
+rem 只有打包成功才清理采集目录；失败保留，便于服务器侧兜底打包
+@if defined PACKED rd /S/Q "%workpath%"
+rem 保留 tools 目录与自身脚本，便于重复执行与排查（原来会删除）
+@del %cd%\dump.zip 2>nul
+@del %cd%\storcli.log 2>nul
+@del %cd%\tools\SMART.txt 2>nul

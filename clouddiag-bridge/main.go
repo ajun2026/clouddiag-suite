@@ -23,7 +23,16 @@ import (
 )
 
 // Version 桥接器版本号（构建时可用 -ldflags 覆盖）
-var Version = "1.1.2"
+var Version = "1.4.2"
+
+// 抓屏助手模式参数（2026-11-02）
+var (
+	captureOut       string
+	captureMonitor   string
+	captureFormat    string
+	captureMaxWidth  int
+	captureQuality   int
+)
 
 // ClientInfo 上报给服务器的本机身份信息
 type ClientInfo struct {
@@ -72,7 +81,16 @@ func main() {
 	flag.BoolVar(&elevated, "elevated", false, "内部标志：已处于提权后的进程")
 	flag.BoolVar(&interactiveFlag, "interactive", false, "交互式输入房间码（默认行为：打印用法后退出，不阻塞终端）")
 	flag.IntVar(&maxRetries, "max-retries", 10, "连续连接失败上限（达到后停止重连并退出；0=不限制）")
+	// 2026-11-02：抓屏助手模式（供 PowerShell 版桥接器调用，规避 Defender 误杀 PS 脚本）
+	flag.StringVar(&captureOut, "capture", "", "内部：抓屏写入此文件后退出（PowerShell 版桥接器调用）")
+	flag.StringVar(&captureMonitor, "capture-monitor", "primary", "内部：抓屏范围 primary|all")
+	flag.StringVar(&captureFormat, "capture-format", "png", "内部：图片格式 png|jpg")
+	flag.IntVar(&captureMaxWidth, "capture-max-width", 0, "内部：JPEG 预览最大宽度")
+	flag.IntVar(&captureQuality, "capture-quality", 90, "内部：JPEG 质量 10-95")
 	flag.Parse()
+	if captureOut != "" {
+		os.Exit(runCaptureHelper(captureOut, captureMonitor, captureFormat, captureMaxWidth, captureQuality))
+	}
 	// 统一规范化服务器地址（交互输入与命令行参数都容错 http:// / 漏协议）
 	serverURL = normalizeServerURL(serverURL)
 

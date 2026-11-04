@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>操作轨迹 · Nexpert</title>
+<style>
+:root{
+  --brand:#2468F2; --brand-tint:#EEF3FE; --brand-line:#D6E2FD;
+  --text:#1B2333; --text-2:#4A5468; --text-3:#8A94A6;
+  --line:#E6E9F0; --surface:#FFFFFF; --surface-2:#F7F9FC;
+  --ok:#127C4B; --err:#C4342B; --warn:#A86500;
+  --font:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+  --r:10px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--font)}
+.top{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:12px;padding:12px 20px}
+.top h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
+.top .room{font:12.5px/1 ui-monospace,Menlo,Consolas,monospace;color:var(--text-2);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+.spacer{flex:1}
+.btn{border:1px solid var(--line);background:var(--surface);color:var(--text-2);border-radius:8px;
+  padding:6px 12px;font-size:12.5px;cursor:pointer;font-family:var(--font)}
+.btn:hover{border-color:var(--brand-line);color:var(--brand)}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--text-2);border-radius:999px;
+  padding:4px 12px;font-size:12.5px;cursor:pointer}
+.chip.on{background:var(--brand-tint);border-color:var(--brand-line);color:var(--brand);font-weight:600}
+.bar{display:flex;gap:8px;align-items:center;padding:10px 20px;flex-wrap:wrap}
+.wrap{max-width:1080px;margin:0 auto;padding:4px 20px 60px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.ev{display:grid;grid-template-columns:64px 92px 1fr auto;gap:10px;align-items:start;
+  padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.ev:last-child{border-bottom:0}
+.ev:hover{background:#FBFCFE}
+.ev.child{background:var(--surface-2);padding-left:30px}
+.t{font:12.5px/1.4 ui-monospace,Menlo,Consolas,monospace;color:var(--text-3);padding-top:1px;
+  font-variant-numeric:tabular-nums}
+.who{font-size:12px;color:var(--text-2);display:flex;gap:6px;align-items:center;padding-top:1px}
+.role{font-size:11px;border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--text-3)}
+.role.field{color:var(--brand);border-color:var(--brand-line);background:var(--brand-tint)}
+.role.expert{color:#7A4BD0;border-color:#E2D8F8;background:#F5F1FD}
+.role.ai{color:#0C7C86;border-color:#CBE9EC;background:#EDF8F9}
+.role.system{color:var(--text-3)}
+.desc{font-size:13px;color:var(--text);line-height:1.55}
+.desc .mono{font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;color:var(--text-2)}
+.sub{font-size:12px;color:var(--text-3);margin-top:2px}
+.meta{font-size:12px;color:var(--text-3);white-space:nowrap;font-variant-numeric:tabular-nums;padding-top:1px}
+.detail{display:none;border-bottom:1px solid var(--line);background:#FCFDFF;padding:10px 14px 14px 30px}
+.detail.open{display:block}
+.detail pre{margin:6px 0 0;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;
+  padding:10px;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;color:var(--text-2);
+  white-space:pre-wrap;word-break:break-all;max-height:280px;overflow:auto}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:12.5px}
+.kv dt{color:var(--text-3)}
+.kv dd{margin:0;color:var(--text-2);word-break:break-all}
+.empty{padding:48px;text-align:center;color:var(--text-3);font-size:13px}
+.clientbar{margin:10px 0 0;padding:9px 12px;border:1px solid var(--brand-line);background:var(--brand-tint);
+  color:#173A8A;border-radius:8px;font-size:12.5px}
+.clientbar.hidden{display:none}
+.lnk{color:var(--brand);text-decoration:none;border-bottom:1px dashed var(--brand-line)}
+.lnk:hover{border-bottom-style:solid}
+.badge-ok{color:var(--ok)} .badge-err{color:var(--err)} .badge-warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>操作轨迹</h1>
+  <span class="room" id="roomTag">—</span>
+  <span class="spacer"></span>
+  <button class="btn" id="earlier" style="display:none">加载更早</button>
+  <button class="btn" id="reload">刷新</button>
+</div>
+
+<div class="bar">
+  <button class="chip on" data-f="all">全部</button>
+  <button class="chip" data-f="field">现场</button>
+  <button class="chip" data-f="expert">二线</button>
+  <button class="chip" data-f="ai">AI</button>
+  <button class="chip" data-f="system">系统</button>
+  <span class="spacer"></span>
+  <button class="chip" id="viewClient" title="客户版：隐藏命令、路径与账号，用于对外展示与报告">客户版视图</button>
+  <span class="sub" id="count">—</span>
+</div>
+
+<div class="wrap">
+  <div class="clientbar hidden" id="clientBar">
+    客户版视图：命令原文、文件路径、账号与附件已隐藏，仅保留时间、角色、动作与结果规模。
+  </div>
+  <div class="card" id="list"><div class="empty">加载中…</div></div>
+</div>
+
+<script>
+(function(){
+  const qs = new URLSearchParams(location.search);
+  const room = (qs.get('room') || qs.get('room_code') || '').toUpperCase();
+  document.getElementById('roomTag').textContent = room || '未指定房间';
+  let all = [], filter = 'all', oldestSeq = null, hasMore = false, view = 'full';
+
+  const KIND = {
+    'auth.login':      {t:'登录系统',            i:'user'},
+    'diag.step.start': {t:'开始检查',            i:'play'},
+    'diag.step.end':   {t:'检查完成',            i:'check'},
+    'op.call':         {t:'执行命令',            i:'term'},
+    'op.result':       {t:'命令输出',            i:'out'},
+    'artifact.uploaded':{t:'上传日志包',          i:'up'},
+    'im.message':      {t:'协作消息',            i:'chat'},
+    'ai.turn':         {t:'AI 提问',             i:'ask'},
+    'ai.answer':       {t:'AI 回答',             i:'ai'},
+    'room.created':    {t:'创建房间',            i:'plus'},
+    'bridge.connect':  {t:'客户机接入',          i:'link'},
+    'bridge.disconnect':{t:'客户机断开',         i:'unlink'},
+    'diag.conclude':   {t:'给出结论',            i:'flag'},
+    'approval.request': {t:'请求审批',           i:'shield'},
+    'approval.approve': {t:'批准操作',           i:'shield'},
+    'approval.deny':   {t:'拒绝操作',            i:'shield'},
+    'room.escalate':   {t:'升级二线',            i:'up'},
+    'gate.confirm':    {t:'工号确认',            i:'user'},
+    'gate.blocked':    {t:'门禁拦截',            i:'shield'},
+    'diag.batch.start':{t:'批量执行开始',        i:'play'},
+    'diag.batch.end':  {t:'批量执行完成',        i:'check'},
+    'artifact.collect.start':{t:'开始采集日志',  i:'up'},
+    'artifact.collect.end':  {t:'采集日志完成',  i:'up'},
+    'file.uploaded':   {t:'上传附件',            i:'up'},
+    'file.deleted':    {t:'删除附件',            i:'trash'},
+    'report.viewed':   {t:'查看报告',            i:'file'},
+    'report.archived': {t:'报告定稿',            i:'file'},
+    'op.error':        {t:'执行失败',            i:'alert'},
+    'ui.note':         {t:'备注',                i:'dot'},
+    'correction':      {t:'修正',                i:'edit'}
+  };
+  const ROLE_CN = {field:'现场', cc:'渠道', expert:'二线', admin:'管理员', ai:'AI', bridge:'客户机', system:'系统', guest:'游客'};
+
+  function roleKey(e){
+    if (e.kind.startsWith('ai.')) return 'ai';
+    if (e.actor === 'bridge') return 'system';
+    return e.role || 'system';
+  }
+  function hhmmss(ms){
+    const d = new Date(ms); const p = n => String(n).padStart(2,'0');
+    return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  function title(e){
+    const d = e.data || {};
+    switch(e.kind){
+      case 'auth.login': return '登录系统'
+        + ((view !== 'client' && d.ip) ? '　<span class="sub">IP '+esc(d.ip)+'</span>' : '');
+      case 'room.created':
+        return '创建房间　<span class="sub">SN '+esc(d.sn||'')+' · '+esc(d.model||'')+' · '+esc(d.org||'')+'</span>';
+      case 'bridge.connect':
+        return '客户机接入　<span class="sub">'+esc(d.hostname||'')+(d.version?' · 桥接器 v'+esc(d.version):'')
+          + (d.mode?' · '+esc(d.mode):'')+'</span>';
+      case 'bridge.disconnect':
+        return '客户机断开　<span class="sub">'+esc((d.reason||'').slice(0,60))+(d.count?'（累计第 '+esc(d.count)+' 次）':'')+'</span>';
+      case 'approval.request': return '请求审批　<span class="sub">'+esc(d.tool||'')+'（Tier '+esc(d.tier||'?')+'）</span>';
+      case 'approval.approve': return '批准操作　<span class="sub">'+esc(d.tool||'')+'</span>';
+      case 'approval.deny':    return '拒绝操作　<span class="sub">'+esc(d.tool||'')+'</span>';
+      case 'room.escalate':    return '升级二线　<span class="sub">'+esc(d.to||'')+'</span>';
+      case 'gate.confirm':     return '工号确认　<span class="sub">'+esc(d.op||'')+(d.reviewer?' / 复核 '+esc(d.reviewer):'')+'</span>';
+      case 'gate.blocked':     return '门禁拦截　<span class="sub">'+esc((d.msg||'').slice(0,70))+'</span>';
+      case 'diag.batch.start': return '批量执行开始　<span class="sub">'+esc(d.count||0)+' 项</span>';
+      case 'diag.batch.end':   return '批量执行完成　<span class="sub">成功 '+esc(d.ok||0)+' · 失败 '+esc(d.failed||0)+'</span>';
+      case 'artifact.collect.start': return '开始采集日志　<span class="sub">'+esc(d.tool||'IDG 日志采集')+'</span>';
+      case 'artifact.collect.end': {
+        if (d.ok === false) return '采集日志失败　<span class="sub">'+esc((d.error||'').slice(0,70))+'</span>';
+        return '采集日志完成　<span class="sub">'+esc(d.name||'')+' · '+esc(d.size_mb||0)+' MB · '+esc(d.seconds||0)+' 秒</span>';
+      }
+      case 'file.uploaded':    return '上传附件　<span class="sub">'+esc(d.name||'')+'</span>';
+      case 'file.deleted':     return '删除附件　<span class="sub">'+esc(d.name||'')+'</span>';
+      case 'report.viewed':    return '查看报告　<span class="sub">'+(d.archived?'存档 v'+esc(d.version||0):'实时生成')+'</span>';
+      case 'report.archived':  return '报告定稿　<span class="sub">'+(d.draft?'草稿（未存档）':'v'+esc(d.version||0)+' 已存档')+'</span>';
+      case 'op.error':         return '执行失败　<span class="sub">'+esc((d.error||'').slice(0,80))+'</span>';
+      case 'diag.conclude': {
+        const lv = d.level || 'nodata';
+        const cn = ({ok:'未发现异常',warn:'需要关注',bad:'发现故障',nodata:'数据不足'})[lv] || lv;
+        return '给出结论　<b>'+esc(cn)+'</b>　<span class="sub">'+esc((d.headline||'').slice(0,90))+'</span>';
+      }
+      case 'diag.step.start': return '开始检查：<b>'+esc(d.label||'')+'</b>';
+      case 'diag.step.end': {
+        const ok = d.ok !== false;
+        const rows = (d.rows === 0) ? '0 条' : (d.rows ? d.rows+' 条' : '');
+        return '检查完成：<b>'+esc(d.label||'')+'</b>'
+          + (rows ? '　<span class="badge-ok">'+rows+'</span>' : '')
+          + (ok ? '' : '　<span class="badge-err">失败 '+esc((d.error||'').slice(0,60))+'</span>');
+      }
+      case 'op.call': return view === 'client'
+        ? '向客户机下发检查命令　<span class="sub">（命令内容已隐藏）</span>'
+        : '执行命令　<span class="mono">'+esc((d.command||'').slice(0,110))+'</span>'
+          + ((d.command||'').length>110?'…':'');
+      case 'op.result': {
+        if (view === 'client')
+          return '检查结果回传　<span class="sub">'+esc(d.chars||0)+' 字符（内容已隐藏）</span>';
+        const full = d.blob ? '　<a class="lnk" href="/api/room/event/'+esc(e.id)+'/blob" target="_blank">查看完整输出</a>' : '';
+        return '命令输出　<span class="sub">'+esc(d.chars||0)+' 字符</span>　'
+          + '<span class="mono">'+esc((d.preview||'').slice(0,90))+'</span>' + full;
+      }
+      case 'artifact.uploaded': return '上传日志包　<b>'+esc(d.filename||'')+'</b>'
+        + (d.content_length ? '　<span class="sub">'+esc(d.content_length)+' 字节</span>' : '');
+      case 'im.message': {
+        const tag = {text:'文字', image:'图片', file:'文件'}[d.kind] || '消息';
+        const body = d.kind === 'text' ? esc((d.text||'').slice(0,160))
+                                       : esc((d.text||'').slice(0,80)) + '　<span class="sub">附件</span>';
+        return tag + '：' + body;
+      }
+      case 'ai.turn': return 'AI 提问　'+esc((d.q||'').slice(0,140));
+      case 'ai.answer': return 'AI 回答　<span class="sub">'+esc(d.chars||0)+' 字</span>　'
+        + esc((d.preview||'').slice(0,110)) + ((d.preview||'').length>110?'…':'');
+      default: return esc(e.kind);
+    }
+  }
+
+  function meta(e){
+    const d = e.data || {};
+    if (e.kind === 'diag.step.end' && d.ms != null) return d.ms >= 1000 ? (d.ms/1000).toFixed(1)+'s' : d.ms+'ms';
+    if (e.kind === 'op.call' && d.tool) return esc(d.tool);
+    return '';
+  }
+
+  function detail(e){
+    const d = e.data || {};
+    const rows = Object.entries(d).map(([k,v])=>{
+      const val = (typeof v === 'object') ? JSON.stringify(v, null, 2) : String(v);
+      const long = val.length > 240;
+      return '<dt>'+esc(k)+'</dt><dd>'+(long ? '<pre>'+esc(val)+'</pre>' : esc(val))+'</dd>';
+    }).join('');
+    return '<dl class="kv">'+rows
+      + '<dt>事件ID</dt><dd class="sub">'+esc(e.id)+'</dd>'
+      + '<dt>流 / 序号</dt><dd class="sub">'+esc(e.stream)+' · #'+esc(e.seq)+'</dd></dl>';
+  }
+
+  function render(){
+    const box = document.getElementById('list');
+    const list = all.filter(e => filter === 'all' || roleKey(e) === filter);
+    document.getElementById('count').textContent = list.length + ' 条事件' + (filter==='all' ? '' : '（已过滤）');
+    if (!list.length){ box.innerHTML = '<div class="empty">' + (room ? '这个房间还没有事件记录' : '请在地址后加 ?room=房间号') + '</div>'; return; }
+    box.innerHTML = list.map(e => {
+      const k = KIND[e.kind] || {t:e.kind,i:'dot'};
+      const rk = roleKey(e);
+      const child = !!e.parent;
+      return '<div class="ev'+(child?' child':'')+'" data-id="'+e.id+'">'
+        + '<div class="t">'+hhmmss(e.ts)+'</div>'
+        + '<div class="who"><span class="role '+rk+'">'+(ROLE_CN[rk]||rk)+'</span>'
+        +   (view === 'client' ? '' : '<span class="sub">'+esc(e.actor||'')+'</span>') + '</div>'
+        + '<div class="desc">'+title(e)
+        +   (child ? '<div class="sub">↳ 由上一条记录触发</div>' : '')
+        + '</div>'
+        + '<div class="meta">'+meta(e)+'</div>'
+        + '</div>'
+        + '<div class="detail" id="d-'+e.id+'">'+detail(e)+'</div>';
+    }).join('');
+    syncEarlierBtn();
+    box.querySelectorAll('.ev').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const d = document.getElementById('d-'+el.dataset.id);
+        if (d) d.classList.toggle('open');
+      });
+    });
+  }
+
+  async function load(){   // 一律按时间正序：从上到下就是现场发生顺序
+    if (!room){ document.getElementById('list').innerHTML = '<div class="empty">请在地址后加 ?room=房间号（例：/trajectory?room=ABCD1234）</div>'; return; }
+    try{
+      const r = await fetch('/api/room/events?room_code='+encodeURIComponent(room)+'&limit=300&view='+view, {credentials:'same-origin'});
+      const j = await r.json();
+      if (!r.ok){ document.getElementById('list').innerHTML = '<div class="empty">'+esc(j.error||('HTTP '+r.status))+'</div>'; return; }
+      all = j.events || [];
+      oldestSeq = all.length ? all[0].seq : null;
+      hasMore = all.length >= 300;   // 取满一页说明可能还有更早的
+      render();
+    }catch(e){
+      document.getElementById('list').innerHTML = '<div class="empty">加载失败：'+esc(e.message)+'</div>';
+    }
+  }
+
+  // 角色筛选：排除「客户版视图」开关（它不是筛选器，2026-11-03）
+  document.querySelectorAll('.chip:not(#viewClient)').forEach(c=>{
+    c.addEventListener('click', ()=>{
+      document.querySelectorAll('.chip:not(#viewClient)').forEach(x=>x.classList.remove('on'));
+      c.classList.add('on'); filter = c.dataset.f || 'all'; render();
+    });
+  });
+  async function loadEarlier(){
+    if (!room || oldestSeq == null) return;
+    const btn = document.getElementById('earlier');
+    btn.disabled = true; btn.textContent = '加载中…';
+    try{
+      const r = await fetch('/api/room/events?room_code='+encodeURIComponent(room)+'&limit=300&view='+view+'&before_seq='+oldestSeq, {credentials:'same-origin'});
+      const j = await r.json();
+      if (r.ok && j.events && j.events.length){
+        all = j.events.concat(all);
+        oldestSeq = j.events[0].seq;
+        hasMore = j.events.length >= 300;
+        render();
+      } else { hasMore = false; }
+    }catch(e){ console.warn(e); }
+    btn.disabled = false; btn.textContent = '加载更早';
+    syncEarlierBtn();
+  }
+  function syncEarlierBtn(){
+    const btn = document.getElementById('earlier');
+    if (btn) btn.style.display = hasMore ? '' : 'none';
+  }
+  document.getElementById('earlier').addEventListener('click', loadEarlier);
+  document.getElementById('viewClient').addEventListener('click', function(){
+    view = (view === 'full') ? 'client' : 'full';
+    this.classList.toggle('on', view === 'client');
+    document.getElementById('clientBar').classList.toggle('hidden', view !== 'client');
+    document.body.classList.toggle('is-client', view === 'client');
+    load();
+  });
+  document.getElementById('reload').addEventListener('click', load);
+  load();
+  setInterval(load, 15000);   // 15s 自动刷新（P0 只读轮询，后续换 WS 增量）
+})();
+</script>
+</body>
+</html>

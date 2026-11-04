@@ -16,6 +16,7 @@ import zipfile
 import mimetypes
 import logging
 import os
+import pathlib
 import re
 import secrets
 import sqlite3
@@ -28,7 +29,7 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, File, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse, Response, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
@@ -205,6 +206,68 @@ def init_db():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_room_files_room ON room_files(room_code, created_at)")
+    # 协作消息（2026-10-29：现场 ↔ 二线 IM；与 AI 对话的 messages 表严格分开，避免污染 AI 上下文）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS room_im (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_code TEXT NOT NULL,
+            sender TEXT NOT NULL,
+            sender_role TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL DEFAULT 'text',
+            text TEXT DEFAULT '',
+            file_id TEXT DEFAULT '',
+            reply_to INTEGER DEFAULT NULL,
+            recalled_at TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_room_im_room ON room_im(room_code, id)")
+    # 2026-10-30：房间增加「客户单位」与人类可读房间名（客户单位-机型-SN-日期）
+    try:
+        _cols = {r[1] for r in conn.execute("PRAGMA table_info(rooms)")}
+        if "client_org" not in _cols:
+            conn.execute("ALTER TABLE rooms ADD COLUMN client_org TEXT DEFAULT ''")
+        if "room_name" not in _cols:
+            conn.execute("ALTER TABLE rooms ADD COLUMN room_name TEXT DEFAULT ''")
+    except Exception as _e:
+        pass
+    # ═══════════════════════════════════════════════════════════
+    # 事件日志（P0 · 2026-11-02）：DSH 式 append-only，唯一真相
+    #   · 只追加，永不 UPDATE / DELETE；修正靠追加 correction 事件
+    #   · seq 在 stream 内严格单调（UNIQUE 约束兜底并发）
+    #   · 层级放信封（turn/step/parent），不放 data
+    #   · 大对象（命令输出/日志包）只存引用 + sha256，正文进 room_files
+    # ═══════════════════════════════════════════════════════════
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id TEXT PRIMARY KEY,
+            stream TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            room_code TEXT DEFAULT '',
+            ts_srv INTEGER NOT NULL,
+            ts_src INTEGER DEFAULT NULL,
+            kind TEXT NOT NULL,
+            actor TEXT DEFAULT '',
+            actor_role TEXT DEFAULT '',
+            turn TEXT DEFAULT '',
+            step TEXT DEFAULT '',
+            parent TEXT DEFAULT '',
+            v INTEGER NOT NULL DEFAULT 1,
+            data TEXT DEFAULT '{}',
+            UNIQUE(stream, seq)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_room ON events(room_code, seq)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind, ts_srv)")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS room_im_read (
+            room_code TEXT NOT NULL,
+            username TEXT NOT NULL,
+            last_read_id INTEGER DEFAULT 0,
+            PRIMARY KEY (room_code, username)
+        )
+    """)
     conn.commit()
     conn.close()
     seed_users()
@@ -262,7 +325,75 @@ def get_user(username: str) -> Optional[dict]:
     except Exception:
         return None
 
+_EV_SEQ_LOCKS: dict = {}
+
+
+def record_event(kind: str, data: dict = None, *, room_code: str = "", actor: str = "",
+                 actor_role: str = "", stream: str = "", turn: str = "", step: str = "",
+                 parent: str = "", ts_src: int = None) -> str:
+    """追加一条事件（P0）。返回事件 id；失败不抛（事件日志不能弄挂业务）。
+
+    stream 约定：
+      · 房间内动作 → "room:<房间号>"
+      · 登录/账号动作 → "user:<账号>"
+    seq 由 (stream) 内 MAX+1 生成，UNIQUE(stream,seq) 兜底；冲突重试一次。
+    """
+    try:
+        stream = stream or (f"room:{room_code}" if room_code else f"user:{actor or 'system'}")
+        payload = json.dumps(data or {}, ensure_ascii=False)
+        for _attempt in range(2):
+            try:
+                conn = _db_connect()
+                row = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events WHERE stream=?", (stream,)).fetchone()
+                seq = (row[0] if row else 0) + 1
+                eid = uuid.uuid4().hex
+                conn.execute(
+                    "INSERT INTO events(id, stream, seq, room_code, ts_srv, ts_src, kind, actor,"
+                    " actor_role, turn, step, parent, v, data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (eid, stream, seq, (room_code or "").upper(), int(time.time() * 1000), ts_src,
+                     kind, actor or "", actor_role or "", turn or "", step or "", parent or "", 1, payload))
+                conn.commit()
+                conn.close()
+                return eid
+            except sqlite3.IntegrityError:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                time.sleep(0.02)
+            except Exception as e:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                run_logger.warning(f"record_event failed ({kind}): {e}")
+                return ""
+        return ""
+    except Exception as e:
+        run_logger.warning(f"record_event outer failed ({kind}): {e}")
+        return ""
+
+
+def _ev_actor(request) -> tuple:
+    """从 cookie 取当前用户（事件用）。"""
+    try:
+        u = _require_user(request)
+        if u:
+            return u.get("username", ""), u.get("role", "")
+    except Exception:
+        pass
+    return "", ""
+
+
 def save_message(room_code: str, role: str, content: str, tool_name: str = None, tier: int = None):
+    # P0 事件：AI 回答（只记摘要与长度，正文留在 messages）
+    if role == "assistant" and content:
+        try:
+            record_event("ai.answer", {"chars": len(content), "preview": content[:600]},
+                         room_code=room_code, actor="ai", actor_role="assistant",
+                         stream=f"room:{room_code}" if room_code else "system")
+        except Exception:
+            pass
     try:
         conn = _db_connect()
         conn.execute(
@@ -1121,6 +1252,9 @@ class Room:
     def __init__(self, code: str):
         self.code = code
         self.browser_ws: Optional[WebSocket] = None
+        # 2026-10-29：房间内所有在线浏览器（IM 广播用）。原来的 browser_ws 只能记住最后一个，
+        #   两人同时在一个房间时先连的那个收不到广播。
+        self.browser_clients: list = []
         self.bridge_ws: Optional[WebSocket] = None
         self.created_at = datetime.now(timezone.utc)
         self.pending_commands: dict[str, asyncio.Future] = {}
@@ -1145,6 +1279,9 @@ class Room:
         self._cmd_history_max = 20
         # Bridge 协议版本: "v1" = 旧 python bridge (tool/args), "v2" = go-pipe (command)
         self.bridge_mode: str = "v1"
+        # 2026-11-02：桥接器扩展能力（identify 上报）。目前只有 "screenshot"（原生 GDI 抓屏）。
+        #   老桥接器不上报 → 空集合 → 服务端自动回退到 PowerShell 老路径，行为不变。
+        self.bridge_caps: set = set()
         # 目标平台: windows | linux | darwin（默认 windows，兼容旧 bridge）
         self.platform: str = "windows"
         # 闲置检测任务（browser 断开后 30min 倒计时）
@@ -1181,7 +1318,7 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.5.4"
 
 app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -1233,6 +1370,14 @@ async def enforce_domain_host(request: Request, call_next):
     hostname = host.split(":")[0].lower()
     if hostname not in ALLOWED_HOSTS:
         return HTMLResponse(migrate_page(), status_code=200)
+    # 2026-11-03 安全加固：作业台页面不得匿名访问（静态目录里的 .html 也一样）
+    _p = request.url.path
+    if (_p.startswith("/static/console/") and _p.endswith(".html")) or _p in ("/trajectory",):
+        try:
+            if not _require_user(request):
+                return RedirectResponse("/login", status_code=303)
+        except Exception:
+            return RedirectResponse("/login", status_code=303)
     return await call_next(request)
 
 # ============================================================
@@ -1620,6 +1765,13 @@ async def user_login(request: Request):
     _login_clear(ip)
     if username:
         _login_clear("u:" + username)
+    # P0 事件：登录（谁、什么角色、从哪来）
+    try:
+        record_event("auth.login", {"name": user.get("name", ""), "ip": request.client.host if request.client else "",
+                                    "ua": (request.headers.get("user-agent", "") or "")[:120]},
+                     actor=user["username"], actor_role=user["role"], stream=f"user:{user['username']}")
+    except Exception:
+        pass
     resp = JSONResponse({"ok": True, "username": user["username"], "name": user["name"], "role": user["role"]})
     _set_user_cookie(resp, user["username"], user["role"])
     run_logger.info(f"[auth] {username} 登录成功")
@@ -1771,6 +1923,44 @@ async def admin_toggle_user(request: Request, username: str):
     conn.close()
     run_logger.info(f"[admin] {admin['username']} {'停用' if new_enabled == 0 else '启用'} 账号 {username}")
     return {"ok": True, "username": username, "enabled": new_enabled}
+
+
+@app.get("/api/admin/login_locks")
+async def admin_login_locks(request: Request):
+    """查看登录限流表（2026-10-29：限流计数在内存里，锁住账号时运维可查可解）。"""
+    admin = _require_admin_user(request)
+    if not admin:
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    now = time.time()
+    rows = []
+    for key, rec in list(LOGIN_FAILS.items()):
+        left = int(rec.get("lock_until", 0) - now)
+        rows.append({"key": key, "fails": rec.get("count", 0),
+                     "locked": left > 0, "unlock_in_s": max(0, left)})
+    return {"locks": rows}
+
+
+@app.post("/api/admin/unlock_login")
+async def admin_unlock_login(request: Request):
+    """解除登录限流：body 传 {"username": "xxx"} 只解该账号，{"all": true} 清空全部。"""
+    admin = _require_admin_user(request)
+    if not admin:
+        return JSONResponse({"error": "未授权"}, status_code=401)
+    body = await _safe_json(request)
+    if body.get("all"):
+        LOGIN_FAILS.clear()
+        run_logger.info(f"[admin] {admin['username']} 清空登录限流表")
+        return {"ok": True, "cleared": "all"}
+    username = (body.get("username") or "").strip()
+    if not username:
+        return JSONResponse({"error": "缺少 username 或 all"}, status_code=400)
+    removed = []
+    for key in ("u:" + username, username):
+        if key in LOGIN_FAILS:
+            LOGIN_FAILS.pop(key, None)
+            removed.append(key)
+    run_logger.info(f"[admin] {admin['username']} 解除登录限流 {username}（{removed}）")
+    return {"ok": True, "username": username, "removed": removed}
 
 
 @app.post("/api/admin/users/{username}/reset_password")
@@ -1959,6 +2149,14 @@ async def ai_qa(request: Request):
     ctx += f"\n【已采集证据（最近 {len(msgs)} 条）】\n{evidence}"
 
     avail, tools = _ai_tool_specs(platform, row["machine_model"])
+    # P0 事件：AI 提问（现场台走 /api/ai_qa，不是 WS chat —— 两条路都要记）
+    _ev_turn = ""
+    try:
+        _ev_turn = record_event("ai.turn", {"q": question, "via": "ai_qa"},
+                                room_code=room_code, actor=user["username"], actor_role=user["role"],
+                                stream=f"room:{room_code}")
+    except Exception:
+        pass
     messages = [{"role": "system", "content": AI_QA_SYSTEM}, * _ai_history(room_code),
                 {"role": "user", "content": ctx + "\n\n【我的问题】" + question}]
 
@@ -2034,6 +2232,14 @@ async def ai_qa(request: Request):
             run_logger.info(f"[{room_code}] ai_qa 采集项: {audit_add}")
         except Exception:
             pass
+    # P0 事件：AI 回答（记摘要 + 用到的工具 + 耗时留给前端，这里只记事实）
+    try:
+        record_event("ai.answer", {"chars": len(answer or ""), "preview": (answer or "")[:600],
+                                   "tools_used": used_tools, "model": OPENAI_MODEL},
+                     room_code=room_code, actor="ai", actor_role="assistant",
+                     stream=f"room:{room_code}", parent=_ev_turn)
+    except Exception:
+        pass
     return {"ok": True, "answer": answer, "model": OPENAI_MODEL,
             "evidence_used": len(msgs), "tools_used": used_tools,
             "max_tools": max_tools, "pending_tools": pending_tools}
@@ -2870,11 +3076,143 @@ def _conclude_system(o):
     return {"level": "ok", "headline": "系统状态正常，未检出大量严重错误", "facts": facts}
 
 
+
+# ── 2026-11-02：结论规则改为读「结构化 JSON 行」（步骤输出已是 Get-WinEvent/Get-CimInstance + JSON）
+def _rows_by(o: dict, *keywords):
+    """按标签关键词找该步骤的结构化行；老文本输出解析不出来就返回空列表（等价于未检出）。"""
+    for k, v in (o or {}).items():
+        if not any(kw in str(k) for kw in keywords):
+            continue
+        st = _struct_step_output(str(v or ""))
+        return st.get("rows") or []
+    return []
+
+
+def _conclude_bsod_json(o):
+    bc = _rows_by(o, "1001")
+    dmp = _rows_by(o, "Minidump")
+    whea = _rows_by(o, "WHEA")
+    kp = _rows_by(o, "非正常关机", "41 / 6008", "41/6008")
+    mem = _rows_by(o, "内存诊断")
+    tdr = _rows_by(o, "4101", "TDR")
+    codes = []
+    for r in bc:
+        for c in re.findall(r"0x[0-9a-fA-F]{6,16}", str(r.get("msg") or "")):
+            if c.lower() not in [x.lower() for x in codes]:
+                codes.append(c)
+    codes = codes[:3]
+    facts = [{"k": "蓝屏记录(1001)", "v": f"{len(bc)} 条" if bc else "未检出"},
+             {"k": "转储文件", "v": f"{len(dmp)} 个" if dmp else "未检出"},
+             {"k": "硬件错误(WHEA)", "v": f"{len(whea)} 条" if whea else "未检出"},
+             {"k": "卡死断电(41/6008)", "v": f"{len(kp)} 条" if kp else "未检出"},
+             {"k": "显卡超时(4101)", "v": f"{len(tdr)} 条" if tdr else "未检出"},
+             {"k": "内存诊断", "v": f"{len(mem)} 条" if mem else "未检出"}]
+    if codes:
+        facts.append({"k": "停止码", "v": "、".join(codes)})
+    if bc or dmp:
+        head = f"检出蓝屏痕迹：事件 {len(bc)} 条、转储 {len(dmp)} 个" + (f"，停止码 {'、'.join(codes)}" if codes else "")
+        return {"level": "warn", "headline": head, "facts": facts}
+    if kp:
+        return {"level": "warn", "facts": facts,
+                "headline": f"无蓝屏记录，但检出 {len(kp)} 次非正常关机——倾向「卡死后被断电/强重启」，优先查电源与散热"}
+    return {"level": "ok", "headline": "未检出蓝屏记录、转储文件与非正常关机", "facts": facts}
+
+
+def _conclude_reboot_json(o):
+    ev = _rows_by(o, "重启与关机事件", "41/6008/1074")
+    boot = _rows_by(o, "最近启动")
+    upd = _rows_by(o, "更新安装")
+    th = _rows_by(o, "温度与降频")
+    wake = _rows_by(o, "睡眠唤醒")
+    def cnt(ids):
+        return sum(1 for r in ev if str(r.get("id")) in ids)
+    n41, n6008, n1074 = cnt({"41"}), cnt({"6008"}), cnt({"1074"})
+    facts = [{"k": "意外断电(41)", "v": f"{n41} 次" if n41 else "未检出"},
+             {"k": "非正常关闭(6008)", "v": f"{n6008} 次" if n6008 else "未检出"},
+             {"k": "人为/计划重启(1074)", "v": f"{n1074} 次" if n1074 else "未检出"},
+             {"k": "更新安装事件", "v": f"{len(upd)} 条" if upd else "未检出"},
+             {"k": "温度降频事件", "v": f"{len(th)} 条" if th else "未检出"}]
+    if boot:
+        facts.append({"k": "最近启动", "v": str(boot[0].get("last_boot") or "")})
+    if n41 or n6008:
+        if n41 and not n41 < n1074:
+            return {"level": "warn", "facts": facts,
+                    "headline": f"检出 {n41} 次意外断电重启（41）——倾向电源/散热方向，结合温度降频事件看"}
+        return {"level": "warn", "facts": facts,
+                "headline": f"检出非正常关机记录（41 {n41} 次 / 6008 {n6008} 次）"}
+    if n1074:
+        return {"level": "ok", "facts": facts,
+                "headline": f"重启均为人为或计划触发（1074 {n1074} 次），未见意外断电"}
+    return {"level": "ok", "headline": "未检出异常重启记录", "facts": facts}
+
+
+def _conclude_slow_json(o):
+    boot = _rows_by(o, "开机耗时")
+    startup = _rows_by(o, "开机自启动项")
+    proc = _rows_by(o, "进程占用")
+    disk = _rows_by(o, "磁盘空间")
+    health = _rows_by(o, "磁盘健康")
+    minfree = None
+    for r in disk:
+        try:
+            f = float(r.get("free_GB") or 0)
+            if minfree is None or f < minfree[1]:
+                minfree = (r.get("drive"), f)
+        except Exception:
+            pass
+    bad_disk = [r for r in health if str(r.get("health", "")).lower() not in ("healthy", "")]
+    top = sorted(proc, key=lambda r: float(r.get("cpu_s") or 0), reverse=True)[:3]
+    facts = [{"k": "开机耗时记录", "v": f"{len(boot)} 条" if boot else "未检出"},
+             {"k": "自启动项", "v": f"{len(startup)} 项" if startup else "未检出"},
+             {"k": "进程样本", "v": f"{len(proc)} 个" if proc else "未检出"},
+             {"k": "磁盘健康异常", "v": f"{len(bad_disk)} 块" if bad_disk else "全部正常"}]
+    if minfree and minfree[0]:
+        facts.append({"k": "可用空间最低", "v": f"{minfree[0]} 剩 {minfree[1]} GB"})
+    if top:
+        facts.append({"k": "CPU 占用前三", "v": "、".join(f"{r.get('name')}({r.get('cpu_s')}s)" for r in top)})
+    if bad_disk:
+        return {"level": "warn", "facts": facts, "headline": "磁盘健康异常，卡顿可能来自存储，优先看「硬盘」项"}
+    if minfree and minfree[1] and minfree[1] < 10:
+        return {"level": "warn", "facts": facts, "headline": f"系统盘可用仅 {minfree[1]} GB，空间不足会显著拖慢"}
+    if len(startup) > 20:
+        return {"level": "warn", "facts": facts, "headline": f"开机自启动 {len(startup)} 项，倾向启动项过多导致变慢"}
+    return {"level": "ok", "facts": facts, "headline": "未发现明显资源瓶颈（详见各步输出）"}
+
+
+def _conclude_display_json(o):
+    gpu = _rows_by(o, "显卡设备")
+    mode = _rows_by(o, "分辨率")
+    mon = _rows_by(o, "显示器连接")
+    tdr = _rows_by(o, "4101", "显卡超时")
+    err = _rows_by(o, "显示驱动错误")
+    bad = [r for r in gpu if str(r.get("status", "")).strip().lower() not in ("ok", "")]
+    facts = [{"k": "显卡设备", "v": f"{len(gpu)} 个" if gpu else "未检出"},
+             {"k": "状态异常", "v": f"{len(bad)} 个" if bad else "全部正常"},
+             {"k": "显示器", "v": f"{len(mon)} 个" if mon else "未检出"},
+             {"k": "显卡超时(TDR)", "v": f"{len(tdr)} 条" if tdr else "未检出"},
+             {"k": "显示驱动错误", "v": f"{len(err)} 条" if err else "未检出"}]
+    if mode:
+        m0 = mode[0]
+        facts.append({"k": "当前输出", "v": f"{m0.get('w')}×{m0.get('h')} @ {m0.get('hz')}Hz"})
+    if gpu:
+        facts.append({"k": "显卡清单", "v": "、".join(str(r.get("name")) for r in gpu[:3])})
+    if bad:
+        return {"level": "warn", "facts": facts, "headline": "存在状态异常的显卡设备（疑似掉卡或被禁用），先查驱动/硬件"}
+    if tdr or err:
+        return {"level": "warn", "facts": facts,
+                "headline": f"检出显卡超时 {len(tdr)} 条、显示驱动错误 {len(err)} 条——倾向驱动方向"}
+    if len(gpu) >= 2:
+        return {"level": "ok", "facts": facts, "headline": "显卡与输出模式正常；若外接屏才花屏，方向是线材/接口"}
+    return {"level": "ok", "facts": facts, "headline": "显卡与显示驱动未见异常"}
+
+
 ACTION_CONCLUDERS = {
-    "bsod": _conclude_bsod,
+    "bsod": _conclude_bsod_json,
     "disk": _conclude_disk,
     "thermal": _conclude_thermal,
-    "reboot": _conclude_reboot,
+    "reboot": _conclude_reboot_json,
+    "slow": _conclude_slow_json,
+    "display": _conclude_display_json,
     "startup": _conclude_startup,
     "system": _conclude_system,
 }
@@ -2911,6 +3249,21 @@ async def action_conclude(request: Request):
     if bad and bad >= max(1, len(outputs) // 2):
         out["level"] = "nodata"
         out["headline"] = f"{bad}/{len(outputs)} 步采集失败，数据不足，无法给出结论"
+    # 2026-11-03：结论入轨迹（客户版只留等级/结论/事实，命令与原文已被投影层过滤）
+    try:
+        _u = _require_user(request)
+        record_event("diag.conclude",
+                     {"action_key": action_key, "level": out.get("level"),
+                      "headline": out.get("headline"),
+                      "facts": [{"k": f.get("k"), "v": f.get("v")} for f in (out.get("facts") or [])][:20],
+                      "steps": out.get("steps"), "failed_steps": bad},
+                     room_code=str(body.get("room_code") or ""),
+                     actor=(_u or {}).get("username", ""),
+                     actor_role=(_u or {}).get("role", ""),
+                     stream=f"room:{body.get('room_code')}" if body.get("room_code") else "global",
+                     turn=action_key)
+    except Exception:
+        pass
     return out
 
 
@@ -3160,6 +3513,13 @@ async def room_file_commit(request: Request):
                 "uploader": user["username"], "uploader_role": role}})
         except Exception:
             pass
+    # 2026-10-29：上传的文件同时进入协作消息流（kind=image / file），聊天里直接可见
+    try:
+        _ikind = "image" if str(mime or "").startswith("image/") else "file"
+        _imsg = _im_insert(room_code, user["username"], role, _ikind, (note or ""), rid)
+        await _im_broadcast(room_code, {"type": "im", "msg": _imsg})
+    except Exception as _e:
+        run_logger.warning(f"[{room_code}] 文件转 IM 消息失败：{_e}")
     run_logger.info(f"[{room_code}] 文件入库 {rid} {filename} {size}B by {user['username']}")
     return {"ok": True, "id": rid, "filename": filename, "size": size,
             "sha256": h.hexdigest(), "mime": mime}
@@ -3269,6 +3629,38 @@ async def room_files_zip(room_code: str = "", request: Request = None):
     fname = f"room-{room_code}-files.zip"
     return Response(content=buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+_LAST_BRIDGE_CONN = {}   # room_code -> 上次记录 bridge.connect 的时刻（去重用）
+
+EVENTS_RETENTION_DAYS = int(os.getenv("EVENTS_RETENTION_DAYS", "180") or 180)
+
+
+async def _events_purge_loop():
+    """事件保留期清理（默认 180 天，可用 EVENTS_RETENTION_DAYS 调整）+ 过期 blob 清理。"""
+    await asyncio.sleep(90)          # 启动后等业务稳定再跑
+    while True:
+        try:
+            cutoff = int((time.time() - EVENTS_RETENTION_DAYS * 86400) * 1000)
+            conn = _db_connect()
+            n = conn.execute("DELETE FROM events WHERE ts_srv < ?", (cutoff,)).rowcount
+            conn.commit()
+            conn.close()
+            # blob 目录：删掉 7 天没被写入的（对应事件早已过期）
+            try:
+                base = pathlib.Path(__file__).resolve().parent / "room_event_blobs"
+                if base.exists():
+                    dead = time.time() - 7 * 86400
+                    for f in base.rglob("*.txt"):
+                        if f.stat().st_mtime < dead:
+                            f.unlink(missing_ok=True)
+            except Exception:
+                pass
+            if n:
+                run_logger.info(f"[events] 清理过期事件 {n} 条（保留 {EVENTS_RETENTION_DAYS} 天）")
+        except Exception as e:
+            run_logger.warning(f"[events] purge failed: {e}")
+        await asyncio.sleep(6 * 3600)
 
 
 async def _room_files_purge_loop():
@@ -3413,12 +3805,15 @@ async def create_room(request: Request):
     sn = _s(body.get("sn"), 64)
     ticket_no = _s(body.get("ticket_no"), 64)
     machine_model = _s(body.get("machine_model"), 128)
+    client_org = _s(body.get("client_org"), 64)
     if sn is None:
         return JSONResponse({"error": "SN 含非法字符或超过 64 字符"}, status_code=400)
     if ticket_no is None:
         return JSONResponse({"error": "工单号含非法字符或超过 64 字符"}, status_code=400)
     if machine_model is None:
         return JSONResponse({"error": "机型含非法字符或超过 128 字符"}, status_code=400)
+    if client_org is None:
+        return JSONResponse({"error": "客户单位含非法字符或超过 64 字符"}, status_code=400)
     # 客户机系统（创建时选择——连接后 identify 自动纠正）：windows / linux
     os_choice = (body.get("os") or "windows").strip().lower()
     if os_choice not in ("windows", "linux"):
@@ -3436,8 +3831,12 @@ async def create_room(request: Request):
         validity_days = 30
     if not sn:
         return JSONResponse({"error": "SN 序列号必填"}, status_code=400)
-    if not ticket_no:
-        return JSONResponse({"error": "工单号必填"}, status_code=400)
+    # 2026-10-30：工单号/机型改为「自动识别」字段——允许为空（识别到之后再补），不再强制必填
+    ticket_no = ticket_no or ""
+    machine_model = machine_model or ""
+    # 人类可读房间名：客户单位-机型-SN-日期（缺项用「未识别」占位，长度截断到 96）
+    _md = datetime.now().strftime("%m%d")
+    room_name = "-".join([client_org or "未填单位", machine_model or "未识别机型", sn, _md])[:96]
     # 生成唯一 8 位房间码（内存 + 数据库双向查重）
     code = None
     for _ in range(50):
@@ -3452,8 +3851,9 @@ async def create_room(request: Request):
     try:
         conn = _db_connect()
         conn.execute(
-            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, engineer_username, expires_at, os) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (code, sn, ticket_no, machine_model, user["username"], expires_at, os_choice),
+            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, engineer_username, expires_at, os, client_org, room_name) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (code, sn, ticket_no, machine_model, user["username"], expires_at, os_choice, client_org or "", room_name),
         )
         conn.commit()
         conn.close()
@@ -3462,7 +3862,18 @@ async def create_room(request: Request):
         run_logger.error(f"Room create DB error: {e}")
         return JSONResponse({"error": f"创建失败: {e}"}, status_code=500)
     run_logger.info(f"Room created: {code} by {user['username']} (SN={sn}, ticket={ticket_no}, days={validity_days}, os={os_choice})")
+    # 2026-11-03：建房入轨迹（时间轴的起点）
+    try:
+        record_event("room.created",
+                     {"sn": sn, "ticket_no": ticket_no, "model": machine_model,
+                      "org": client_org or "", "room_name": room_name, "os": os_choice,
+                      "days": validity_days},
+                     room_code=code, actor=user["username"], actor_role=user.get("role", ""),
+                     stream=f"room:{code}")
+    except Exception:
+        pass
     return {"room_code": code, "sn": sn, "ticket_no": ticket_no, "machine_model": machine_model,
+            "client_org": client_org or "", "room_name": room_name,
             "expires_at": expires_at, "days_left": room_days_left(expires_at), "os": os_choice}
 
 
@@ -3692,6 +4103,8 @@ async def my_rooms(request: Request):
             "ticket_no": d["ticket_no"],
             "machine_model": d["machine_model"],
             "engineer_username": d["engineer_username"],
+            "client_org": d.get("client_org") or "",
+            "room_name": d.get("room_name") or "",
             "created_at": d["created_at"],
             "last_seen": last_seen,
             "bridge_online": bridge_online,
@@ -4159,6 +4572,10 @@ async def room_close(room_code: str, request: Request):
                 pass
         room.bridge_ws = None
     run_logger.info(f"[{room_code}] room closed by {user['username']} (archived)")
+    try:
+        await _im_system(room_code, f"房间已结单归档 · 处理人 {user['username']}（协作消息转为只读）")
+    except Exception:
+        pass
     return {"ok": True, "status": "archived", "report": archive}
 
 
@@ -4303,6 +4720,10 @@ async def room_escalate(room_code: str, request: Request):
         run_logger.error(f"[{room_code}] escalate failed: {e}")
         return JSONResponse({"error": "升级失败"}, status_code=500)
     run_logger.info(f"[{room_code}] escalated to {expert} by {user['username']}")
+    try:
+        await _im_system(room_code, f"房间已升级二线 · 处理人 {expert}（{user['username']} 升级）")
+    except Exception:
+        pass
     return {"ok": True, "status": "escalated", "escalated_to": expert}
 
 
@@ -4412,7 +4833,8 @@ async def expert_rooms(request: Request):
         size = 20
 
     sel = ("SELECT room_code, sn, ticket_no, machine_model, os, engineer_username, status, "
-           "escalated_to, escalated_at, report_version, closed_at, created_at FROM rooms ")
+           "escalated_to, escalated_at, report_version, closed_at, created_at, "
+           "COALESCE(client_org,'') AS client_org, COALESCE(room_name,'') AS room_name FROM rooms ")
     try:
         conn = _db_connect()
 
@@ -4507,7 +4929,8 @@ async def joinable_rooms(request: Request):
     try:
         conn = _db_connect()
         rows = conn.execute(
-            "SELECT room_code, sn, ticket_no, machine_model, os, engineer_username, status, created_at "
+            "SELECT room_code, sn, ticket_no, machine_model, os, engineer_username, status, created_at, "
+            "COALESCE(room_name,'') AS room_name, COALESCE(client_org,'') AS client_org "
             "FROM rooms WHERE COALESCE(status,'') != 'archived' "
             "AND created_at >= datetime('now','localtime','-30 days') "
             "AND engineer_username != ? "
@@ -5223,6 +5646,18 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
             "cwd": fn_args.get("cwd", ""),
         }
 
+    # P0 事件 · checkpoint 纪律：命令下发前先记录「调用事实」
+    #   截图/预览帧、探针这类高频内部调用不记，避免刷爆事件表
+    _skip_ev = cmd_id.startswith(("shot", "nshot", "probe"))   # 只跳过截图/预览/探针这类高频内部调用
+    if not _skip_ev:
+        try:
+            record_event("op.call", {"tool": fn_name,
+                                     "command": (str(fn_args.get("command") or fn_args.get("path") or ""))[:1000]},
+                         room_code=room.code, stream=f"room:{room.code}", actor="bridge",
+                         actor_role="system", step=cmd_id)
+        except Exception:
+            pass
+
     if room.bridge_ws:
         if room.bridge_mode == "v2":
             # v2 文件通道：FileDownload → 拉取 bridge 端文件；FileUpload → 推送
@@ -5278,6 +5713,27 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
         result = "[timeout] Command exceeded 240s"
 
     room.pending_commands.pop(cmd_id, None)
+    # 2026-11-03：记录命令结果（事件只存摘要与引用，全文落盘 room_event_blobs/）
+    try:
+        if not cmd_id.startswith(("shot", "nshot", "probe")):
+            _txt = str(result or "")
+            _blob = ""
+            if len(_txt) > 400:
+                try:
+                    _dir = pathlib.Path(__file__).resolve().parent / "room_event_blobs" / room.code
+                    _dir.mkdir(parents=True, exist_ok=True)
+                    _bid = uuid.uuid4().hex
+                    (_dir / (_bid + ".txt")).write_text(_txt, encoding="utf-8")
+                    _blob = f"{room.code}/{_bid}.txt"
+                except Exception:
+                    _blob = ""
+            record_event("op.result", {"tool": fn_name, "chars": len(_txt),
+                                       "preview": _txt[:400], "blob": _blob,
+                                       "sha256": hashlib.sha256(_txt.encode("utf-8", "replace")).hexdigest()[:16]},
+                         room_code=room.code, stream=f"room:{room.code}",
+                         actor="bridge", actor_role="system", step=cmd_id)
+    except Exception:
+        pass
     return result
 
 
@@ -7917,7 +8373,19 @@ async def tools_tslog(request: Request):
         'if (!(Test-Path "$d\\tslog.bat")) { Write-Output "EXTRACT_FAIL"; exit }; '
         'Push-Location $d; cmd /c "tslog.bat"; Pop-Location; '
         'New-Item -ItemType Directory -Force -Path "C:\\DiagLogs\\tslog" | Out-Null; '
-        '$pk = Get-ChildItem "$d\\*.7z" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1; '
+        # 2026-11-03 修复：工具可能打 7z 也可能打 zip（7z 被杀软拦截时改用系统 tar）
+        '$pk = Get-ChildItem "$d\\*.7z","$d\\*.zip" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1; '
+        # 兜底：工具没打出任何包，但采集目录（tslog_日期时间）还在 → 服务器侧自己打包
+        'if (-not $pk) { '
+        '  $wk = Get-ChildItem "$d\\tslog_*" -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1; '
+        '  if ($wk) { '
+        '    $z2 = "$d\\fallback_" + (Get-Date -Format "yyyyMMddHHmmss") + ".zip"; '
+        '    Write-Output ("TSLOG_FALLBACK_PACK " + $wk.FullName); '
+        '    try { Compress-Archive -Path (Join-Path $wk.FullName "*") -DestinationPath $z2 -Force -ErrorAction Stop; $pk = Get-Item $z2 -ErrorAction SilentlyContinue } '
+        '    catch { Write-Output ("TSLOG_FALLBACK_FAIL " + $_.Exception.Message) } '
+        '  } '
+        '}; '
+        'if (-not $pk) { Write-Output ("TSLOG_DIAG 7z=" + (Test-Path "$d\\tools\\7-Zip\\7z.exe") + " tar=" + [bool](Get-Command tar.exe -ErrorAction SilentlyContinue) + " workdirs=" + ((Get-ChildItem "$d\\tslog_*" -Directory -ErrorAction SilentlyContinue | Measure-Object).Count)) }; '
         'if ($pk) { $dest = "C:\\DiagLogs\\tslog\\" + $pk.Name; Move-Item $pk.FullName $dest -Force; Write-Output ("TSLOG_DONE " + $dest + " (" + [math]::Round($pk.Length/1MB,2) + " MB)") } else { Write-Output "TSLOG_NO_PACKAGE" }'
     )
 
@@ -8111,6 +8579,17 @@ async def bridge_upload(request: Request, file: UploadFile = File(...)):
             return JSONResponse({"error": _err}, status_code=502)
         # 2026-09-10：直接完成 pending future（不依赖 bridge WS 回传——防 bridge 断线丢结果导致前端卡死）
         _resolve_pending(room_code, request.query_params.get("fid", ""), f"[upjob] job={d['job_id']}")
+        # P0 事件：日志包/IDG 上传完成（只记元数据：文件名/大小/job）
+        try:
+            record_event("artifact.uploaded",
+                         {"filename": getattr(file, "filename", ""),
+                          "content_length": _clen, "job_id": locals().get("job_id", ""),
+                          "elapsed_s": round(time.time() - _t0, 1)},
+                         room_code=room_code, stream=f"room:{room_code}",
+                         actor="bridge", actor_role="system")
+        except Exception:
+            pass
+
         return JSONResponse({"ok": True, "job_id": d["job_id"],
                              "analyze_url": f"/log-analyzer/analyze/{d['job_id']}"})
     except Exception as e:
@@ -8344,6 +8823,54 @@ if ($fatal -ne '') {
 """
 
 
+async def _bridge_native_shot(room, preview: bool = False, max_width: int = 0,
+                              quality: int = 90, monitor: str = "primary") -> dict:
+    """让桥接器原生抓屏（GDI），返回回执字典。2026-11-02
+
+    协议：发 {"type":"screenshot","id":...,"preview":bool,"max_width":int,"quality":int}
+          → 收 screenshot_result（见 ws_bridge 分发）。
+    编码在客户机完成：高清=PNG，观察=缩放后的 JPEG（体积小，1fps 才跑得动）。
+    """
+    sid = f"nshot_{uuid.uuid4().hex[:8]}"
+    fut: asyncio.Future = asyncio.get_event_loop().create_future()
+    room.pending_commands[sid] = fut
+    try:
+        await room.bridge_ws.send_json({"type": "screenshot", "id": sid,
+                                        "preview": bool(preview),
+                                        "max_width": int(max_width or 0),
+                                        "quality": int(quality or 90),
+                                        "monitor": monitor or "primary"})
+        raw = await asyncio.wait_for(fut, timeout=60)
+    finally:
+        room.pending_commands.pop(sid, None)
+    txt = str(raw or "")
+    if txt.startswith("SHOTJSON:"):
+        try:
+            return json.loads(txt[len("SHOTJSON:"):])
+        except Exception as e:
+            return {"ok": False, "error": f"回执解析失败：{e}"}
+    return {"ok": False, "error": txt or "桥接器没有回执"}
+
+
+def _shot_preview(url: str, maxw: int, quality: int) -> str:
+    """把回传的 PNG 原图缩放成预览 JPEG（在服务器做，客户机只出原图）。"""
+    if not url.startswith("/static/downloads/"):
+        return url
+    try:
+        from PIL import Image
+    except Exception:
+        return url
+    src = static_dir / "downloads" / os.path.basename(url)
+    if not src.exists():
+        return url
+    im = Image.open(src).convert("RGB")
+    if maxw > 0 and im.width > maxw:
+        im = im.resize((maxw, max(1, round(im.height * maxw / im.width))), Image.LANCZOS)
+    out = src.with_name(src.stem + ".preview.jpg")
+    im.save(out, "JPEG", quality=max(10, min(95, quality)), optimize=True)
+    return f"/static/downloads/{out.name}"
+
+
 @app.post("/api/tools/screenshot")
 async def tools_screenshot(request: Request):
     user = _require_user(request)
@@ -8378,6 +8905,55 @@ async def tools_screenshot(request: Request):
     _fmt = "jpg" if _preview else "png"
     _sub = "preview" if _preview else "shots"
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    # 2026-11-02：桥接器原生截图优先（Windows，桥接器 >= 1.4.0）
+    #   背景：Defender 用签名 HackTool:PowerShell/EmpireGetScreenshot.C 误杀一切
+    #   PowerShell + CopyFromScreen 的抓屏脚本（客户机不让加白名单），改为桥接器自己用 GDI 抓屏。
+    #   老桥接器不上报 caps → 自动走下面的 PowerShell 老路径，行为与改动前完全一致。
+    if plat != "linux" and "screenshot" in (getattr(room, "bridge_caps", None) or set()):
+        try:
+            _info = await asyncio.wait_for(
+                _bridge_native_shot(room, _preview, _maxw, _q,
+                                    str(body.get("monitor") or "primary")), timeout=90)
+        except Exception as e:
+            return JSONResponse({"error": f"原生截图失败：{e}", "engine": "bridge"}, status_code=502)
+        if not _info.get("ok"):
+            return JSONResponse({
+                "error": "截图失败：" + (_info.get("error") or "未知原因"),
+                "engine": "bridge",
+                "hint": "抓屏由桥接器(内置 GDI)完成，不再是 PowerShell；常见原因：锁屏/无交互桌面会话/权限不足"},
+                status_code=502)
+        _real = _info.get("path") or ""
+        _dims = {"width": int(_info.get("width") or 0), "height": int(_info.get("height") or 0),
+                 "monitors": int(_info.get("monitors") or 0), "mode": "bridge-native",
+                 "bytes": int(_info.get("bytes") or 0), "ms": int(_info.get("ms") or 0),
+                 "src_width": int(_info.get("src_width") or 0),
+                 "src_height": int(_info.get("src_height") or 0),
+                 "format": _info.get("format") or "", "monitors_info": ""}
+        try:
+            _dl = await asyncio.wait_for(
+                execute_bridge_command(room, "FileDownload", {"path": _real},
+                                       f"shotdl_{uuid.uuid4().hex[:8]}"), timeout=300)
+        except Exception as e:
+            return JSONResponse({"error": f"取回截图失败：{e}", "engine": "bridge"}, status_code=502)
+        _m = re.search(r"saved=(\S+)", _dl or "")
+        _url = _m.group(1) if _m else ""
+        if not _url:
+            return JSONResponse({"error": "截图已生成但回传失败：" + (_dl or "")[:200],
+                                 "engine": "bridge"}, status_code=502)
+        # 预览缩放：桥接器 1.4.0 已在客户机侧出 JPEG → 服务器无需再处理；
+        #   老桥接器/异常情况（回执里 format 不是 jpg）才在服务器用 Pillow 兜底。
+        if _preview and str(_info.get("format") or "").lower() != "jpg":
+            try:
+                _url = _shot_preview(_url, _maxw, _q)
+                run_logger.info(f"[{room_code}] 预览缩放（服务器兜底） → {_url}（maxw={_maxw}, q={_q}）")
+            except Exception as e:
+                run_logger.warning(f"[{room_code}] 预览缩放失败，回退原图：{e}")
+        run_logger.info(f"[{room_code}] 远程截图(桥接器原生) {_real} → {_url}（{user['username']}）")
+        save_message(room_code, "tool", f"[远程截图] {_real} → {_url}", "截图", 1)
+        return {"ok": True, "url": _url, "path": _real, "engine": "bridge",
+                "at": datetime.now().strftime("%H:%M:%S"), **_dims}
+
     if plat == "linux":
         _fmt = "png"   # Linux 侧抓屏工具只出 PNG，预览缩放不支持（服务器不参与图像处理）
         out_path = f"/tmp/nexpert-shot-{room_code}-{ts}.png"
@@ -8408,32 +8984,66 @@ async def tools_screenshot(request: Request):
                    .replace("__MAXW__", str(_maxw))
                    .replace("__FMT__", _fmt)
                    .replace("__Q__", str(_q)))
-        # 2026-10-28：改成「gzip + base64」内联。
-        #   历史踩坑：把整段脚本 base64 塞进 -EncodedCommand，再被桥接器用
-        #   `powershell -Command "powershell … -EncodedCommand <12KB>"` 包一层，
-        #   实机报 "使用1个参数调用Start时发生异常:文件名或扩展名太长"（命令行过长）。
-        #   压缩后 EncodedCommand 从 ~12.7KB 降到 ~6KB，稳在 8K 以内。
-        _gz = gzip.compress(_stage2.encode("utf-8"), 9)
-        _b64 = base64.b64encode(_gz).decode("ascii")
-        _stage1 = (
+        # 2026-10-29：prologue 内置——DPI 感知 + 加载绘图程序集（原在 stage1 里，现在合并进脚本本体）
+        # 2026-11-02：去掉内联 C#（Add-Type -TypeDefinition + DllImport）——
+        #   实测被 Windows Defender 的 AMSI 判为恶意内容并阻止执行（SCRIPT_ERR=该脚本包含恶意内容）。
+        #   现在只加载程序集，不再编译原生调用。
+        _prologue = (
             "$ErrorActionPreference='Stop';"
-            # DPI 感知必须在使用绘图/屏幕 API 之前声明，否则 125%/150% 缩放下只抓到左上角
-            "try { "
-            "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;"
-            "public class __DpiAw{[DllImport(\"user32.dll\")]public static extern bool SetProcessDPIAware();}' "
-            "-ErrorAction Stop; [__DpiAw]::SetProcessDPIAware() | Out-Null "
-            "} catch { }; "
             "try { Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing } "
             "catch { Write-Output 'RESULT=FAIL'; Write-Output 'MSG=E_ASSEMBLY'; exit 0 }; "
-            "Write-Output 'STAGE1=OK'; "
-            "$b='" + _b64 + "'; "
-            "$ms=New-Object IO.MemoryStream(,[Convert]::FromBase64String($b)); "
-            "$gz=New-Object IO.Compression.GZipStream($ms,[IO.Compression.CompressionMode]::Decompress); "
-            "$t=(New-Object IO.StreamReader($gz,[Text.Encoding]::UTF8)).ReadToEnd(); "
-            "Invoke-Expression $t"
+            "Write-Output 'STAGE1=OK';\n"
         )
-        _enc = base64.b64encode(_stage1.encode("utf-16-le")).decode("ascii")
-        cmd = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + _enc
+        _stage2 = _prologue + _stage2
+        # 2026-10-29：彻底不用 -EncodedCommand。
+        #   实机反馈：编码命令被安全软件当成可疑载荷拦下（"使用1个参数调用Start时发生异常：拒绝访问"，
+        #   exit_code -1），而且桥接器会把我们的命令再包一层 powershell -Command，等于嵌套子进程。
+        #   新策略（两条路都不起子进程）：
+        #     · v2 桥接器：把脚本作为文件推到客户机 %TEMP%\clouddiag\，用 & 直接在当前会话执行
+        #     · 老桥接器：gzip+base64 在当前会话内解压后 Invoke-Expression
+        #   两者都不再拼 -EncodedCommand，也不启动新的 powershell.exe。
+        _gz = gzip.compress(_stage2.encode("utf-8"), 9)
+        _b64 = base64.b64encode(_gz).decode("ascii")
+        _sname = f"nexpert_shot_{uuid.uuid4().hex[:8]}.ps1"
+        _pushed = False
+        if getattr(room, "bridge_mode", "") == "v2" and room.bridge_ws:
+            try:
+                await room.bridge_ws.send_json({
+                    "type": "file_upload", "id": f"shotup_{uuid.uuid4().hex[:8]}",
+                    "path": _sname, "name": _sname,
+                    "data": base64.b64encode(_stage2.encode("utf-8")).decode("ascii"),
+                    "chunk": 0, "total": 1,
+                })
+                _pushed = True
+                run_logger.info(f"[{room_code}] 截图脚本已推送到客户机临时目录（{_sname}）")
+            except Exception as e:
+                run_logger.warning(f"[{room_code}] 截图脚本推送失败，回退内联执行：{e}")
+                _pushed = False
+
+        if _pushed:
+            # 2026-11-02：加自诊断输出（EXISTS/SIZE/POLICY），脚本不再立即删除，
+            #   便于「命令返回空」这类问题一眼定位：是文件没落地、还是被策略拦、还是脚本本身报错。
+            cmd = (
+                "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue;"
+                "$ErrorActionPreference='Continue';"
+                "$p = Join-Path $env:TEMP '" + "clouddiag" + "\\" + _sname + "';"
+                "Write-Output ('PUSHED=' + $p);"
+                "Write-Output ('EXISTS=' + (Test-Path -LiteralPath $p));"
+                "if (Test-Path -LiteralPath $p) { "
+                "  Write-Output ('SIZE=' + (Get-Item -LiteralPath $p).Length); "
+                "  Write-Output ('POLICY=' + (Get-ExecutionPolicy -Scope Process)); "
+                "  try { & $p } catch { Write-Output ('SCRIPT_ERR=' + $_.Exception.Message) } "
+                "} else { Write-Output 'RESULT=FAIL'; Write-Output 'MSG=NO_SCRIPT' }"
+            )
+        else:
+            cmd = (
+                "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue;"
+                "$ErrorActionPreference='Continue';"
+                "$ms=New-Object IO.MemoryStream(,[Convert]::FromBase64String('" + _b64 + "')); "
+                "$gz=New-Object IO.Compression.GZipStream($ms,[IO.Compression.CompressionMode]::Decompress); "
+                "$t=(New-Object IO.StreamReader($gz,[Text.Encoding]::UTF8)).ReadToEnd(); "
+                "Invoke-Expression $t"
+            )
 
     try:
         shot_log = await asyncio.wait_for(
@@ -8548,6 +9158,802 @@ async def tools_screenshot(request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════
+# 协作消息（IM，2026-10-29）：现场 ↔ 二线 房间内即时通讯
+#   · 表 room_im 与 AI 对话的 messages 表严格分开（防止污染 AI 上下文）
+#   · 附件复用 room_files：消息只存 file_id
+#   · 广播：房间内所有在线浏览器（room.browser_clients）
+#   · 不经过桥接器——客户机没开机也能聊
+# ═══════════════════════════════════════════════════════════════
+IM_MAX_TEXT = 4000
+IM_RECALL_SECONDS = 120
+
+
+async def _im_broadcast(room_code: str, payload: dict):
+    """把消息推给该房间所有在线浏览器（多端）。"""
+    room = rooms.get(room_code.upper())
+    if not room:
+        return
+    dead = []
+    for c in list(getattr(room, "browser_clients", [])):
+        ws = c.get("ws")
+        if ws is None:
+            continue
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            dead.append(c)
+    if dead:
+        try:
+            room.browser_clients = [c for c in room.browser_clients if c not in dead]
+        except Exception:
+            pass
+
+
+def _im_row(row, uname: str = "") -> dict:
+    if not row:
+        return {}
+    d = dict(row) if not isinstance(row, dict) else row
+    fid = d.get("file_id") or ""
+    out = {
+        "id": d.get("id"), "sender": d.get("sender"), "sender_role": d.get("sender_role"),
+        "kind": d.get("kind"), "text": d.get("text") or "", "file_id": fid,
+        "reply_to": d.get("reply_to"), "recalled": bool(d.get("recalled_at")),
+        "at": d.get("created_at"), "mine": bool(uname and d.get("sender") == uname),
+    }
+    if fid:
+        try:
+            conn = _db_connect()
+            f = conn.execute("SELECT filename, size, mime FROM room_files WHERE id=?", (fid,)).fetchone()
+            conn.close()
+            if f:
+                out["file"] = {"id": fid, "filename": f["filename"], "size": f["size"], "mime": f["mime"],
+                               "url": f"/api/room/file/{fid}"}
+        except Exception:
+            pass
+    return out
+
+
+def _im_insert(room_code: str, sender: str, role: str, kind: str, text: str = "", file_id: str = "") -> dict:
+    conn = _db_connect()
+    cur = conn.execute(
+        "INSERT INTO room_im (room_code, sender, sender_role, kind, text, file_id) VALUES (?,?,?,?,?,?)",
+        (room_code.upper(), sender, role, kind, (text or "")[:IM_MAX_TEXT], file_id or ""),
+    )
+    rid = cur.lastrowid
+    row = conn.execute("SELECT * FROM room_im WHERE id=?", (rid,)).fetchone()
+    conn.commit()
+    conn.close()
+    return _im_row(row, uname=sender)
+
+
+async def _im_system(room_code: str, text: str):
+    """系统事件消息（升级二线 / 结单 / 上传日志包等）。"""
+    try:
+        msg = _im_insert(room_code, "system", "system", "system", text)
+        await _im_broadcast(room_code, {"type": "im", "msg": msg})
+    except Exception as e:
+        run_logger.warning(f"[im] 系统消息写入失败（{room_code}）：{e}")
+
+
+def _room_closed(room_code: str) -> bool:
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT status, closed_at FROM rooms WHERE room_code=?", (room_code.upper(),)).fetchone()
+        conn.close()
+    except Exception:
+        return False
+    if not row:
+        return False
+    return bool(row["closed_at"]) or (row["status"] or "") in ("closed", "archived")
+
+
+@app.get("/api/room/im")
+async def im_list(request: Request, room_code: str = "", before_id: int = 0,
+                  after_id: int = 0, limit: int = 30):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    ok, _role, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    limit = max(1, min(int(limit or 30), 100))
+    sql = "SELECT * FROM room_im WHERE room_code=?"
+    args = [room_code.upper()]
+    if after_id:
+        sql += " AND id>?"; args.append(int(after_id))
+        sql += " ORDER BY id ASC LIMIT ?"; args.append(limit)
+    elif before_id:
+        sql += " AND id<?"; args.append(int(before_id))
+        sql += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+    else:
+        sql += " ORDER BY id DESC LIMIT ?"; args.append(limit)
+    conn = _db_connect()
+    rows = conn.execute(sql, args).fetchall()
+    conn.close()
+    msgs = [_im_row(r, user["username"]) for r in rows]
+    if after_id:
+        pass
+    else:
+        msgs = list(reversed(msgs))
+    return {"ok": True, "messages": msgs, "closed": _room_closed(room_code)}
+
+
+
+# ═══════════════════════════════════════════════════════════
+# 轨迹（P0 · 2026-11-02）：只读投影接口
+#   事件是唯一真相；这里只做查询 + 投影，不做任何写入
+# ═══════════════════════════════════════════════════════════
+
+# ── 轨迹客户版投影（Surface 简化版 · 2026-11-03）───────────────────────────
+# 原则：脱敏在服务端做，前端只负责显示（渲染层不做业务判断）
+_MASK_PATH_RE = re.compile(r"[A-Za-z]:\\[^\s\"',;)]+")
+_MASK_USER_RE = re.compile(r"\\?Users\\[^\\\s\"',;)]+")
+_MASK_IP_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+
+_CLIENT_KEEP_KEYS = ("label", "action_key", "ok", "ms", "rows", "note", "chars", "kind", "tools_used",
+                     "level", "headline", "facts", "sn", "model", "org", "room_name", "os",
+                     "hostname", "version", "mode", "reason", "count", "days",
+                     "name", "size", "size_mb", "seconds", "failed", "items", "failed_items",
+                     "op", "reviewer", "to", "draft", "archived", "error", "msg", "tier", "tool")
+
+
+def _mask_text(s: str) -> str:
+    """把路径/用户名/IP 替换掉；其余原样保留。"""
+    t = str(s or "")
+    t = _MASK_PATH_RE.sub("[已隐藏路径]", t)
+    t = _MASK_USER_RE.sub("[已隐藏路径]", t)
+    t = _MASK_IP_RE.sub("[已隐藏]", t)
+    return t
+
+
+def _client_view_event(e: dict) -> dict:
+    """客户版：去掉命令原文/输出/附件/账号，只留时间、角色、动作、结果规模。"""
+    d = e.get("data") or {}
+    keep = {k: d[k] for k in _CLIENT_KEEP_KEYS if k in d}
+    if isinstance(keep.get("note"), str):
+        keep["note"] = _mask_text(keep["note"])[:160]
+    if d.get("q"):
+        keep["q"] = _mask_text(str(d["q"]))[:200]
+    if isinstance(keep.get("facts"), list):
+        keep["facts"] = [{"k": f.get("k"), "v": _mask_text(str(f.get("v")))[:80]}
+                         for f in keep["facts"] if isinstance(f, dict)][:20]
+    if isinstance(keep.get("reason"), str):
+        keep["reason"] = _mask_text(keep["reason"])[:120]
+    out = {
+        "id": e.get("id"), "seq": e.get("seq"), "kind": e.get("kind"),
+        "ts": e.get("ts"), "role": e.get("role") or "",
+        "turn": e.get("turn") or "", "step": e.get("step") or "",
+        "children": e.get("children", 0),
+        "actor": "",                      # 账号名不外发
+        "actor_role": e.get("role") or e.get("actor_role") or "",
+        "has_hidden_detail": bool(d.get("command") or d.get("blob") or d.get("preview")),
+        "data": keep,
+    }
+    return out
+
+
+
+def _room_window_start(conn, room_code: str) -> int:
+    """房间作业起点（epoch ms）：优先 room.created，其次首条房间事件前 1 小时，最后 rooms.created_at。
+    轨迹里的「登录系统」只显示这之后发生的，避免把账号历史登录灌进来。"""
+    try:
+        r = conn.execute("SELECT MIN(ts_srv) AS m FROM events WHERE room_code=? AND kind='room.created'",
+                         (room_code,)).fetchone()
+        if r and r["m"]:
+            return int(r["m"])
+        r = conn.execute("SELECT MIN(ts_srv) AS m FROM events WHERE room_code=?", (room_code,)).fetchone()
+        if r and r["m"]:
+            return int(r["m"]) - 3600 * 1000
+        r = conn.execute("SELECT created_at FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        if r and r["created_at"]:
+            dt = datetime.strptime(r["created_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1000)
+    except Exception:
+        pass
+    return 0
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 结单报告（P1 · 2026-11-03）
+#   从 events 事件流生成独立 HTML：客户版（脱敏）/ 内部版（含命令与输出链接）
+#   只读投影，不写任何业务数据；一次作业 = 一个房间 = 一份报告
+# ══════════════════════════════════════════════════════════════════════════
+_TURN_CN = {"bsod": "死机、蓝屏", "reboot": "自动重启", "slow": "卡顿", "display": "花屏、闪屏"}
+_LEVEL_CN = {"ok": "未发现异常", "warn": "需要关注", "bad": "发现故障", "nodata": "数据不足"}
+_LEVEL_CLS = {"ok": "ok", "warn": "warn", "bad": "bad", "nodata": "muted"}
+
+
+def _h(x) -> str:
+    return (str("" if x is None else x).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _fmt_ts(ms) -> str:
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return "—"
+
+
+def _fmt_size(n) -> str:
+    try:
+        n = float(n or 0)
+    except Exception:
+        return "—"
+    for u in ("B", "KB", "MB", "GB"):
+        if n < 1024 or u == "GB":
+            return (f"{n:.0f} {u}" if u == "B" else f"{n:.1f} {u}")
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+def _build_room_report(room_code: str, view: str = "client") -> tuple:
+    """返回 (html, meta)。view=client 脱敏；view=full 含命令原文与输出链接。"""
+    conn = _db_connect()
+    room = conn.execute("SELECT * FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+    rows = conn.execute("SELECT * FROM events WHERE room_code=? ORDER BY ts_srv ASC, rowid ASC",
+                        (room_code,)).fetchall()
+    files = conn.execute("SELECT filename, size, created_at FROM room_files WHERE room_code=? "
+                         "AND (deleted_at IS NULL OR deleted_at='') ORDER BY id ASC", (room_code,)).fetchall()
+    # 处理人显示名：优先 users.name（客户版不外发登录账号）
+    eng_name = ""
+    try:
+        urow = conn.execute("SELECT name FROM users WHERE username=?",
+                            (room["engineer_username"],)).fetchone()
+        eng_name = (urow["name"] if urow else "") or ""
+    except Exception:
+        eng_name = ""
+    conn.close()
+    if not room:
+        return None, None
+
+    evs = []
+    for r in rows:
+        try:
+            data = json.loads(r["data"] or "{}")
+        except Exception:
+            data = {}
+        e = {"id": r["id"], "seq": r["seq"], "kind": r["kind"], "ts": r["ts_srv"],
+             "role": r["actor_role"], "actor": r["actor"], "turn": r["turn"], "step": r["step"],
+             "data": data}
+        evs.append(e)
+
+    cards, concludes, timeline, notes = {}, {}, [], []
+    t0 = evs[0]["ts"] if evs else None
+    t1 = evs[-1]["ts"] if evs else None
+    steps_by_turn = {}
+    for e in evs:
+        k, d = e["kind"], e["data"]
+        if k == "diag.step.end" and e["turn"]:
+            c = cards.setdefault(e["turn"], {"steps": 0, "rows": 0, "ms": 0, "failed": 0})
+            c["steps"] += 1
+            c["rows"] += d.get("rows") if isinstance(d.get("rows"), int) else len(d.get("data_rows") or [])
+            c["ms"] += d.get("ms") or 0
+            if d.get("ok") is False:
+                c["failed"] += 1
+            timeline.append(e)          # 步骤完成也进时间轴（原 elif 分支把它漏掉了）
+            continue
+        if k == "diag.conclude":
+            concludes[d.get("action_key") or ""] = d
+            timeline.append(e)
+            continue
+        if k in ("room.created", "bridge.connect", "bridge.disconnect", "diag.step.start",
+                 "op.call", "op.result", "ai.turn", "im.message", "artifact.uploaded", "auth.login"):
+            timeline.append(e)
+
+    if view == "client":
+        # 客户版：只保留「客户看得懂」的节点（命令与结果回传是内部细节，交给内部版）
+        _CLIENT_KINDS = {"auth.login", "room.created", "bridge.connect", "diag.step.end",
+                         "diag.conclude", "artifact.uploaded"}
+        _kept, _bridges = [], 0
+        for e in timeline:
+            if e["kind"] not in _CLIENT_KINDS:
+                continue
+            if e["kind"] == "bridge.connect":
+                _bridges += 1
+                if _bridges > 2:          # 反复重连不刷屏
+                    continue
+            _kept.append(e)
+        timeline = [_client_view_event({**e, "data": dict(e["data"])}) for e in _kept]
+
+    # 读时去重：同 kind 且 10 秒内的重复记录只留一条（历史数据里存在重复 identify）
+    _dedup, _seen = [], {}
+    for e in timeline:
+        key = (e["kind"], e.get("turn") or "", e.get("step") or "")
+        prev = _seen.get(key)
+        if prev is not None and abs(e["ts"] - prev) < 10 * 1000:
+            continue
+        _seen[key] = e["ts"]
+        _dedup.append(e)
+    timeline = _dedup
+
+    # ── 时间轴行 ──
+    def row_html(e):
+        k, d = e["kind"], e["data"]
+        role = {"field": "现场", "cc": "渠道", "expert": "二线", "admin": "管理员",
+                "ai": "AI", "bridge": "客户机", "system": "系统",
+                "guest": "游客"}.get(e.get("role") or "", e.get("role") or "")
+        if view == "client" and not role:
+            role = ""
+        label, extra, cls = k, "", ""
+        if k == "auth.login":
+            label = "登录系统"
+        elif k == "room.created":
+            label = "创建房间"
+            extra = f"{d.get('sn','')} · {d.get('model','')}"
+        elif k == "bridge.connect":
+            label = "客户机接入"
+            extra = "客户机已连入" if view == "client" else (d.get("hostname") or "")
+            if d.get("version"):
+                extra += f" · 桥接器 v{d['version']}"
+        elif k == "bridge.disconnect":
+            label = "客户机断开"
+            extra = (d.get("reason") or "")[:80]
+        elif k == "diag.step.end":
+            label = "检查完成"
+            if view == "client":
+                # 客户版不显示工具执行毫秒（易被误读成"卡顿时长"）
+                extra = f"{d.get('label') or ''} · 采集 {d.get('rows','')} 条数据"
+            else:
+                extra = f"{d.get('label') or ''} · {d.get('rows','')} 条 · {d.get('ms') or 0} ms"
+            cls = "" if d.get("ok") is not False else "bad"
+        elif k == "op.call":
+            label = "下发检查命令"
+            extra = ("（命令内容已隐藏）" if view == "client"
+                     else str(d.get("command") or "")[:90])
+        elif k == "op.result":
+            label = "结果回传"
+            extra = f"{d.get('chars') or 0} 字符" + ("（内容已隐藏）" if view == "client" else " · 可查完整输出")
+        elif k == "ai.turn":
+            label = "AI 提问"
+            extra = str(d.get("q") or "")[:70]
+        elif k == "im.message":
+            label = "协作消息"
+            extra = str(d.get("text") or "")[:70]
+        elif k == "artifact.uploaded":
+            label = "上传日志包"
+            extra = str(d.get("filename") or d.get("name") or "")
+        elif k == "diag.conclude":
+            lv = d.get("level") or "nodata"
+            label = "给出结论"
+            extra = f"{_LEVEL_CN.get(lv, lv)} · {d.get('headline') or ''}"
+            cls = _LEVEL_CLS.get(lv, "")
+        return (f'<tr class="{cls}"><td class="t">{_fmt_ts(e["ts"])[11:]}</td>'
+                f'<td class="r">{_h(role)}</td><td class="l">{_h(label)}</td>'
+                f'<td class="x">{_h(extra)}</td></tr>')
+
+    # ── 卡片概览 ──
+    card_rows = []
+    for turn, c in cards.items():
+        cc = concludes.get(turn) or {}
+        lv = cc.get("level") or ""
+        card_rows.append(
+            f'<tr><td class="b">{_h(_TURN_CN.get(turn, turn))}</td>'
+            f'<td class="c">{c["steps"]} 步</td>'
+            f'<td class="c">{c["rows"]} 条</td>'
+            f'<td class="c">{c["ms"]/1000:.1f} s</td>'
+            f'<td class="c">{c["failed"]} 步</td>'
+            f'<td class="{_LEVEL_CLS.get(lv,"muted")}">{_h(_LEVEL_CN.get(lv,"未出结论"))}</td></tr>'
+            f'<tr class="sub"><td colspan="6">{_h(cc.get("headline") or "—")}</td></tr>')
+
+    # ── 结论要点 ──
+    fact_rows = []
+    for turn, cc in concludes.items():
+        for f in (cc.get("facts") or []):
+            fact_rows.append(f'<tr><td class="b">{_h(_TURN_CN.get(turn, turn))}</td>'
+                             f'<td>{_h(f.get("k"))}</td><td class="c">{_h(f.get("v"))}</td></tr>')
+
+    file_rows = "".join(
+        f'<tr><td>{_h(f["filename"])}</td><td class="c">{_fmt_size(f["size"])}</td>'
+        f'<td class="c">{_h(f["created_at"] or "")}</td></tr>' for f in files) or \
+        '<tr><td colspan="3" class="muted">本次作业没有留存附件</td></tr>'
+
+    dur = ""
+    if t0 and t1:
+        sec = max(0, int((t1 - t0) / 1000))
+        dur = f"{sec // 60} 分 {sec % 60} 秒"
+
+    mode_cn = "客户版（已脱敏）" if view == "client" else "内部版（含命令原文）"
+    html_out = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>诊断报告 · {_h(room["room_code"])}</title>
+<style>
+:root{{--brand:#2468F2;--line:#E5E8EF;--text:#1B2432;--text2:#5A6478;--bg:#F6F8FC;--ok:#0E9F6E;--warn:#C77700;--bad:#D64545}}
+*{{box-sizing:border-box}}
+body{{margin:0;background:#fff;color:var(--text);font:14px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}}
+.wrap{{max-width:960px;margin:0 auto;padding:28px 32px 60px}}
+.hd{{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:2px solid var(--brand)}}
+.hd h1{{margin:0;font-size:20px;font-weight:650;letter-spacing:.3px}}
+.hd .tag{{margin-left:auto;font-size:12px;color:var(--text2);border:1px solid var(--line);border-radius:999px;padding:3px 10px}}
+h2{{font-size:14px;font-weight:650;margin:26px 0 10px;padding-left:9px;border-left:3px solid var(--brand)}}
+table{{width:100%;border-collapse:collapse;font-size:13px}}
+th,td{{border-bottom:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}}
+th{{background:var(--bg);color:var(--text2);font-weight:600;font-size:12px}}
+td.t,td.c{{font-variant-numeric:tabular-nums;white-space:nowrap}}
+td.r{{width:64px;color:var(--text2)}}
+td.b{{font-weight:600;width:132px}}
+td.x{{color:var(--text2);word-break:break-all}}
+tr.sub td{{border-bottom:1px solid var(--line);background:#FBFCFE;color:var(--text2);font-size:12.5px}}
+.ok{{color:var(--ok)}}.warn{{color:var(--warn)}}.bad{{color:var(--bad)}}.muted{{color:var(--text2)}}
+tr.bad td.l{{color:var(--bad);font-weight:600}}
+.kv{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 18px;margin-top:4px}}
+.kv div{{border:1px solid var(--line);border-radius:8px;padding:9px 11px}}
+.kv span{{display:block;font-size:11.5px;color:var(--text2);margin-bottom:3px}}
+.kv b{{font-weight:600;font-size:13.5px;word-break:break-all}}
+.ft{{margin-top:30px;padding-top:12px;border-top:1px solid var(--line);color:var(--text2);font-size:12px;display:flex;gap:14px}}
+.ft .sp{{flex:1}}
+.bar{{display:flex;align-items:center;gap:8px;padding:10px 32px;background:var(--bg);border-bottom:1px solid var(--line);font-size:13px}}
+.bar .lbl{{color:var(--text2);margin-right:4px}}
+.bar .sp{{flex:1}}
+.btn{{border:1px solid var(--line);background:#fff;color:var(--text);border-radius:7px;padding:5px 12px;
+  text-decoration:none;font-size:12.5px;cursor:pointer;font-family:inherit}}
+.btn:hover{{border-color:var(--brand);color:var(--brand)}}
+.btn.ghost{{color:var(--text2)}}
+@media print{{.bar{{display:none}}.wrap{{max-width:none;padding:0 6mm}}h2{{page-break-after:avoid}}table{{page-break-inside:auto}}tr{{page-break-inside:avoid}}}}
+</style></head><body><div class="wrap">
+<div class="bar">
+  <span class="lbl">{_h(mode_cn)}</span>
+  <a class="btn" href="?view=client">客户版</a>
+  <a class="btn" href="?view=full">内部版</a>
+  <a class="btn" href="?view={_h(view)}&amp;download=1">下载 HTML</a>
+  <button class="btn" onclick="window.print()">打印 / 存 PDF</button>
+  <span class="sp"></span>
+  <button class="btn ghost" onclick="window.close()">关闭</button>
+</div>
+<div class="hd"><h1>设备诊断报告</h1><span class="tag">{_h(mode_cn)} · {_h(room["room_code"])}</span></div>
+
+<h2>作业信息</h2>
+<div class="kv">
+  <div><span>客户单位</span><b>{_h(room["client_org"] or "—")}</b></div>
+  <div><span>机器型号</span><b>{_h(room["machine_model"] or "—")}</b></div>
+  <div><span>SN 序列号</span><b>{_h(room["sn"] or "—")}</b></div>
+  <div><span>工单号</span><b>{_h(room["ticket_no"] or "—")}</b></div>
+  <div><span>房间 / 现场处理人</span><b>{_h(room["room_code"])} / {_h((eng_name or room["engineer_username"]) if view == "client" else (room["engineer_username"] or "—"))}</b></div>
+  <div><span>作业时段</span><b>{_fmt_ts(t0) if t0 else "—"} ~ {_fmt_ts(t1)[11:] if t1 else "—"}（{_h(dur or "—")}）</b></div>
+</div>
+
+<h2>诊断概览</h2>
+<table><thead><tr><th>故障分类</th><th>步骤</th><th>数据行</th><th>耗时</th><th>失败步</th><th>结论</th></tr></thead>
+<tbody>{"".join(card_rows) or '<tr><td colspan="6" class="muted">本次作业未执行诊断项</td></tr>'}</tbody></table>
+
+<h2>关键数据</h2>
+<table><thead><tr><th>故障分类</th><th>指标</th><th>结果</th></tr></thead>
+<tbody>{"".join(fact_rows) or '<tr><td colspan="3" class="muted">无</td></tr>'}</tbody></table>
+
+<h2>操作记录</h2>
+<table><thead><tr><th>时间</th><th>角色</th><th>动作</th><th>内容</th></tr></thead>
+<tbody>{"".join(row_html(e) for e in timeline[-120:]) or '<tr><td colspan="4" class="muted">无记录</td></tr>'}</tbody></table>
+
+<h2>附件清单</h2>
+<table><thead><tr><th>文件名</th><th>大小</th><th>上传时间</th></tr></thead><tbody>{file_rows}</tbody></table>
+
+<div class="ft"><span>Nexpert 设备诊断报告</span><span>房间 {_h(room["room_code"])}</span>
+<span class="sp"></span><span>生成时间 {_fmt_ts(int(time.time()*1000))}</span>
+<span>v{APP_VERSION}</span></div>
+</div></body></html>"""
+    meta = {"room_code": room["room_code"], "view": view, "events": len(evs),
+            "cards": list(cards.keys()), "concludes": len(concludes),
+            "files": len(files), "start": _fmt_ts(t0) if t0 else "",
+            "end": _fmt_ts(t1) if t1 else "", "duration_sec": int((t1 - t0) / 1000) if t0 and t1 else 0}
+    return html_out, meta
+
+
+
+# ── 前端埋点上报（2026-11-03）：调用记录 / 原始日志里已有的信息，统一进轨迹 ──
+# 只接受白名单 kind，长度受限；actor 一律取登录会话，前端传什么用户名都不认
+_UI_EVENT_KINDS = {
+    "approval.request", "approval.approve", "approval.deny",
+    "room.escalate", "gate.confirm", "gate.blocked",
+    "diag.batch.start", "diag.batch.end",
+    "artifact.collect.start", "artifact.collect.end",
+    "file.uploaded", "file.deleted",
+    "report.viewed", "report.archived",
+    "op.error", "ui.note", "tool.result",
+}
+
+
+@app.post("/api/room/event")
+async def post_room_event(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = json.loads((await request.body()) or b"{}")
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    kind = str(body.get("kind") or "")
+    if kind not in _UI_EVENT_KINDS:
+        return JSONResponse({"error": f"不支持的事件类型：{kind}"}, status_code=400)
+    room_code = str(body.get("room_code") or "").upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    if not can_access_room(user, room_code):
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+
+    def _clip(x, n=200):
+        return str(x if x is not None else "")[:n]
+
+    raw = body.get("data") if isinstance(body.get("data"), dict) else {}
+    data = {}
+    for k, v in list(raw.items())[:12]:
+        if isinstance(v, (int, float, bool)) or v is None:
+            data[str(k)[:32]] = v
+        elif isinstance(v, (list, tuple)):
+            data[str(k)[:32]] = [_clip(i, 80) for i in list(v)[:10]]
+        else:
+            data[str(k)[:32]] = _clip(v, 300)
+    try:
+        record_event(kind, data, room_code=room_code,
+                     actor=user.get("username", ""), actor_role=user.get("role", ""),
+                     stream=f"room:{room_code}",
+                     turn=_clip(body.get("turn"), 40), step=_clip(body.get("step"), 60))
+    except Exception as e:
+        return JSONResponse({"error": f"记录失败：{e}"}, status_code=500)
+    return {"ok": True, "kind": kind}
+
+
+@app.get("/api/room/report/{room_code}")
+async def room_report(room_code: str, request: Request):
+    """结单报告 HTML（客户版默认 / ?view=full 内部版）。只读，不写业务数据。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = room_code.upper()
+    if not can_access_room(user, room_code):
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+    view = str(request.query_params.get("view") or "client").lower()
+    if view not in ("client", "full"):
+        view = "client"
+    try:
+        html_out, meta = _build_room_report(room_code, view)
+    except Exception as e:
+        run_logger.warning(f"[report] {room_code} 生成失败：{e}")
+        return JSONResponse({"error": f"报告生成失败：{e}"}, status_code=500)
+    if not html_out:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    headers = {"X-Report-View": view, "X-Report-Events": str(meta["events"])}
+    if str(request.query_params.get("download") or "") in ("1", "true", "yes"):
+        headers["Content-Disposition"] = f'attachment; filename="report-{room_code}-{view}.html"'
+    return HTMLResponse(html_out, headers=headers)
+
+
+@app.get("/api/room/events")
+async def room_events(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = str(request.query_params.get("room_code") or request.query_params.get("room") or "").upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    if not can_access_room(user, room_code):
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+    try:
+        limit = max(1, min(int(request.query_params.get("limit") or 200), 500))
+    except Exception:
+        limit = 200
+    before = request.query_params.get("before_seq")
+    _view = str(request.query_params.get("view") or "full").lower()
+    try:
+        conn = _db_connect()
+        # 房间参与者（登录事件按人合并进同一条时间轴）
+        members = [r["username"] for r in conn.execute(
+            "SELECT username FROM room_members WHERE room_code=?", (room_code,)).fetchall()]
+        r0 = conn.execute("SELECT engineer_username FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        if r0 and r0["engineer_username"]:
+            members.append(r0["engineer_username"])
+        members = sorted({m for m in members if m})
+        ph = ",".join("?" * len(members)) if members else "''"
+        where = "e.room_code=?"
+        params = [room_code]
+        if before:
+            where += " AND e.seq < ?"
+            params.append(int(before))
+        rows = conn.execute(
+            "SELECT e.*, (SELECT COUNT(*) FROM events c WHERE c.parent=e.id) AS children "
+            "FROM events e WHERE " + where + " ORDER BY e.ts_srv ASC, e.rowid ASC LIMIT ?",
+            params + [limit]).fetchall()
+        # 2026-11-03：登录事件只在「房间作业窗口内」并入，且同一人 30 分钟内只留首次
+        # （旧逻辑按房间参与者合并全部历史登录 → 轨迹里全是本次作业之前的历史登录，属错误）
+        if not before:
+            win = _room_window_start(conn, room_code)
+            lg = conn.execute(
+                "SELECT e.*, 0 AS children FROM events e WHERE e.kind='auth.login' "
+                "AND e.actor IN (" + ph + ") AND e.ts_srv >= ? ORDER BY e.ts_srv ASC",
+                members + [win]).fetchall()
+            dedup, last = [], {}
+            for x in lg:
+                a = x["actor"]
+                if a in last and (x["ts_srv"] - last[a]) < 30 * 60 * 1000:
+                    last[a] = x["ts_srv"]
+                    continue
+                last[a] = x["ts_srv"]
+                dedup.append(x)
+            rows = sorted(list(rows) + dedup[:8], key=lambda r: (r["ts_srv"], r["seq"]))
+        conn.close()
+    except Exception as e:
+        return JSONResponse({"error": f"查询失败：{e}"}, status_code=500)
+    out = []
+    for r in rows:
+        try:
+            data = json.loads(r["data"] or "{}")
+        except Exception:
+            data = {"_raw": r["data"]}
+        out.append({
+            "id": r["id"], "seq": r["seq"], "stream": r["stream"], "room": r["room_code"],
+            "ts": r["ts_srv"], "kind": r["kind"], "actor": r["actor"], "role": r["actor_role"],
+            "turn": r["turn"], "step": r["step"], "parent": r["parent"],
+            "children": r["children"], "data": data,
+        })
+    if _view == "client":
+        # 客户版投影：同样的事件，脱敏后的视图（报告与对外展示用）
+        out = [_client_view_event(e) for e in out]
+        return {"ok": True, "room_code": room_code, "count": len(out), "view": "client",
+                "members": [], "events": out}
+    return {"ok": True, "room_code": room_code, "count": len(out), "view": "full",
+            "members": members, "events": out}
+
+
+
+@app.get("/api/room/event/{event_id}/blob")
+async def room_event_blob(event_id: str, request: Request):
+    """取某条 op.result 事件的完整命令输出（全文，鉴权 + 房间权限 + 路径防穿越）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        conn = _db_connect()
+        row = conn.execute("SELECT room_code, data FROM events WHERE id=?", (event_id,)).fetchone()
+        conn.close()
+    except Exception as e:
+        return JSONResponse({"error": f"查询失败：{e}"}, status_code=500)
+    if not row:
+        return JSONResponse({"error": "事件不存在"}, status_code=404)
+    room_code = row["room_code"] or ""
+    if room_code and not can_access_room(user, room_code):
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+    try:
+        data = json.loads(row["data"] or "{}")
+    except Exception:
+        data = {}
+    rel = str(data.get("blob") or "")
+    if not rel:
+        return JSONResponse({"error": "该事件没有附件输出", "preview": (data.get("preview") or "")},
+                            status_code=404)
+    base = pathlib.Path(__file__).resolve().parent / "room_event_blobs"
+    target = (base / rel).resolve()
+    if not str(target).startswith(str(base.resolve())) or not target.exists():
+        return JSONResponse({"error": "输出文件不存在或已过期"}, status_code=404)
+    return PlainTextResponse(target.read_text(encoding="utf-8", errors="replace"),
+                             media_type="text/plain; charset=utf-8")
+
+@app.get("/trajectory")
+async def trajectory_page(request: Request):
+    f = static_dir / "console" / "trajectory.html"
+    if not f.exists():
+        return JSONResponse({"error": "轨迹页未部署"}, status_code=404)
+    return FileResponse(str(f))
+
+@app.post("/api/room/im/send")
+async def im_send(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    body = await _safe_json(request)
+    room_code = str(body.get("room_code") or "").upper()
+    text = (body.get("text") or "").strip()
+    file_id = str(body.get("file_id") or "")
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    ok, role, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    if _room_closed(room_code):
+        return JSONResponse({"error": "房间已归档，仅可查看"}, status_code=409)
+    if not text and not file_id:
+        return JSONResponse({"error": "消息为空"}, status_code=400)
+    kind = "text"
+    if file_id:
+        kind = "file"
+        try:
+            conn = _db_connect()
+            f = conn.execute("SELECT mime FROM room_files WHERE id=?", (file_id,)).fetchone()
+            conn.close()
+            if f and str(f["mime"] or "").startswith("image/"):
+                kind = "image"
+        except Exception:
+            pass
+    msg = _im_insert(room_code, user["username"], role, kind, text, file_id)
+    await _im_broadcast(room_code, {"type": "im", "msg": msg})
+    # P0 事件：协作消息（谁说了什么 / 传了什么附件）
+    try:
+        record_event("im.message", {"kind": kind, "text": (text or "")[:500], "file_id": file_id},
+                     room_code=room_code, actor=user["username"], actor_role=role,
+                     stream=f"room:{room_code}")
+    except Exception:
+        pass
+    return {"ok": True, "message": msg}
+
+
+@app.post("/api/room/im/read")
+async def im_read(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    body = await _safe_json(request)
+    room_code = str(body.get("room_code") or "").upper()
+    last_id = int(body.get("last_read_id") or 0)
+    ok, _r, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    conn = _db_connect()
+    conn.execute(
+        "INSERT INTO room_im_read (room_code, username, last_read_id) VALUES (?,?,?) "
+        "ON CONFLICT(room_code, username) DO UPDATE SET last_read_id=MAX(last_read_id, excluded.last_read_id)",
+        (room_code, user["username"], last_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/room/im/unread")
+async def im_unread(request: Request, room_code: str = ""):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    ok, _r, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    conn = _db_connect()
+    base = "SELECT COALESCE((SELECT last_read_id FROM room_im_read WHERE room_code=? AND username=?), 0)"
+    row = conn.execute(base, (room_code.upper(), user["username"])).fetchone()
+    conn.close()
+    last = int(row[0] or 0) if row else 0
+    conn = _db_connect()
+    n = conn.execute(
+        "SELECT COUNT(*) FROM room_im WHERE room_code=? AND id>? AND sender!=?",
+        (room_code.upper(), last, user["username"])).fetchone()[0]
+    conn.close()
+    return {"ok": True, "unread": int(n or 0), "last_read_id": last}
+
+
+@app.post("/api/room/im/recall")
+async def im_recall(request: Request):
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    body = await _safe_json(request)
+    room_code = str(body.get("room_code") or "").upper()
+    mid = int(body.get("id") or 0)
+    ok, _r, why = _rf_perm(room_code, user)
+    if not ok:
+        return JSONResponse({"error": why}, status_code=403)
+    conn = _db_connect()
+    row = conn.execute("SELECT * FROM room_im WHERE id=? AND room_code=?", (mid, room_code)).fetchone()
+    if not row:
+        conn.close()
+        return JSONResponse({"error": "消息不存在"}, status_code=404)
+    if row["sender"] != user["username"] and user.get("role") != "admin":
+        conn.close()
+        return JSONResponse({"error": "只能撤回自己的消息"}, status_code=403)
+    try:
+        # created_at 由 sqlite datetime('now') 写入 = UTC；这里必须用 UTC 比较，否则差 8 小时直接判超时
+        age = (datetime.utcnow() - datetime.strptime(row["created_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
+    except Exception:
+        age = 0
+    if age > IM_RECALL_SECONDS and user.get("role") != "admin":
+        conn.close()
+        return JSONResponse({"error": f"超过 {IM_RECALL_SECONDS // 60} 分钟不可撤回"}, status_code=409)
+    conn.execute("UPDATE room_im SET recalled_at=datetime('now'), text='' WHERE id=?", (mid,))
+    conn.commit()
+    row2 = conn.execute("SELECT * FROM room_im WHERE id=?", (mid,)).fetchone()
+    conn.close()
+    msg = _im_row(row2, user["username"])
+    await _im_broadcast(room_code, {"type": "im_update", "msg": msg})
+    return {"ok": True, "message": msg}
+
+
+# ═══════════════════════════════════════════════════════════════
 # 只读命令终端（2026-10-20 新增）
 #   二线/现场都能用，但只能跑白名单里的**只读**命令：
 #     · 第一道：命令前缀必须在白名单里
@@ -8595,13 +10001,14 @@ CMD_DENY_WORDS = [
 #   未配置步骤的作业项由前端回退到整包执行，并如实标注「整包执行」。
 # ══════════════════════════════════════════════════════════════════════
 ACTION_STEP_SPECS = {
-    # 蓝屏分析
+    # bsod（2026-11-02：纯 PowerShell 执行 + JSON 输出，避免嵌套与本地化错误乱码）
     "bsod": [
-        {"label": "190 天内蓝屏记录", "cmd": 'wevtutil qe System /q:"*[System[(EventID=1001)]]" /c:10 /rd:true /f:text'},
-        {"label": "Minidump 文件清单", "cmd": 'powershell -NoProfile -Command "Get-ChildItem C:\\Windows\\Minidump -Filter *.dmp -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5 Name,Length,LastWriteTime | Format-Table -AutoSize"'},
-        {"label": "WHEA 硬件错误事件", "cmd": 'wevtutil qe System /q:"*[System[Provider[@Name=\'Microsoft-Windows-WHEA-Logger\']]]" /c:10 /rd:true /f:text'},
-        {"label": "Kernel-Power 41 事件", "cmd": 'wevtutil qe System /q:"*[System[(EventID=41)]]" /c:10 /rd:true /f:text'},
-        {"label": "内存诊断记录", "cmd": 'wevtutil qe System /q:"*[System[Provider[@Name=\'Microsoft-Windows-MemoryDiagnostics-Results\']]]" /c:5 /rd:true /f:text'},
+        {"label": "蓝屏记录（事件 1001）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';Id=1001} -MaxEvents 10;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "Minidump 文件清单", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-ChildItem C:\\Windows\\Minidump -Filter *.dmp -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|Select-Object -First 5|ForEach-Object{[pscustomobject]@{file=$_.Name;time=$_.LastWriteTime.ToString('yyyy-MM-dd HH:mm');MB=[math]::Round($_.Length/1MB,1)}};if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "非正常关机（41 / 6008）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';Id=41,6008} -MaxEvents 15;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "WHEA 硬件错误", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-WHEA-Logger'} -MaxEvents 10;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "内存诊断记录", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-MemoryDiagnostics-Results'} -MaxEvents 5;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "显卡超时（TDR 4101）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';Id=4101} -MaxEvents 10;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
     ],
     # 硬盘健康（key=disk）
     "disk": [
@@ -8617,10 +10024,29 @@ ACTION_STEP_SPECS = {
         {"label": "风扇与散热状态", "cmd": 'powershell -NoProfile -Command "Get-CimInstance Win32_Fan -ErrorAction SilentlyContinue | Select-Object Name,Status,DesiredSpeed | Format-Table -AutoSize"'},
         {"label": "降频与温度事件", "cmd": 'wevtutil qe System /q:"*[System[Provider[@Name=\'Microsoft-Windows-Kernel-Processor-Power\']]]" /c:10 /rd:true /f:text'},
     ],
-    # 意外重启 / 休眠唤醒
+    # reboot（2026-11-02：纯 PowerShell 执行 + JSON 输出，避免嵌套与本地化错误乱码）
     "reboot": [
-        {"label": "异常关机与重启事件", "cmd": 'wevtutil qe System /q:"*[System[(EventID=41 or EventID=6008 or EventID=1074)]]" /c:15 /rd:true /f:text'},
-        {"label": "最近启动时间", "cmd": 'powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime"'},
+        {"label": "重启与关机事件（41/6008/1074，分类计数）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=@();foreach($id in 41,6008,1074){  $e=Get-WinEvent -FilterHashtable @{LogName='System';Id=$id} -MaxEvents 10;  foreach($v in $e){    $m=($v.Message -replace '\\s+',' ');    $x+=[pscustomobject]@{time=$v.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$v.Id;src=$v.ProviderName;msg=$m.Substring(0,[Math]::Min(160,$m.Length))}  }};if($x){$x|Sort-Object time -Descending|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "最近启动时间", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-CimInstance Win32_OperatingSystem|ForEach-Object{[pscustomobject]@{last_boot=$_.LastBootUpTime.ToString('yyyy-MM-dd HH:mm:ss');uptime_h=[math]::Round(((Get-Date)-$_.LastBootUpTime).TotalHours,1)}};if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "更新安装事件（19）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';Id=19} -MaxEvents 10;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "温度与降频事件", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Kernel-Processor-Power'} -MaxEvents 10;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "睡眠唤醒来源", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';Id=1;ProviderName='Microsoft-Windows-Power-Troubleshooter'} -MaxEvents 5;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+    ],
+    # slow（2026-11-02：纯 PowerShell 执行 + JSON 输出，避免嵌套与本地化错误乱码）
+    "slow": [
+        {"label": "开机耗时（启动性能事件）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Diagnostics-Performance/Operational';Id=100} -MaxEvents 5;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "开机自启动项", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-CimInstance Win32_StartupCommand|Select-Object Name,Command,Location,User;if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "进程占用 Top 10", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-Process|Sort-Object CPU -Descending|Select-Object -First 10|ForEach-Object{[pscustomobject]@{name=$_.Name;cpu_s=[math]::Round($_.CPU,1);mem_MB=[math]::Round($_.WS/1MB,0)}};if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "磁盘空间占用", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-CimInstance Win32_LogicalDisk -Filter \"DriveType=3\"|ForEach-Object{[pscustomobject]@{drive=$_.DeviceID;total_GB=[math]::Round($_.Size/1GB,1);free_GB=[math]::Round($_.FreeSpace/1GB,1)}};if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "磁盘健康概况", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-PhysicalDisk|ForEach-Object{[pscustomobject]@{disk=$_.FriendlyName;type=$_.MediaType;health=$_.HealthStatus;status=$_.OperationalStatus}};if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+    ],
+    # display（2026-11-02：纯 PowerShell 执行 + JSON 输出，避免嵌套与本地化错误乱码）
+    "display": [
+        {"label": "显卡设备与驱动状态", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-CimInstance Win32_VideoController|ForEach-Object{[pscustomobject]@{name=$_.Name;driver=$_.DriverVersion;date=$_.DriverDate;status=$_.Status}};if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "分辨率与刷新率", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=@();$vc=Get-CimInstance Win32_VideoController;foreach($v in $vc){  $w=$v.CurrentHorizontalResolution; $h=$v.CurrentVerticalResolution; $hz=$v.CurrentRefreshRate;  if(-not $w -and $v.VideoModeDescription -match '(\\d+)\\s*x\\s*(\\d+)'){ $w=[int]$Matches[1]; $h=[int]$Matches[2] };  $x+=[pscustomobject]@{name=$v.Name;w=$w;h=$h;hz=$hz;src='wmi';desc=$v.VideoModeDescription}};try{ Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop;  $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;  $x+=[pscustomobject]@{name='(primary-screen)';w=$s.Width;h=$s.Height;hz=$null;src='winforms';desc=''} }catch{};if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "显示器连接信息", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorID -ErrorAction SilentlyContinue|ForEach-Object{[pscustomobject]@{id=$_.InstanceName;active=$_.Active}};if($x){$x|ConvertTo-Json -Compress -Depth 5}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "显卡超时（TDR 4101）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';Id=4101} -MaxEvents 10;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        {"label": "显示驱动错误日志", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Display'} -MaxEvents 10;if($e){$e|ForEach-Object{[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');id=$_.Id;src=$_.ProviderName;msg=(($_.Message -replace '\\s+',' '))}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
     ],
     # 开机自启动
     "startup": [
@@ -8635,6 +10061,45 @@ ACTION_STEP_SPECS = {
         {"label": "系统严重错误日志", "cmd": 'wevtutil qe System /q:"*[System[(Level=1 or Level=2)]]" /c:15 /rd:true /f:text'},
     ],
 }
+
+
+def _struct_step_output(text: str) -> dict:
+    """把步骤原始输出解析成结构化行（2026-11-02）。
+
+    背景：早期步骤用 wevtutil /f:text，中文系统输出 GBK 文本 → 桥接器按 UTF-8 解码，
+    中文全乱码，停止码也糊掉。现在命令统一改为 Get-WinEvent / Get-CimInstance + ConvertTo-Json，
+    由这里解析成 {fields, rows}，前端渲染成表格，AI 也拿到干净字段。
+    """
+    res = {"structured": False, "count": 0, "fields": [], "rows": [], "note": ""}
+    t = (text or "").strip()
+    if not t:
+        res["note"] = "无输出"
+        return res
+    # 桥接器可能附加 [exit_code] / [stderr] 行 → 逐个候选起点尝试解析，取第一个成功的
+    dec = json.JSONDecoder()
+    obj = None
+    for i, ch in enumerate(t):
+        if ch not in "[{":
+            continue
+        try:
+            obj, _ = dec.raw_decode(t[i:])
+            break
+        except Exception:
+            continue
+    if obj is None:
+        return res
+    rows = obj if isinstance(obj, list) else [obj]
+    rows = [r for r in rows if isinstance(r, dict)]
+    res["structured"] = True
+    if not rows:
+        res["note"] = "0 条记录（本次查询无匹配事件）"
+        return res
+    fields = list(rows[0].keys())
+    res["fields"] = fields
+    res["count"] = len(rows)
+    res["rows"] = [{k: ("" if r.get(k) is None else str(r.get(k))[:160]) for k in fields}
+                   for r in rows[:20]]
+    return res
 
 
 @app.get("/api/action_steps/{action_key}")
@@ -8683,6 +10148,11 @@ async def action_step(request: Request):
 
     step = spec[idx]
     began = time.time()
+    _eu, _er = _ev_actor(request)
+    _turn_ev = record_event("diag.step.start",
+                            {"action_key": action_key, "step_index": idx, "label": step["label"]},
+                            room_code=room_code, actor=_eu, actor_role=_er,
+                            turn=f"{action_key}", step=f"{action_key}#{idx}")
     try:
         out = await asyncio.wait_for(
             execute_bridge_command(room, "RunCommand",
@@ -8698,6 +10168,15 @@ async def action_step(request: Request):
     # 摘要：取前若干非空行，够前端展示"这一步看到了什么"
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     summary = " / ".join(lines[:3])[:300] if lines else (err or "（无输出）")
+    # 2026-11-02：JSON 采集 → 结构化行，前端出表格（避免 GBK 乱码糊掉关键字段）
+    _st = _struct_step_output(text)
+    if _st["structured"]:
+        if _st["count"]:
+            _first = _st["rows"][0]
+            _clip = " · ".join(str(v) for k, v in list(_first.items())[:2] if str(v))
+            summary = f"查到 {_st['count']} 条：{_clip}"[:300]
+        else:
+            summary = _st["note"]
 
     # 命令"看起来执行了但其实是失败"的判定（桥接器只回文本，不给退出码）
     if ok and text:
@@ -8711,6 +10190,16 @@ async def action_step(request: Request):
                 err = "命令执行失败：" + (_kw)
                 break
 
+    record_event("diag.step.end",
+                 {"action_key": action_key, "step_index": idx, "label": step["label"],
+                  "ok": ok, "ms": round((time.time() - began) * 1000),
+                  "rows": _st.get("count", 0), "note": (_st.get("note") or "")[:120],
+                  "output_chars": len(text), "preview": text[:600], "error": err[:200],
+                  # 结构化数据留在事件里（最多 50 行），事后可重建结论，不依赖被截断的文本
+                  "fields": _st.get("fields") or [],
+                  "data_rows": (_st.get("rows") or [])[:50]},
+                 room_code=room_code, actor=_eu, actor_role=_er,
+                 turn=f"{action_key}", step=f"{action_key}#{idx}", parent=_turn_ev)
     save_message(room_code, "tool", f"[步骤 {idx + 1}] {step['label']}\n{text[:800]}", f"step:{action_key}", 1)
     run_logger.info(f"[{room_code}] 步骤执行 {action_key}#{idx + 1} {step['label']} ok={ok} "
                     f"{round((time.time() - began) * 1000)}ms")
@@ -8723,6 +10212,12 @@ async def action_step(request: Request):
         "lines": len(lines),
         "error": err,
         "duration_ms": round((time.time() - began) * 1000),
+        # 结构化采集结果（前端渲染表格；无 JSON 时为空，前端回退显示文本）
+        "structured": _st["structured"],
+        "count": _st["count"],
+        "fields": _st["fields"],
+        "rows": _st["rows"],
+        "note": _st["note"],
     }
 
 
@@ -8968,11 +10463,16 @@ async def ws_browser(websocket: WebSocket, room_code: str):
     room.browser_ws = websocket
     # 浏览器身份（cookie 会话）——用于角色权限（field 上门工程师无对话权）
     ws_role = _ws_sess.get("role", "")
+    _ws_uname = _ws_sess.get("username", "")
+    try:
+        room.browser_clients.append({"ws": websocket, "username": _ws_uname, "role": ws_role})
+    except Exception:
+        pass
     # 浏览器重连：取消闲置倒计时（宽限期内回来 = 不关闭）
     if getattr(room, "idle_task", None):
         room.idle_task.cancel()
         room.idle_task = None
-    run_logger.info(f"[browser] joined room {room_code}")
+    run_logger.info(f"[browser] joined room {room_code} (role={ws_role}, user={_ws_uname})")
 
     ready_msg = "Bridge connected [OK]" if room.bridge_ws else "Waiting for bridge connection [--]"
     await websocket.send_json({
@@ -8993,6 +10493,14 @@ async def ws_browser(websocket: WebSocket, room_code: str):
                 # 2026-10-22：渠道工程师（field）现在用「现场作业台」，作业项执行与 AI 协助都要走这条通道，
                 #   所以不再按角色禁对话（只读工具白名单、写操作门禁、留痕规则照旧生效）。
                 #   仍限制游客（guest）：只允许快捷工具指令。
+                # P0 事件：AI 提问（谁问的、问了什么）
+                try:
+                    record_event("ai.turn",
+                                 {"q": str(msg_data.get("content") or "")[:800], "role": ws_role},
+                                 room_code=room_code, actor=ws_user, actor_role=ws_role,
+                                 stream=f"room:{room_code}")
+                except Exception:
+                    pass
                 if ws_role == "guest":
                     user_message = msg_data["content"]
                     if not user_message.startswith("[QUICK_ACTION:"):
@@ -9131,6 +10639,10 @@ async def ws_browser(websocket: WebSocket, room_code: str):
         run_logger.info(f"[browser] left room {room_code}")
     finally:
         room.browser_ws = None
+        try:
+            room.browser_clients = [c for c in room.browser_clients if c.get("ws") is not websocket]
+        except Exception:
+            pass
         # 闲置检测：30min 后无浏览器重连 → 置 idle + 清令牌（防离开后滥用）
         if getattr(room, "idle_task", None):
             room.idle_task.cancel()
@@ -9286,6 +10798,20 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                         run_logger.error(f"[{room_code}] 文件拼接失败: {e} buflen={len(buf['chunks'])}")
                     room.pending_files.pop(fid, None)
 
+            elif msg_data.get("type") == "screenshot_result":
+                # 2026-11-02：桥接器原生截图回执（宽高/字节/耗时/客户机文件路径）
+                fid = msg_data.get("id")
+                fut = room.pending_commands.get(fid)
+                run_logger.info(f"[{room_code}] 原生截图回执 ok={msg_data.get('ok')} "
+                                f"{msg_data.get('width')}x{msg_data.get('height')} "
+                                f"{msg_data.get('bytes')}B {msg_data.get('ms')}ms "
+                                f"err={msg_data.get('error', '')}")
+                if fut and not fut.done():
+                    fut.set_result("SHOTJSON:" + json.dumps({k: v for k, v in msg_data.items()
+                                                             if k != "type"}))
+                else:
+                    run_logger.warning(f"[{room_code}] screenshot_result for unknown id {fid}")
+
             elif msg_data.get("type") == "file_download_error":
                 fid = msg_data["id"]
                 fut = room.pending_commands.get(fid)
@@ -9329,8 +10855,28 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                 else:
                     room.bridge_mode = "v1"
                     room.platform = "windows"
+                # 2026-11-02：扩展能力（"screenshot" = 桥接器内置原生抓屏，不再依赖 PowerShell）
+                _caps = msg_data.get("caps") or []
+                try:
+                    room.bridge_caps = {str(c) for c in _caps if isinstance(c, str)}
+                except Exception:
+                    room.bridge_caps = set()
+                # 2026-11-03：桥接器接入入轨迹（轨迹里才解释得清"这一步为什么没结果"）
+                try:
+                    _now = time.time()
+                    if _now - _LAST_BRIDGE_CONN.get(room_code, 0) > 10:   # 10s 内重复 identify 只记一条
+                        _LAST_BRIDGE_CONN[room_code] = _now
+                        record_event("bridge.connect",
+                                     {"hostname": info.get("hostname"), "os": info.get("os"),
+                                      "version": info.get("version"), "platform": room.platform,
+                                      "mode": room.bridge_mode, "caps": sorted(room.bridge_caps or [])},
+                                     room_code=room_code, actor="bridge", actor_role="system",
+                                     stream=f"room:{room_code}")
+                except Exception:
+                    pass
                 run_logger.info(f"[bridge] {room_code} identify: hostname={info.get('hostname')}, "
                                 f"os={info.get('os')}, platform={room.platform}, mode={room.bridge_mode}, "
+                                f"ver={info.get('version')}, caps={sorted(room.bridge_caps) or '[]'}, "
                                 f"ip={info.get('local_ip')}, user={info.get('username')}")
                 # 平台落库（防服务器重启后内存丢失）
                 try:
@@ -9359,6 +10905,14 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
         room.bridge_disconnect_count += 1
         room.last_disconnect_reason = reason
         room.last_disconnect_at = datetime.now(timezone.utc)
+        # 2026-11-03：桥接器断开入轨迹（配合 bridge.connect 解释"这一步为什么没结果"）
+        try:
+            record_event("bridge.disconnect",
+                         {"reason": str(reason)[:200], "count": room.bridge_disconnect_count},
+                         room_code=room_code, actor="bridge", actor_role="system",
+                         stream=f"room:{room_code}")
+        except Exception:
+            pass
         if room.browser_ws:
             try:
                 await room.browser_ws.send_json({
@@ -9405,6 +10959,7 @@ async def _dead_conn_reaper():
 async def _startup_reaper():
     asyncio.create_task(_dead_conn_reaper())
     asyncio.create_task(_room_files_purge_loop())   # 2026-10-27：房间文件 24h 清理任务
+    asyncio.create_task(_events_purge_loop())       # 2026-11-03：事件保留期清理
     try:
         os.makedirs(ROOM_FILES_DIR, exist_ok=True)
     except Exception:

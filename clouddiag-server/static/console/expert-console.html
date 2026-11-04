@@ -324,6 +324,78 @@ svg{flex:0 0 auto}
 .devitem.num{font-variant-numeric:tabular-nums}
 .devbar .devitem:first-of-type{color:var(--text);font-weight:600}
 
+/* 协作（IM）2026-10-29 */
+.tab-badge{display:inline-block;margin-left:5px;min-width:16px;padding:0 4px;height:16px;line-height:16px;
+  border-radius:8px;background:#DC2626;color:#fff;font-size:10.5px;font-variant-numeric:tabular-nums;text-align:center}
+.im-top{display:flex;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--line-2);margin-bottom:8px}
+.im-files-btn{border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 10px;font-size:12.5px;
+  color:var(--text-2);cursor:pointer}
+.im-files-btn:hover{border-color:var(--brand-line);color:var(--brand-ink);background:var(--brand-tint)}
+.im-body{display:flex;flex-direction:column;min-height:0}
+.im-msgs{flex:1;min-height:240px;overflow:auto;padding:4px 2px;display:flex;flex-direction:column;gap:10px}
+.im-msgs-side{max-height:calc(100vh - 420px)}
+.im-empty{color:var(--text-3);font-size:12px;line-height:1.85;text-align:center;padding:28px 8px}
+.im-row{display:flex;flex-direction:column;gap:4px;max-width:92%}
+.im-row.mine{align-self:flex-end;align-items:flex-end}
+.im-meta{font-size:11px;color:var(--text-3)}
+.im-meta .im-t{margin-left:4px;color:var(--faint)}
+.im-recall{border:none;background:none;color:var(--faint);font-size:10.5px;cursor:pointer;padding:0 2px}
+.im-recall:hover{color:#B91C1C}
+.im-bubble{background:#F4F6F9;border:1px solid var(--line-2);border-radius:10px;padding:7px 10px;font-size:12.5px;line-height:1.6;color:var(--text)}
+.im-row.mine .im-bubble{background:var(--brand-tint);border-color:var(--brand-line)}
+.im-recalled{color:var(--faint);font-size:11.5px;font-style:italic}
+.im-text{white-space:pre-wrap;word-break:break-word}
+.im-img img{max-width:100%;max-height:160px;border-radius:8px;display:block;border:1px solid var(--line-2)}
+.im-file{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--brand-ink);text-decoration:none;
+  background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 9px}
+.im-file-sz{color:var(--faint);font-size:11px}
+.im-sys{text-align:center;color:var(--text-3);font-size:11.5px;padding:3px 0}
+.im-sys span{background:#F1F3F6;border-radius:10px;padding:2px 9px;display:inline-block}
+.im-input{display:flex;align-items:flex-end;gap:6px;padding-top:8px;border-top:1px solid var(--line-2);margin-top:8px}
+.im-pick{width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-size:13px}
+.im-input textarea{flex:1;resize:none;min-height:30px;max-height:100px;border:1px solid var(--line);border-radius:8px;
+  padding:6px 9px;font-size:12.5px;font-family:inherit;line-height:1.5;outline:none}
+.im-input textarea:focus{border-color:#1E56D6;box-shadow:0 0 0 3px #EEF4FE}
+.im-upload{font-size:11.5px;color:var(--brand-ink);padding:4px 0}
+.im-body.on{outline:2px dashed var(--brand-line);outline-offset:-6px;border-radius:10px}
+.im-files-mask{position:fixed;inset:0;background:rgba(16,24,40,.28);z-index:300;opacity:0;pointer-events:none;transition:opacity .2s}
+.im-files-mask.on{opacity:1;pointer-events:auto}
+.im-files-panel{position:fixed;top:0;right:0;bottom:0;width:392px;max-width:92vw;background:#fff;z-index:310;
+  border-left:1px solid var(--line);box-shadow:-12px 0 32px rgba(16,24,40,.14);transform:translateX(102%);
+  transition:transform .22s ease;display:flex;flex-direction:column}
+.im-files-panel.on{transform:none}
+.im-fp-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line-2)}
+.im-fp-title{font-size:14px;font-weight:650}
+.im-fp-close{width:26px;height:26px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer;
+  color:var(--text-2);font-size:15px;line-height:1;display:grid;place-items:center;padding:0}
+.im-fp-body{padding:10px 14px;flex:1;min-height:0;overflow:auto}
+
+/* 观察帧放大层（2026-11-02） */
+.live-zoom{position:fixed;inset:0;z-index:9800;background:rgba(8,10,14,.94);
+  display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
+.live-zoom.hidden{display:none}
+.live-zoom img{max-width:96vw;max-height:calc(100vh - 80px);object-fit:contain;
+  box-shadow:0 24px 64px rgba(0,0,0,.55);border-radius:6px;background:#000}
+.live-zoom-hint{position:absolute;top:14px;left:50%;transform:translateX(-50%);
+  font:12px/1.5 var(--font);color:#c8cedd;background:rgba(20,24,32,.72);
+  padding:5px 12px;border-radius:999px;white-space:nowrap}
+
+/* 2026-11-03：调用记录与原始日志已由「轨迹」取代（信息全部进事件流），界面隐藏、DOM 保留便于恢复 */
+#resPreview,#termCard,#resultCard>.card-head{display:none!important}
+/* 二线台同步（2026-11-03）：新建房间弹窗底栏固定 + 原始日志并入调用记录 */
+#fldNrMask .card-body{overflow-y:auto;min-height:0;padding:12px 14px}
+#fldNrMask .nr-foot{flex:0 0 auto;padding:10px 14px 16px;border-top:1px solid var(--line);background:var(--surface)}
+#fldNrBatPick{gap:6px!important;margin:6px 0 10px!important}
+#fldNrBatPick .check{display:flex;width:100%;align-items:flex-start;gap:7px;line-height:1.5}
+#fldNrBatPick .check>span{flex:1;min-width:0;overflow-wrap:anywhere}
+#fldNrHint{margin-top:12px!important;line-height:1.55}
+#termCard.term-fold{border-top:1px solid var(--line)}
+#termCard .term-sum{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;list-style:none;
+  font-size:12.5px;font-weight:600;color:var(--text-2)}
+#termCard .term-sum::-webkit-details-marker{display:none}
+#termCard .term-sum .spacer{flex:1}
+#termCard[open] .term-sum{border-bottom:1px solid var(--line)}
+
 /* 观察/截图 子页签（2026-10-28） */
 .shot-tabs{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line-2);padding-bottom:6px}
 .shot-tabs button{border:1px solid transparent;background:transparent;color:var(--text-2);font-size:12.5px;
@@ -512,6 +584,12 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
   font-size:11.5px;color:var(--text-3)}
 #inlinePlan .ipl-meta b{color:var(--text);font-weight:600}
 #inlinePlan .ipl-steps{padding:8px 12px}
+.ipl-pack{margin:2px 12px 10px;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#FBFCFE}
+.ipl-pack-head{display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid var(--line);
+  font-size:12px;font-weight:650;color:var(--text-2);background:var(--bg)}
+.ipl-pack-body{margin:0;padding:9px 11px;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-all;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.55;color:var(--text)}
+
 #inlinePlan .ipl-step{display:flex;align-items:flex-start;gap:9px;padding:6px 0;font-size:12.5px;
   border-bottom:1px dashed var(--line-2)}
 #inlinePlan .ipl-step:last-child{border-bottom:0}
@@ -640,7 +718,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
       <div class="card-head" style="padding:10px 14px 0"><span class="card-title">当前接管房间</span></div>
       <div class="card-body">
         <div class="objbar">
-          <div class="kv"><span>房间</span><b class="num" id="oRoom">—</b></div>
+          <div class="kv"><span>房间号</span><b class="num" id="oRoom">—</b></div>
           <div class="kv"><span>SN</span><b class="num" id="oSn">—</b></div>
           <div class="kv"><span>机型</span><b id="oModel">—</b></div>
           <div class="kv"><span>客户</span><b id="oCust">—</b></div>
@@ -691,15 +769,29 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
         <div class="tabs" id="tabs" style="margin-left:12px">
           <button data-tab="collect" title="抓取客户机 OS 日志包，按需上传 IDG 深入分析">OS log 抓取</button>
           <button class="on" data-tab="ai" title="带着已有证据与 AI 深入诊断">AI 诊断</button>
-          <button data-tab="files" title="与现场工程师互传文件（照片/文档/日志包）">文件分享</button>
         </div>
 
         <span class="spacer"></span>
         <input class="input" id="q" placeholder="搜索预设作业项" type="search"
                name="nexpert-tool-search" autocomplete="off" autocorrect="off" autocapitalize="off"
                spellcheck="false" readonly style="width:190px;height:28px" title="点一下即可输入">
+        <!-- 2026-11-03：操作轨迹入口（与现场台同步） -->
+        <button class="btn sm ghost" id="trajBtn" style="margin-left:8px;white-space:nowrap"
+                title="查看本房间的操作轨迹">轨迹</button>
+        <!-- 2026-11-03 P1：诊断报告（客户版默认） -->
+        <button class="btn sm ghost" id="reportBtn" style="margin-left:8px;white-space:nowrap"
+                title="生成本次作业的诊断报告（客户版已脱敏）">报告</button>
       </div>
       <div class="card-body">
+        <div id="waitBar" class="hidden" style="display:flex;align-items:center;gap:9px;padding:8px 11px;margin-bottom:9px;border-radius:8px;background:var(--brand-tint);border:1px solid var(--brand-line);color:#173A8A;font-size:12.5px">
+          <span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--brand);display:inline-block"></span>
+          <b id="waitTitle">执行通道</b>
+          <span id="waitStatus" class="faint">等待中…</span>
+          <span class="spacer" style="flex:1"></span>
+          <span id="waitTimer" class="num" style="font-weight:700">0s</span>
+          <span class="faint">通常 10–60 秒</span>
+        </div>
+
         <div id="paneTools" class="hidden">
           <div class="row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
             <div class="seg" id="groups"></div>
@@ -767,6 +859,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
             <div class="shot-tabs" id="shotTabs">
               <button class="on" data-st="live">远程桌面观察</button>
               <button data-st="shot">高清截图</button>
+              <button data-st="im">协作<span class="tab-badge hidden" id="imBadgeExpert"></span></button>
               <span class="spacer" style="flex:1"></span>
               <span class="badge" id="shotState">待观察</span>
             </div>
@@ -780,13 +873,19 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
                   <button class="btn primary" id="liveBtn">开始观察</button>
                   <div class="small faint">约 2 秒一帧 · 只读，不含远程操控</div>
                 </div>
-                <img id="liveImg" alt="客户机桌面（实时观察）" style="display:none">
+                <img id="liveImg" alt="客户机桌面（实时观察）" title="点击放大查看" style="display:none;cursor:zoom-in">
               </div>
               <div class="row" id="liveBar" style="margin-top:8px;gap:6px;flex-wrap:wrap;align-items:center;display:none">
                 <button class="btn sm" id="liveToggle">暂停</button>
                 <button class="btn sm ghost" id="liveShot">截高清图</button>
                 <span class="small faint" id="liveMeta"></span>
               </div>
+            </div>
+
+            <!-- 观察帧放大层（2026-11-02）：点击画面放大，跟随实时刷新；Esc/点击关闭 -->
+            <div class="live-zoom hidden" id="liveZoom">
+              <div class="live-zoom-hint">点击空白处或按 Esc 关闭 · 画面持续刷新</div>
+              <img id="liveZoomImg" alt="客户机桌面（放大观察）">
             </div>
 
             <!-- 高清截图：原始像素，可全屏查看/下载 -->
@@ -807,30 +906,32 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
               </div>
             </div>
 
+
+            <!-- 协作（IM，2026-10-29）：与现场工程师即时通讯，可发文字/图片/文件 -->
+            <div id="imPane" class="hidden">
+              <div class="im-top">
+                <button class="im-files-btn" id="imFilesBtn">本房间文件 <span id="filesCount">0</span> ▸</button>
+                <span class="spacer" style="flex:1"></span>
+                <button class="btn sm ghost" id="filesZipBtn">打包下载</button>
+              </div>
+              <div class="im-body" id="imDrop">
+                <div id="imMsgs" class="im-msgs im-msgs-side"></div>
+                <div class="im-upload hidden" id="imUpload"></div>
+                <div class="im-input">
+                  <button class="im-pick" id="imPick" title="上传文件/图片（也可拖进来或 Ctrl+V 粘贴）">📎</button>
+                  <textarea id="imText" rows="1" placeholder="输入消息，Enter 发送"></textarea>
+                  <button class="btn primary sm" id="imSend">发送</button>
+                </div>
+                <span class="small faint hidden" id="imReadonly">房间已归档 · 仅可查看</span>
+                <input type="file" id="imFileInput" multiple style="display:none">
+                <input type="file" id="filesInput" multiple style="display:none">
+                <div id="filesProg" class="files-prog hidden"></div>
+                <div id="filesDrop" class="hidden"></div>
+              </div>
+            </div>
             <div id="shotErr" class="note warn hidden" style="margin-top:8px"></div>
           </aside>
           </div><!-- /ai-split -->
-        </div>
-
-        <!-- 文件分享（2026-10-28：作为第四个模式页签，主区整块显示） -->
-        <div id="paneFiles" class="hidden">
-          <div class="row" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;align-items:center">
-            <span class="small" style="font-weight:650">本房间文件</span>
-            <span class="badge" id="filesCount">0</span>
-            <span class="spacer" style="flex:1"></span>
-            <span class="small faint" id="filesHint">现场与二线互传 · 结单时自动打包下载</span>
-          </div>
-          <div class="files-drop fd-big" id="filesDrop">
-            <div class="fd-line">把文件拖到这里</div>
-            <div class="fd-acts">
-              <button class="btn primary sm" id="filesUploadBtn">上传文件</button>
-              <button class="btn sm" id="filesZipBtn">打包下载</button>
-            </div>
-            <div class="small faint">单文件 ≤ 500MB · 图片/PDF 可直接预览</div>
-          </div>
-          <div id="filesProg" class="files-prog"></div>
-          <div id="filesList" class="files-list pane-files-list"><div class="small faint">还没有文件</div></div>
-          <input type="file" id="filesInput" multiple style="display:none">
         </div>
 
         <div id="paneCollect" class="hidden">
@@ -869,6 +970,12 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
         <button class="btn sm" id="resToggle" title="展开/收起">收起</button>
         <button class="btn sm" id="resExpand" style="display:none">查看完整结果</button></div>
       <div class="card-body tight" id="resPreview"></div>
+      <!-- 原始日志（2026-11-03：与现场台同步，并入调用记录） -->
+      <details id="termCard" class="term-fold">
+        <summary class="term-sum">原始日志<span class="spacer"></span><span class="badge" id="termBadge">待命</span></summary>
+        <div class="card-body tight">
+        <div class="term" id="term"><div class="c">Nexpert 现场作业台就绪 · 等待连接客户机</div></div></div>
+      </details>
     </section>
 
     <!-- 文件预览弹层（2026-10-27） -->
@@ -889,20 +996,6 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
       </div>
     </div>
 
-    <!-- 终端 -->
-    <details class="card" id="termCard">
-      <summary class="card-head" style="cursor:pointer;list-style:none"><span class="card-title">原始日志</span><span class="spacer"></span><span class="badge" id="termBadge">待命</span></summary>
-      <div class="card-body tight">
-        <div id="waitBar" class="hidden" style="display:flex;align-items:center;gap:9px;padding:8px 11px;margin-bottom:9px;border-radius:8px;background:var(--brand-tint);border:1px solid var(--brand-line);color:#173A8A;font-size:12.5px">
-          <span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--brand);display:inline-block"></span>
-          <b id="waitTitle">执行通道</b>
-          <span id="waitStatus" class="faint">等待中…</span>
-          <span class="spacer" style="flex:1"></span>
-          <span id="waitTimer" class="num" style="font-weight:700">0s</span>
-          <span class="faint">通常 10–60 秒</span>
-        </div>
-        <div class="term" id="term"><div class="c">Nexpert 现场作业台就绪 · 等待连接客户机</div></div></div>
-    </details>
   </main>
 
   <!-- 状态与留痕层 -->
@@ -975,7 +1068,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
         </div>
         <div class="small faint" style="margin:8px 0 0;line-height:1.75">
           <b>exe 版</b>：先下载 5MB 桥接器再连接；大日志包上传更稳（推荐）。<br>
-          <b>PowerShell 版</b>：不落地 exe，适合杀软拦截 exe 的环境；大日志包上传略弱。
+          <b>PowerShell 版</b>：免装 exe 桥接器，适合不方便落 exe 的环境；首次截图会取一次抓屏组件（约 6MB），大日志包上传略弱。
         </div>
       </div>
       <div id="brPaneCmd" class="hidden">
@@ -1104,7 +1197,7 @@ window.NP_DATA =[
   "key": "system",
   "title": "系统问题",
   "platform": "all",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "系统版本与激活状态",
@@ -1119,60 +1212,61 @@ window.NP_DATA =[
  },
  {
   "key": "bsod",
-  "title": "蓝屏分析",
+  "title": "死机、蓝屏",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "快捷诊断",
   "tier": "read",
   "plan": [
-   "90 天内蓝屏记录",
-   "Minidump 文件解析",
-   "WHEA 硬件错误事件",
-   "Kernel-Power 41 事件",
-   "内存诊断记录"
+   "蓝屏记录（事件 1001）",
+   "Minidump 文件清单",
+   "非正常关机（41 / 6008）",
+   "WHEA 硬件错误",
+   "内存诊断记录",
+   "显卡超时（TDR 4101）"
   ],
-  "duration": "约 3 分钟",
+  "duration": "约 2 分钟",
   "icon": "zap",
-  "desc": "采集：90 天内蓝屏记录 · Minidump 文件解析 · WHEA 硬件错误事件 等 5 项"
+  "desc": "判定属于哪一类死机：真蓝屏 / 卡死被断电 / 软件无响应 · 6 项"
  },
  {
   "key": "reboot",
-  "title": "意外重启",
+  "title": "自动重启",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "快捷诊断",
   "tier": "read",
   "plan": [
-   "重启历史",
-   "类型判定",
-   "原因关联",
-   "电源相关",
-   "温度记录"
+   "重启与关机事件（41/6008/1074/6005/6009）",
+   "最近启动时间",
+   "更新安装事件（19）",
+   "温度与降频事件",
+   "睡眠唤醒来源"
   ],
-  "duration": "约 3 分钟",
+  "duration": "约 2 分钟",
   "icon": "rotate",
-  "desc": "采集：重启历史 · 类型判定 · 原因关联 等 5 项"
+  "desc": "区分自己重启与人为重启，定位触发点 · 5 项"
  },
  {
   "key": "slow",
-  "title": "性能卡顿",
+  "title": "卡顿",
   "platform": "all",
-  "group": "系统诊断",
+  "group": "快捷诊断",
   "tier": "read",
   "plan": [
+   "开机耗时（启动性能事件）",
    "开机自启动项",
-   "进程 CPU/内存占用 Top",
+   "进程占用 Top 10",
    "磁盘空间占用",
-   "磁盘/CPU 占用源分析",
-   "开机耗时记录"
+   "磁盘健康概况"
   ],
   "duration": "约 3 分钟",
   "icon": "activity",
-  "desc": "采集：开机自启动项 · 进程 CPU/内存占用 Top · 磁盘空间占用 等 5 项"
+  "desc": "区分开机慢与用起来慢，定位资源瓶颈 · 5 项"
  },
  {
   "key": "thermal",
   "title": "温度散热",
   "platform": "all",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "机器型号识别",
@@ -1189,7 +1283,7 @@ window.NP_DATA =[
   "key": "sleep",
   "title": "睡眠唤醒",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "睡眠与唤醒事件记录",
@@ -1206,7 +1300,7 @@ window.NP_DATA =[
   "key": "appcrash",
   "title": "应用崩溃",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "应用程序错误事件",
@@ -1223,7 +1317,7 @@ window.NP_DATA =[
   "key": "security",
   "title": "安全威胁",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "Defender 状态与威胁检测记录",
@@ -1240,7 +1334,7 @@ window.NP_DATA =[
   "key": "data",
   "title": "数据丢失",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "磁盘空间与分区状态",
@@ -1257,7 +1351,7 @@ window.NP_DATA =[
   "key": "disk",
   "title": "硬盘健康",
   "platform": "all",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "SMART 全量数据",
@@ -1274,7 +1368,7 @@ window.NP_DATA =[
   "key": "battery",
   "title": "电池健康",
   "platform": "win",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "电池报告",
@@ -1289,26 +1383,26 @@ window.NP_DATA =[
  },
  {
   "key": "display",
-  "title": "花屏显示",
+  "title": "花屏、闪屏",
   "platform": "win",
-  "group": "硬件诊断",
+  "group": "快捷诊断",
   "tier": "read",
   "plan": [
    "显卡设备与驱动状态",
-   "分辨率/刷新率当前设置",
+   "分辨率与刷新率",
    "显示器连接信息",
-   "显卡驱动崩溃记录",
-   "显示相关事件日志"
+   "显卡超时（TDR 4101）",
+   "显示驱动错误日志"
   ],
-  "duration": "约 3 分钟",
+  "duration": "约 2 分钟",
   "icon": "monitor",
-  "desc": "采集：显卡设备与驱动状态 · 分辨率/刷新率当前设置 · 显示器连接信息 等 5 项"
+  "desc": "区分驱动/硬件/线材三类花屏 · 5 项"
  },
  {
   "key": "keyboard",
   "title": "键盘触控板",
   "platform": "win",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "键盘与触控板设备状态",
@@ -1325,7 +1419,7 @@ window.NP_DATA =[
   "key": "usb",
   "title": "USB 接口",
   "platform": "win",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "USB 设备枚举状态",
@@ -1342,7 +1436,7 @@ window.NP_DATA =[
   "key": "audio",
   "title": "音频设备",
   "platform": "win",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "音频设备状态",
@@ -1359,7 +1453,7 @@ window.NP_DATA =[
   "key": "network",
   "title": "网络诊断",
   "platform": "all",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "连通性测试",
@@ -1409,7 +1503,7 @@ window.NP_DATA =[
   "key": "update",
   "title": "更新失败",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "更新历史与失败记录",
@@ -1426,7 +1520,7 @@ window.NP_DATA =[
   "key": "sfc",
   "title": "系统文件修复",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "write",
   "plan": [
    "检查当前状态（系统文件校验历史）",
@@ -1443,7 +1537,7 @@ window.NP_DATA =[
   "key": "adware",
   "title": "弹窗广告",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "write",
   "plan": [
    "检查当前状态（自启动项清单）",
@@ -1460,7 +1554,7 @@ window.NP_DATA =[
   "key": "bitlocker",
   "title": "BitLocker/TPM",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "TPM 状态与版本",
@@ -1477,7 +1571,7 @@ window.NP_DATA =[
   "key": "printer",
   "title": "打印扫描",
   "platform": "win",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "打印机设备清单与状态",
@@ -1494,7 +1588,7 @@ window.NP_DATA =[
   "key": "camera",
   "title": "摄像头麦克风",
   "platform": "win",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "摄像头/影像设备枚举与健康状态",
@@ -1511,7 +1605,7 @@ window.NP_DATA =[
   "key": "ime",
   "title": "输入法/语言",
   "platform": "win",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "已安装输入法与语言包清单",
@@ -1528,7 +1622,7 @@ window.NP_DATA =[
   "key": "diskspace",
   "title": "磁盘空间",
   "platform": "all",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "各分区容量与可用空间",
@@ -1545,7 +1639,7 @@ window.NP_DATA =[
   "key": "activation",
   "title": "系统激活",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "write",
   "plan": [
    "检查当前状态（Windows 激活状态）",
@@ -1562,7 +1656,7 @@ window.NP_DATA =[
   "key": "raid",
   "title": "RAID 阵列",
   "platform": "win",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "RAID 控制器信息",
@@ -1579,7 +1673,7 @@ window.NP_DATA =[
   "key": "gpuactive",
   "title": "独显启用状态",
   "platform": "win",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "显卡设备枚举",
@@ -1596,7 +1690,7 @@ window.NP_DATA =[
   "key": "biometric",
   "title": "生物识别",
   "platform": "win",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "指纹识别设备枚举与状态",
@@ -1613,7 +1707,7 @@ window.NP_DATA =[
   "key": "kernel",
   "title": "内核日志",
   "platform": "linux",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "内核版本与启动参数",
@@ -1630,7 +1724,7 @@ window.NP_DATA =[
   "key": "service",
   "title": "系统服务",
   "platform": "linux",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "write",
   "plan": [
    "检查当前状态（系统运行时间与最近启动时间）",
@@ -1647,7 +1741,7 @@ window.NP_DATA =[
   "key": "bootfail",
   "title": "启动失败",
   "platform": "linux",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "write",
   "plan": [
    "检查当前状态（引导加载器信息）",
@@ -1664,7 +1758,7 @@ window.NP_DATA =[
   "key": "oom",
   "title": "内存与 OOM",
   "platform": "linux",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "内存总量与当前使用",
@@ -1681,7 +1775,7 @@ window.NP_DATA =[
   "key": "pkg",
   "title": "包管理状态",
   "platform": "linux",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "发行版与版本识别，确定包管理器",
@@ -1698,7 +1792,7 @@ window.NP_DATA =[
   "key": "fsdisk",
   "title": "磁盘与文件系统",
   "platform": "linux",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "块设备清单与分区",
@@ -1715,7 +1809,7 @@ window.NP_DATA =[
   "key": "sensor",
   "title": "温度与风扇",
   "platform": "linux",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "可用的温度传感器与读数",
@@ -1732,7 +1826,7 @@ window.NP_DATA =[
   "key": "netcfg",
   "title": "网络配置",
   "platform": "linux",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "网卡清单与状态",
@@ -1749,7 +1843,7 @@ window.NP_DATA =[
   "key": "pci",
   "title": "USB 与 PCI 设备",
   "platform": "linux",
-  "group": "外设网络",
+  "group": "归档",
   "tier": "read",
   "plan": [
    "USB 设备清单",
@@ -1815,23 +1909,6 @@ window.NP_DATA =[
   "desc": "动作：把驱动装到客户机，执行前自动建快照，可回滚"
  },
  {
-  "key": "file_push",
-  "title": "接收文件到客户机",
-  "platform": "win",
-  "group": "实用工具",
-  "tier": "write",
-  "icon": "upload",
-  "plan": [
-   "核对文件来源与签名",
-   "在客户机侧杀毒扫描",
-   "由现场工程师确认投放",
-   "投放后核对文件哈希并留痕"
-  ],
-  "duration": "约 2 分钟",
-  "impact": "向客户机写入文件",
-  "desc": "动作：二线传文件，需现场确认后投放"
- },
- {
   "key": "driver_installed",
   "title": "本机已装驱动",
   "platform": "win",
@@ -1852,7 +1929,7 @@ window.NP_DATA =[
   "key": "hw_smart",
   "title": "硬盘健康检测（SMART）",
   "platform": "all",
-  "group": "硬件诊断",
+  "group": "实用工具",
   "tier": "read",
   "icon": "hard-drive",
   "duration": "约 2 分钟",
@@ -1869,7 +1946,7 @@ window.NP_DATA =[
   "key": "hw_winlogs",
   "title": "系统日志收集（.evtx）",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "icon": "clipboard",
   "duration": "约 2 分钟",
@@ -1886,7 +1963,7 @@ window.NP_DATA =[
   "key": "hw_dump",
   "title": "Dump / Minidump 收集",
   "platform": "win",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "icon": "database",
   "duration": "约 2 分钟",
@@ -1903,7 +1980,7 @@ window.NP_DATA =[
   "key": "hw_sio",
   "title": "SIO Log 硬件诊断日志",
   "platform": "win",
-  "group": "硬件诊断",
+  "group": "归档",
   "tier": "read",
   "icon": "cpu",
   "duration": "约 3 分钟",
@@ -1920,7 +1997,7 @@ window.NP_DATA =[
   "key": "hw_tslog",
   "title": "IDG 日志一键搜集",
   "platform": "win",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "icon": "server",
   "duration": "约 3 分钟",
@@ -1937,7 +2014,7 @@ window.NP_DATA =[
   "key": "bio",
   "title": "BIOS 信息读取",
   "platform": "win",
-  "group": "硬件诊断",
+  "group": "实用工具",
   "tier": "read",
   "icon": "shield",
   "duration": "约 1 分钟",
@@ -1971,7 +2048,7 @@ window.NP_DATA =[
   "key": "linux_logpack",
   "title": "打包系统日志",
   "platform": "linux",
-  "group": "系统诊断",
+  "group": "归档",
   "tier": "read",
   "icon": "archive",
   "duration": "约 2 分钟",
@@ -2117,7 +2194,7 @@ window.NP_TIERS = {
   const DATA = window.NP_DATA || [];
   const TIERS = window.NP_TIERS || {};
   const KEY = 'nexpert_v03';
-  const BUILD = 'v0.11.0 · 2026-10-28 · 二线台：远程桌面观察（约2秒一帧，只看不控）+ 高清截图分离'
+  const BUILD = 'v0.13.3 · 2026-11-03 · 实用工具：整包结果就地渲染 + OA3 端点修正 + 去掉接收文件到客户机'
   const DEMO = location.protocol === 'file:';
 
   const PHASES = [
@@ -2276,7 +2353,9 @@ window.NP_TIERS = {
   }
   /* 分组精简为两大类：诊断类 → 快捷诊断；动手类 → 实用工具 */
   const BUCKET = { '系统诊断': '快捷诊断', '硬件诊断': '快捷诊断', '外设网络': '快捷诊断',
-                   '实用工具': '实用工具', '驱动管理': '实用工具', '刷写与激活': '实用工具' };
+                   '实用工具': '实用工具', '驱动管理': '实用工具', '刷写与激活': '实用工具',
+                   /* 2026-11-03：与现场台一致——快捷诊断只保留 4 张故障卡，其余归档不显示 */
+                   '归档': '归档' };
   function bucketOf(g) { return BUCKET[g] || '快捷诊断'; }
   function byKey(k) { return DATA.find(a => a.key === k) || null; }
   function tierOf(a) { return TIERS[a.tier] || { label: a.tier, risk: '', note: '' }; }
@@ -2404,6 +2483,7 @@ window.NP_TIERS = {
     driver: '/api/tools/drivers/fetch',
     bio: '/api/tools/bios/read',
     activation: '/api/tools/oa3/read',
+    oa3_activate: '/api/tools/oa3/read',   // 2026-11-03：卡片 key 与端点表不一致，OA3 之前一直走假通道
     driver_installed: '/api/tools/drivers/list',
     hw_smart: '/api/tools/smart',
     hw_winlogs: '/api/tools/winlogs',
@@ -2952,15 +3032,14 @@ window.NP_TIERS = {
   const T = NP.TIERS;
   const picked = new Set();   // 批量执行勾选集
 
-  let tab = 'ai', group = '推荐', keyword = '', expanded = {};   // 2026-10-28 二线台：默认 AI 诊断
+  let tab = 'ai', group = '快捷诊断', keyword = '', expanded = {};   // 2026-10-28 二线台：默认 AI 诊断
   // 推荐：按当前房间证据方向挑 6 项，理由直接写在卡上（不是随机排序）
   // 推荐：只放有量化异常依据的项（不放"基础状态"这类泛化项），按风险排序
   const REC = [
-    { key: 'disk',     why: 'SMART 05=248（阈值 140）/ C5=64' },
-    { key: 'bsod',     why: '90 天内 3 次 BugCheck 0x7A' },
-    { key: 'thermal',  why: 'CPU 峰值 97°C，触发降频 11 次' },
-    { key: 'driver',   why: '7 个驱动落后官网 2 个以上版本' },
-    { key: 'startup',  why: '启动耗时 41.2s（基线 18s）' }
+    { key: 'bsod',    why: '90 天内 3 次 BugCheck 0x7A' },
+    { key: 'reboot',  why: '近 30 天 5 次非正常关机' },
+    { key: 'slow',    why: '启动耗时 41.2s（基线 18s）' },
+    { key: 'display', why: '近 7 天 2 次显卡超时（TDR 4101）' }
   ];
   const GROUP_MAX = 8;   // 非推荐分组默认只铺 8 张
   document.getElementById('logoMark').innerHTML = NP.icon('spark', 15);
@@ -3124,6 +3203,29 @@ window.NP_TIERS = {
     else { NP.disconnect(); term('> 已断开客户机（证据与留痕保留）'); }
   });
 
+  /* 报告入口（2026-11-03 P1）：新窗口打开报告页，页内可切客户版/内部版、可下载与打印 */
+  (function bindReport(){
+    const b = document.getElementById('reportBtn');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      const rc = ((window.NP && NP.state && NP.state.room && NP.state.room.code) || '').toUpperCase();
+      if (!rc) { if (NP.toast) NP.toast('先创建或加入房间，才有报告可出'); return; }
+      if (window.NP && NP.ev) NP.ev('report.viewed', { archived: false, version: 0, via: '报告按钮' });
+      window.open('/api/room/report/' + encodeURIComponent(rc) + '?view=client', '_blank');
+    });
+  })();
+
+  /* 轨迹入口（2026-11-03）：新开只读页 /trajectory?room=… */
+  (function bindTraj(){
+    const b = document.getElementById('trajBtn');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      const rc = ((window.NP && NP.state && NP.state.room && NP.state.room.code) || '').toUpperCase();
+      if (!rc) { if (NP.toast) NP.toast('先创建或加入房间，才有轨迹可看'); return; }
+      window.open('/trajectory?room=' + encodeURIComponent(rc), '_blank');
+    });
+  })();
+
   /* ---------------- 状态线 ---------------- */
   function paintStatus() {
     // 2026-10-22：现场台取消「状态线」卡片；顶部 pill 与作业项状态照旧，这里只画存在的容器
@@ -3139,10 +3241,9 @@ window.NP_TIERS = {
 
   /* ---------------- 作业项网格 ---------------- */
   function paintGroups() {
-    const firstTab = (NP.isReal && NP.isReal()) ? '常用' : '推荐';
-    const groups = [firstTab, '快捷诊断', '实用工具'];
-    if (group === '推荐' && firstTab === '常用') group = '常用';
-    if (group === '常用' && firstTab === '推荐') group = '推荐';
+    // 2026-11-03：与现场台同步——取消「常用/推荐」页签
+    const groups = ['快捷诊断', '实用工具'];
+    if (group !== '快捷诊断' && group !== '实用工具') group = '快捷诊断';
     $('#groups').innerHTML = groups.map(g => '<button class="chip ' + (g === group ? 'on' : '') + '" data-g="' + NP.esc(g) + '">' + NP.esc(g) + '</button>').join('');
     $('#groups').querySelectorAll('[data-g]').forEach(b => b.addEventListener('click', () => { group = b.dataset.g; paintGroups(); paintGrid(); }));
   }
@@ -3334,9 +3435,27 @@ window.NP_TIERS = {
      · 点标签 → 下方展开该作业项计划（元信息 + 步骤 + 取消/运行）
      · 运行 → 服务端配了步骤就逐条执行（真进度），否则回退整包
      ══════════════════════════════════════════════════════════════ */
-  const STEP_STATE = { key: null, steps: [], supported: false, running: false, done: false, error: '', concl: null };
+  const STEP_STATE = { key: null, steps: [], supported: false, running: false, done: false, error: '', concl: null, pack: null };
 
   /* 初步结论渲染（结论来自服务端规则提取，只消费真实输出） */
+  /* 2026-11-03：整包类工具（驱动清单/已装驱动/SMART/BIOS/能源/OA3）结果就地渲染
+     原来结果只进「执行结果」区（已并入轨迹、界面隐藏），导致点了运行啥也看不到 */
+  function renderPack(p) {
+    if (!p) return '';
+    if (p.error) return '<div class="note danger" style="margin:0 12px 8px">执行失败：' + NP.esc(p.error) + '</div>';
+    const lines = String(p.text || '').split('\n');
+    const head = lines.slice(0, p.max || 18);
+    const rest = lines.length - head.length;
+    return '<div class="ipl-pack">' +
+      '<div class="ipl-pack-head">执行结果' +
+        (p.rows ? '<span class="faint">· ' + p.rows + ' 条</span>' : '') +
+        '<span style="flex:1"></span>' +
+        (rest > 0 ? '<button class="btn sm" id="pkToggle">展开全部 ' + lines.length + ' 行</button>' : '') +
+      '</div>' +
+      '<pre class="ipl-pack-body">' + NP.esc((p.expanded ? lines : head).join('\n')) + '</pre>' +
+    '</div>';
+  }
+
   function renderConcl(c) {
     const lv = c.level === 'ok' ? 'cc-ok' : c.level === 'warn' ? 'cc-warn' : c.level === 'bad' ? 'cc-bad' : '';
     const facts = (c.facts || []).map(f => '<span class="cc-fact">' + NP.esc(f.k) + ' <b>' + NP.esc(f.v) + '</b></span>').join('');
@@ -3369,7 +3488,7 @@ window.NP_TIERS = {
     const offline = !NP.canRun();
     if (STEP_STATE.key !== plan.key) {
       STEP_STATE.key = plan.key; STEP_STATE.running = false; STEP_STATE.done = false;
-      STEP_STATE.error = ''; STEP_STATE.supported = false; STEP_STATE.concl = null;
+      STEP_STATE.error = ''; STEP_STATE.supported = false; STEP_STATE.concl = null; STEP_STATE.pack = null;
       STEP_STATE.steps = a.plan.map((s, i) => ({ index: i, label: s, st: 'wait', summary: '' }));
       fetch('/api/action_steps/' + encodeURIComponent(plan.key), { credentials: 'same-origin' })
         .then(r => r.ok ? r.json() : null)
@@ -3407,6 +3526,7 @@ window.NP_TIERS = {
               '<span class="ipl-st">' + (stTxt[s.st] || '') + '</span>' +
             '</div>').join('') +
         '</div>' +
+        (STEP_STATE.pack ? renderPack(STEP_STATE.pack) : '') +
         (STEP_STATE.concl ? renderConcl(STEP_STATE.concl) : '') +
         (STEP_STATE.error ? '<div class="note danger" style="margin:0 12px 8px">' + NP.esc(STEP_STATE.error) + '</div>' : '') +
         '<div class="ipl-foot">' +
@@ -3424,6 +3544,8 @@ window.NP_TIERS = {
 
     const c = document.getElementById('iplCancel'); if (c) c.onclick = () => NP.closePlan();
     const r = document.getElementById('iplRun'); if (r) r.onclick = () => runInlinePlan();
+    const pk = document.getElementById('pkToggle');
+    if (pk) pk.onclick = () => { STEP_STATE.pack.expanded = !STEP_STATE.pack.expanded; renderInlinePlan(); };
   }
 
   async function runInlinePlan() {
@@ -3439,16 +3561,28 @@ window.NP_TIERS = {
         const ok = await NP.preflight(a);
         if (!ok) { STEP_STATE.running = false; renderInlinePlan(); return; }
       } catch (e) { STEP_STATE.running = false; STEP_STATE.error = e.message || String(e); renderInlinePlan(); return; }
-      STEP_STATE.steps.forEach(s => { s.st = 'done'; s.summary = '整包执行，结果见「执行结果」'; });
+      STEP_STATE.steps.forEach(s => { s.st = 'done'; s.summary = '已提交（写操作）'; });
       STEP_STATE.running = false; STEP_STATE.done = true; renderInlinePlan(); return;
     }
 
     if (!STEP_STATE.supported) {
+      // 2026-11-03：整包类工具——把真实返回就地渲染，不再只写「结果见执行结果」
+      const t0 = Date.now();
       try {
-        await NP.preflight(a);
-        STEP_STATE.steps.forEach(s => { s.st = 'done'; s.summary = '整包执行，结果见「执行结果」'; });
+        const res = await NP.preflight(a);
+        const text = (res && (res.text || res.log)) || '执行完成（无输出）';
+        const first = String(text).split('\n')[0].slice(0, 90);
+        STEP_STATE.steps.forEach(s => { s.st = 'done'; s.summary = first; });
+        const rows = (res && res.data && Array.isArray(res.data.drivers)) ? res.data.drivers.length : 0;
+        STEP_STATE.pack = { text: String(text).slice(0, 20000), rows: rows, expanded: false };
         STEP_STATE.done = true;
-      } catch (e) { STEP_STATE.error = e.message || String(e); }
+        if (window.NP && NP.ev) NP.ev('tool.result', { tool: a.title, key: a.key, chars: String(text).length,
+                                                       rows: rows, ms: Date.now() - t0 });
+      } catch (e) {
+        STEP_STATE.error = e.message || String(e);
+        STEP_STATE.pack = { error: e.message || String(e) };
+        if (window.NP && NP.ev) NP.ev('tool.result', { tool: a.title, key: a.key, ok: false, error: e.message || String(e) });
+      }
       STEP_STATE.running = false; renderInlinePlan(); return;
     }
 
@@ -3638,8 +3772,9 @@ window.NP_TIERS = {
     const a = NP.gateState.action;
     const values = { op: ($('#gOp') || {}).value || '', rv: ($('#gRv') || {}).value || '' };
     const r = NP.gateSubmit(values);
-    if (!r.ok) { const e = $('#gateErr'); e.textContent = r.msg; e.classList.remove('hidden'); NP.audit('门禁拦截：' + r.msg, 'err'); toast(r.msg, 'danger'); return; }
+    if (!r.ok) { const e = $('#gateErr'); e.textContent = r.msg; e.classList.remove('hidden'); NP.audit('门禁拦截：' + r.msg, 'err'); NP.ev('gate.blocked', { msg: r.msg }); toast(r.msg, 'danger'); return; }
     term('> 工号确认通过：' + values.op + (values.rv ? ' / 复核 ' + values.rv : ''));
+    NP.ev('gate.confirm', { op: values.op, reviewer: values.rv || '' });
   });
   $('#gateCancel').addEventListener('click', () => NP.gateCancel());
 
@@ -3694,7 +3829,7 @@ window.NP_TIERS = {
     collectRunning = true; collectPkg = null; collectUploaded = false; paintCollect();
     const t0 = Date.now();
     term('> IDG 日志一键搜集开始（客户机执行中，约 3~10 分钟）');
-    NP.audit('IDG 日志一键搜集：开始', 'ok');
+    NP.audit('IDG 日志一键搜集：开始', 'ok'); NP.ev('artifact.collect.start', { tool: 'IDG 日志采集' });
     $('#collectResult').innerHTML = '';
     // 进度条：按 3~10 分钟的典型耗时推进（只做等待感知，不显示假数字）
     const pg = makeProgress($('#collectPg'), {
@@ -3718,7 +3853,7 @@ window.NP_TIERS = {
         pg.fail('采集未完成' + (fail ? '：' + fail : ''));
         $('#collectResult').innerHTML = '<div class="note danger">采集未完成' + (fail ? '：' + NP.esc(fail) : '') +
           '</div><pre class="small" style="white-space:pre-wrap;margin-top:6px">' + NP.esc(raw.slice(0, 800)) + '</pre>';
-        NP.audit('IDG 日志一键搜集失败' + (fail ? '：' + fail : ''), 'err');
+        NP.audit('IDG 日志一键搜集失败' + (fail ? '：' + fail : ''), 'err'); NP.ev('artifact.collect.end', { ok: false, error: fail || '采集未完成' });
         toast('采集未完成' + (fail ? '：' + fail : ''), 'danger');
         return;
       }
@@ -3731,6 +3866,7 @@ window.NP_TIERS = {
         NP.esc(path) + '</code>');
       NP.addEvidence({ tool: 'IDG 日志一键搜集', text: '日志包：' + path + '（' + sizeMB + ' MB）· 耗时 ' + cost + ' 秒', real: true });
       NP.audit('IDG 日志一键搜集完成：' + collectPkg.name + '（' + sizeMB + ' MB，' + cost + ' 秒）', 'ok');
+      NP.ev('artifact.collect.end', { ok: true, name: collectPkg.name, size_mb: sizeMB, seconds: cost });
       $('#collectResult').innerHTML = '';   // 完成摘要已合并到进度块，不再重复
       // 完成信息已在进度块里展示，不再弹重复 toast
       paintCollect(); NP.setPhase('done', 'IDG 日志采集完成');
@@ -3739,7 +3875,7 @@ window.NP_TIERS = {
       clearInterval(tick);
       pg.fail('采集失败：' + (e.message || e));
       $('#collectResult').innerHTML = '<div class="note danger">采集失败：' + NP.esc(e.message || String(e)) + '</div>';
-      NP.audit('IDG 日志一键搜集失败：' + (e.message || e), 'err');
+      NP.audit('IDG 日志一键搜集失败：' + (e.message || e), 'err'); NP.ev('artifact.collect.end', { ok: false, error: e.message || String(e) });
       toast('采集失败：' + e.message, 'danger');
     } finally { collectRunning = false; paintCollect(); }
   });
@@ -3963,6 +4099,7 @@ window.NP_TIERS = {
     paintBatchBar();
     term('> 批量执行开始 · ' + list.length + ' 项（只读）');
     NP.audit('批量执行：' + list.length + ' 个只读项', 'ok');
+    NP.ev('diag.batch.start', { count: list.length, items: list.map(function (x) { return x.title; }).slice(0, 12) });
     for (const a of list) {
       term('> [' + (batchDone + 1) + '/' + list.length + '] ' + a.title);
       try { await NP.preflight(a); batchDone++; }
@@ -3974,6 +4111,7 @@ window.NP_TIERS = {
     const okN = list.length - batchFail.length;
     term('> 批量执行完成：成功 ' + okN + ' / 失败 ' + batchFail.length);
     NP.audit('批量执行完成：成功 ' + okN + '，失败 ' + batchFail.length, batchFail.length ? 'err' : 'ok');
+    NP.ev('diag.batch.end', { ok: okN, failed: batchFail.length, failed_items: batchFail.map(function (x) { return x.title + '：' + x.msg; }).slice(0, 8) });
     toast('批量执行完成：成功 ' + okN + ' 项' + (batchFail.length ? '，失败 ' + batchFail.length + ' 项' : ''), batchFail.length ? 'warn' : 'ok');
     const note = $('#batchNote');
     if (note) {
@@ -4115,6 +4253,7 @@ window.NP_TIERS = {
                        at: Date.now(), text: r.txt.slice(0, 20000), real: true };
           openResult(ev);
           NP.audit('读取报告：' + (r.archived ? '存档 v' + r.version : '实时生成'), 'ok');
+          NP.ev('report.viewed', { archived: !!r.archived, version: r.version || 0 });
         }).catch(e => toast('读取报告失败：' + e.message, 'danger'));
         return;
       }
@@ -4124,12 +4263,14 @@ window.NP_TIERS = {
       $('#repArtifacts').textContent = s.artifacts.length + ' 个产物';
       $('#repMask').classList.add('on');
       NP.audit(fin ? ('定稿报告已存档 v' + fin.version + '（不可修改）') : '生成报告草稿（未存档，结单时定稿）', 'ok');
+      NP.ev('report.archived', { version: fin ? fin.version : 0, draft: !fin });
     });
     if (esc) esc.addEventListener('click', () => {
       if (NP.isReal && NP.isReal()) {
         esc.disabled = true; esc.textContent = '升级中…';
         NP.escalateReal().then(js => {
           term('> 已升级二线：' + (js.escalated_to || '') + '（服务端已记录）');
+          NP.ev('room.escalate', { to: js.escalated_to || '' });
           toast('已升级二线：' + (js.escalated_to || ''), 'ok'); paintAll();
         }).catch(e => { esc.disabled = false; esc.textContent = '升级二线'; toast('升级失败：' + e.message, 'danger'); });
         return;
@@ -4182,6 +4323,21 @@ window.NP_TIERS = {
     t.appendChild(d); t.scrollTop = t.scrollHeight;
   }
   NP.term = term;
+
+  /* 轨迹埋点（2026-11-03）：把原先只写进「调用记录 / 原始日志」的信息也送进服务端事件流 */
+  NP.ev = function (kind, data, opts) {
+    try {
+      const rc = (NP.state && NP.state.room && NP.state.room.code) || '';
+      if (!rc) return;
+      fetch('/api/room/event', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: kind, room_code: rc, data: data || {},
+                               turn: (opts && opts.turn) || '', step: (opts && opts.step) || '' })
+      }).catch(() => { });
+    } catch (e) { }
+  };
+
 
   /* ---------------- 执行结果（Markdown 渲染） ---------------- */
   let lastResult = null;
@@ -4339,7 +4495,7 @@ window.NP_TIERS = {
     if (!ok) return;
     try {
       await NP.apiPost('/api/room/file/' + id + '/delete', {});
-      NP.audit('删除文件：' + f.filename, 'ok');
+      NP.audit('删除文件：' + f.filename, 'ok'); NP.ev('file.deleted', { name: f.filename });
       await rfLoad();
     } catch (e) { toast('删除失败：' + (e.message || e), 'danger'); }
   }
@@ -4368,6 +4524,7 @@ window.NP_TIERS = {
     const js = await NP.apiPost('/api/room/file/commit', { room_code: room, fid: fid, filename: file.name });
     if (!js || !js.ok) throw new Error((js && js.error) || '入库失败');
     NP.audit('上传文件：' + file.name + '（' + rfsize(js.size) + '）', 'ok');
+    NP.ev('file.uploaded', { name: file.name, size: js.size || 0 });
   }
   async function rfUploadFiles(list) {
     if (!list || !list.length) return;
@@ -4557,10 +4714,11 @@ window.NP_TIERS = {
     $('#apMask').style.cssText = 'position:fixed;inset:0;z-index:230;display:grid;place-items:center;padding:24px;background:rgba(21,27,38,.34)';
     $('#apMask').classList.add('on');
     term('! 服务端请求审批：' + (m.tool || '') + '（tier ' + (m.tier || '?') + '）');
+    NP.ev('approval.request', { tool: m.tool || '', tier: m.tier || '' });
   }
   function closeApproval() { $('#apMask').classList.remove('on'); $('#apMask').style.display = 'none'; if (apTick) { clearInterval(apTick); apTick = null; } }
-  $('#apAllow').onclick = () => { if (apReq) { NP.respondApproval(apReq.id, true, ''); toast('已批准，继续执行', 'ok'); term('> 已批准：' + (apReq.tool || '')); } closeApproval(); };
-  $('#apDeny').onclick = () => { if (apReq) { NP.respondApproval(apReq.id, false, '工程师拒绝'); toast('已拒绝，本次任务会中止', 'warn'); term('! 已拒绝：' + (apReq.tool || '')); } closeApproval(); };
+  $('#apAllow').onclick = () => { if (apReq) { NP.respondApproval(apReq.id, true, ''); toast('已批准，继续执行', 'ok'); term('> 已批准：' + (apReq.tool || '')); NP.ev('approval.approve', { tool: apReq.tool || '', tier: apReq.tier || '' }); } closeApproval(); };
+  $('#apDeny').onclick = () => { if (apReq) { NP.respondApproval(apReq.id, false, '工程师拒绝'); toast('已拒绝，本次任务会中止', 'warn'); term('! 已拒绝：' + (apReq.tool || '')); NP.ev('approval.deny', { tool: apReq.tool || '', tier: apReq.tier || '' }); } closeApproval(); };
 
   /* ---------------- 执行通道等待条 ---------------- */
   let waitTick = null;
@@ -4669,7 +4827,7 @@ window.NP_TIERS = {
     if (kind === 'run-start') { const a = payload; term('> 开始执行：' + a.title + '（' + T[a.tier].label + '）'); }
     if (kind === 'run-tick') { }
     if (kind === 'run-done') { const a = payload; term('> 完成：' + a.title); NP.unlockAI(); }
-    if (kind === 'run-error') { const e = payload; term('! 失败：' + (e.message || e)); }
+    if (kind === 'run-error') { const e = payload; term('! 失败：' + (e.message || e)); NP.ev('op.error', { error: (e && e.message) || String(e) }); }
     if (kind === 'remote') { paintAll(); }
     else paintAll();
   });
@@ -4779,6 +4937,11 @@ window.NP_TIERS = {
   paintAu();
 })();
 </script>
+<script>
+  window.IM_BADGE = ['#imBadgeExpert'];
+  window.IM_CFG = { pane: '#imPane', poll: 2500, placeholder: '输入消息，Enter 发送' };
+</script>
+<script src="/static/console/im.js"></script>
 <script>
 /* ══════════════════════════════════════════════════════════════
    远程截图（2026-10-28 二线专属）
@@ -4930,7 +5093,7 @@ window.NP_TIERS = {
   const b2 = $('#shotAgain'); if (b2) b2.addEventListener('click', () => shoot(false, false));
 
   /* ── 远程桌面观察（2026-10-28）：低清帧轮询，只看不控 ── */
-  const LIVE = { on: false, timer: null, busy: false, frames: 0, startedAt: 0 };
+  const LIVE = { on: false, timer: null, busy: false, frames: 0, startedAt: 0, zoom: false };
   const LIVE_INTERVAL = 2000;    // 2 秒一帧
   const LIVE_MAX_MIN = 30;       // 最长连续观察 30 分钟，自动停
 
@@ -4958,6 +5121,9 @@ window.NP_TIERS = {
     })).then(js => {
       const img = $('#liveImg');
       if (img) { img.src = js.url; img.style.display = 'block'; }
+      // 放大层开着时跟着刷新
+      const zi = $('#liveZoomImg');
+      if (zi && LIVE.zoom) zi.src = js.url;
       const em = $('#liveEmpty'); if (em) em.style.display = 'none';
       const br = $('#liveBar'); if (br) br.style.display = 'flex';
       LIVE.frames++;
@@ -4995,12 +5161,31 @@ window.NP_TIERS = {
   const lt = $('#liveToggle'); if (lt) lt.addEventListener('click', liveToggle);
   const ls = $('#liveShot'); if (ls) ls.addEventListener('click', () => { shotTab('shot'); shoot(false, false); });
 
+  /* 观察帧放大（2026-11-02）：点击画面 → 全屏看细节；Esc 或点空白关闭 */
+  function liveZoomOpen() {
+    const zi = $('#liveZoomImg'), z = $('#liveZoom'), src = $('#liveImg');
+    if (!zi || !z || !src || !src.src) return;
+    zi.src = src.src;
+    z.classList.remove('hidden');
+    LIVE.zoom = true;
+  }
+  function liveZoomClose() {
+    const z = $('#liveZoom'); if (z) z.classList.add('hidden');
+    const zi = $('#liveZoomImg'); if (zi) zi.removeAttribute('src');
+    LIVE.zoom = false;
+  }
+  const limg = $('#liveImg'); if (limg) limg.addEventListener('click', liveZoomOpen);
+  const lzoom = $('#liveZoom'); if (lzoom) lzoom.addEventListener('click', liveZoomClose);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && LIVE.zoom) liveZoomClose(); });
+
   /* 观察/截图 子页签切换 */
   function shotTab(which) {
     const w = which || 'live';
-    const lp = $('#livePane'), sp = $('#shotPane');
+    const lp = $('#livePane'), sp = $('#shotPane'), ip = $('#imPane');
     if (lp) lp.classList.toggle('hidden', w !== 'live');
     if (sp) sp.classList.toggle('hidden', w !== 'shot');
+    if (ip) ip.classList.toggle('hidden', w !== 'im');
+    if (w === 'im') { try { if (window.IM && IM.reload) IM.reload(); } catch (e) { } }
     const tabs = $('#shotTabs');
     if (tabs) tabs.querySelectorAll('button[data-st]').forEach(b => b.classList.toggle('on', b.dataset.st === w));
     if (w !== 'live') liveStop();
@@ -5080,15 +5265,13 @@ window.NP_TIERS = {
         </label>
         <label class="check" style="align-items:flex-start;gap:7px;line-height:1.5">
           <input type="radio" name="fldNrBat" value="ps" style="margin-top:3px">
-          <span><b>PowerShell 版</b> · 不落地 exe，杀软友好 · <span class="faint">connect-ps-&lt;码&gt;.bat</span></span>
-        </label>
-        <label class="check" style="align-items:flex-start;gap:7px;line-height:1.5">
-          <input type="radio" name="fldNrBat" value="none" style="margin-top:3px">
-          <span><b>先只建房</b> · 不下载，稍后在「连接客户机」里再选</span>
+          <span><b>PowerShell 版</b> · 免装 exe 桥接器，首次截图取抓屏组件 · <span class="faint">connect-ps-&lt;码&gt;.bat</span></span>
         </label>
       </div>
 
-      <div class="row" style="margin-top:10px">
+      </div><!-- /字段区（可滚动） -->
+      <div class="nr-foot"><!-- 按钮与提示固定在底部，内容再长也不会被裁（2026-11-03） -->
+      <div class="row" style="margin-top:0">
         <button class="btn primary" id="fldNrOk" style="flex:1;white-space:nowrap">创建并下载 exe 版</button>
         <button class="btn ghost" id="fldNrCancel" style="flex:1">取消</button>
       </div>
@@ -5371,9 +5554,7 @@ window.NP_TIERS = {
     exe:  { btn: '创建并下载 exe 版',
             hint: '将下载 <b>connect-&lt;房间码&gt;.bat</b>（文件名不带 ps）：双击后自动下载 exe 桥接器并连接本房间。' },
     ps:   { btn: '创建并下载 PS 版',
-            hint: '将下载 <b>connect-ps-&lt;房间码&gt;.bat</b>（文件名带 ps）：不落地 exe，直接加载 PowerShell 桥接器连接本房间。' },
-    none: { btn: '只创建房间',
-            hint: '不下载连接文件。建完可在「连接客户机」里再选 exe 版或 PowerShell 版。' }
+            hint: '将下载 <b>connect-ps-&lt;房间码&gt;.bat</b>（文件名带 ps）：直接加载 PowerShell 桥接器连接本房间；首次截图会向服务器取一次抓屏组件（约 6MB，仅一次）。' }
   };
   function curBatKind() {
     const el = document.querySelector('input[name="fldNrBat"]:checked');
@@ -5620,6 +5801,18 @@ window.NP_TIERS = {
     .catch(() => {});
 })();
 </script>
+<!-- 本房间文件面板（2026-10-29：协作页签顶部细条点开） -->
+<div id="imFilesMask" class="im-files-mask"></div>
+<div id="imFilesPanel" class="im-files-panel">
+  <div class="im-fp-head">
+    <span class="im-fp-title">本房间文件</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn sm" id="filesUploadBtn">上传</button>
+    <button class="im-fp-close" id="imFilesClose" title="关闭">×</button>
+  </div>
+  <div class="im-fp-body"><div id="filesList" class="files-list"></div></div>
+</div>
+
 <!-- 截图全屏查看（2026-10-28） -->
 <div id="shotFullMask" style="display:none;position:fixed;inset:0;z-index:400;background:rgba(12,16,24,.92);
      overflow:auto;padding:24px">

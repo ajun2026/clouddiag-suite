@@ -1,0 +1,121 @@
+{
+  "categories": [
+    "AI 对话",
+    "AI 编程",
+    "AI 模型与工具"
+  ],
+  "links": [
+    {
+      "id": "lnk0001",
+      "category": "AI 对话",
+      "name": "ChatGPT",
+      "desc": "OpenAI 通用对话助手，适合长文分析、代码解释",
+      "url": "https://chat.openai.com",
+      "hidden": false
+    },
+    {
+      "id": "lnk0002",
+      "category": "AI 对话",
+      "name": "Claude",
+      "desc": "Anthropic 对话助手，长文档阅读与总结较稳",
+      "url": "https://claude.ai",
+      "hidden": false
+    },
+    {
+      "id": "lnk0003",
+      "category": "AI 对话",
+      "name": "Gemini",
+      "desc": "Google 对话助手，可结合搜索结果作答",
+      "url": "https://gemini.google.com",
+      "hidden": false
+    },
+    {
+      "id": "lnk0004",
+      "category": "AI 对话",
+      "name": "DeepSeek",
+      "desc": "国产对话模型，中文表达与推理表现好",
+      "url": "https://chat.deepseek.com",
+      "hidden": false
+    },
+    {
+      "id": "lnk0005",
+      "category": "AI 对话",
+      "name": "Kimi",
+      "desc": "月之暗面对话助手，超长上下文文档处理",
+      "url": "https://kimi.moonshot.cn",
+      "hidden": false
+    },
+    {
+      "id": "lnk0006",
+      "category": "AI 对话",
+      "name": "通义千问",
+      "desc": "阿里对话助手，支持文档与图片理解",
+      "url": "https://tongyi.aliyun.com",
+      "hidden": false
+    },
+    {
+      "id": "lnk0007",
+      "category": "AI 对话",
+      "name": "豆包",
+      "desc": "字节对话助手，日常问答与文案润色",
+      "url": "https://www.doubao.com",
+      "hidden": false
+    },
+    {
+      "id": "lnk0008",
+      "category": "AI 编程",
+      "name": "GitHub Copilot",
+      "desc": "编辑器内代码补全与对话，支持 VS Code / JetBrains",
+      "url": "https://github.com/features/copilot",
+      "hidden": false
+    },
+    {
+      "id": "lnk0009",
+      "category": "AI 编程",
+      "name": "Cursor",
+      "desc": "AI 原生编辑器，整仓库理解与批量改代码",
+      "url": "https://cursor.com",
+      "hidden": false
+    },
+    {
+      "id": "lnk0010",
+      "category": "AI 编程",
+      "name": "通义灵码",
+      "desc": "阿里 AI 编码助手，国内网络直接可用",
+      "url": "https://lingma.aliyun.com",
+      "hidden": false
+    },
+    {
+      "id": "lnk0011",
+      "category": "AI 模型与工具",
+      "name": "Hugging Face",
+      "desc": "开源模型与数据集社区，查模型能力与许可证",
+      "url": "https://huggingface.co",
+      "hidden": false
+    },
+    {
+      "id": "lnk0012",
+      "category": "AI 模型与工具",
+      "name": "OpenRouter",
+      "desc": "多模型统一入口，一个 key 调各家模型",
+      "url": "https://openrouter.ai",
+      "hidden": false
+    },
+    {
+      "id": "lnk0013",
+      "category": "AI 模型与工具",
+      "name": "Ollama",
+      "desc": "本地跑开源模型，离线环境做验证",
+      "url": "https://ollama.com",
+      "hidden": false
+    },
+    {
+      "id": "lnk0014",
+      "category": "AI 模型与工具",
+      "name": "Perplexity",
+      "desc": "带来源引用的 AI 搜索，查资料出结论较快",
+      "url": "https://www.perplexity.ai",
+      "hidden": false
+    }
+  ]
+}
