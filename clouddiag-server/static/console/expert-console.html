@@ -2241,7 +2241,7 @@ window.NP_TIERS = {
   const DATA = window.NP_DATA || [];
   const TIERS = window.NP_TIERS || {};
   const KEY = 'nexpert_v03';
-  const BUILD = 'v0.16.7 · 2026-11-04 · 修观察模式残留提示「正在抓取客户机画面」'
+  const BUILD = 'v0.16.8 · 2026-11-04 · 驱动下载改 POST 取链 + 页内下载（SN 不进日志/历史）'
   const DEMO = location.protocol === 'file:';
 
   const PHASES = [
@@ -3520,6 +3520,36 @@ window.NP_TIERS = {
       + more;
   }
 
+  /* 驱动下载：POST 取实时直链 → 页面内触发下载（不跳转、不进历史） */
+  document.addEventListener('click', async function (e) {
+    const b = e.target && e.target.closest ? e.target.closest('[data-drvdl]') : null;
+    if (!b) return;
+    e.preventDefault();
+    const old = b.textContent;
+    b.disabled = true; b.textContent = '取链接…';
+    try {
+      const r = await fetch('/api/tools/drivers/sign', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search_key: b.dataset.key, name: b.dataset.name, version: b.dataset.ver })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.url) {
+        b.textContent = old; b.disabled = false;
+        NP.toast(j.error || ('取链接失败 HTTP ' + r.status), 'err');
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = j.url; a.download = ((j.name || b.dataset.name || 'driver') + '.exe');
+      a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove();
+      b.textContent = '已开始下载'; b.disabled = false;
+      setTimeout(() => { b.textContent = old; }, 2500);
+    } catch (err) {
+      b.textContent = old; b.disabled = false;
+      NP.toast('下载失败：' + (err.message || err), 'err');
+    }
+  });
+
   document.addEventListener('click', function (e) {
     const b = e.target && e.target.closest ? e.target.closest('[data-iplmore]') : null;
     if (!b) return;
@@ -3682,13 +3712,13 @@ window.NP_TIERS = {
         const os = NP.esc((d.os_tags || []).join(' / ') || '—');
         // 2026-11-04：下载直链带时效 token，缓存里不存。点「下载」时按 SN/MT 实时签发（服务端 302）
         const _key = (p.data && p.data.machine && (p.data.machine.search_key || p.data.machine.sn || p.data.machine.model)) || '';
-        const _q = _key ? ('/api/tools/drivers/sign?search_key=' + encodeURIComponent(_key) +
-                           '&name=' + encodeURIComponent(d.name || '') +
-                           '&version=' + encodeURIComponent(d.version || '')) : '';
-        const dl = _q
-          ? '<a class="btn sm ghost" href="' + _q + '" target="_blank" rel="noopener" ' +
-            'style="height:24px;font-size:11.5px;white-space:nowrap">官方下载</a>'
+        // 2026-11-04（审查 P3-1）：改 POST 取链（SN 不进 URL/日志/浏览器历史），拿到直链用 Blob 下载，页面不跳转
+        const _dl = _key
+          ? '<button class="btn sm ghost" data-drvdl="1" data-key="' + NP.esc(_key) +
+            '" data-name="' + NP.esc(d.name || '') + '" data-ver="' + NP.esc(d.version || '') +
+            '" style="height:24px;font-size:11.5px;white-space:nowrap">官方下载</button>'
           : '<span class="faint small">—</span>';
+        const dl = _dl;
         return '<tr><td>' + (i + 1) + '</td><td>' + nm + '</td><td class="num">' + ver + '</td><td>' + os + '</td><td>' + dl + '</td></tr>';
       }).join('');
       return '<div class="ipl-pack">' +
