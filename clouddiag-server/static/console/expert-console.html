@@ -396,6 +396,22 @@ svg{flex:0 0 auto}
 #fldNrBatPick .check{display:flex;width:100%;align-items:flex-start;gap:7px;line-height:1.5}
 #fldNrBatPick .check>span{flex:1;min-width:0;overflow-wrap:anywhere}
 #fldNrHint{margin-top:12px!important;line-height:1.55}
+/* 2026-11-05：SN 官网校验状态行（绿=在保 / 黄=已过保 / 红=无效→禁止创建 / 灰=校验中） */
+#fldNrSnSt{display:flex;align-items:center;gap:7px;font-size:12px;line-height:1.5;
+  margin:0 0 6px;padding:5px 9px;border-radius:8px;border:1px solid var(--line);
+  background:#FAFBFC;color:var(--text-3);transition:background .15s,border-color .15s}
+#fldNrSnSt .nr-dot{width:9px;height:9px;border-radius:50%;background:#C4C9D2;flex:0 0 auto}
+#fldNrSnSt .nr-txt{flex:1;min-width:0;overflow-wrap:anywhere}
+#fldNrSnSt.checking .nr-dot{animation:nrSnPulse 1s ease-in-out infinite}
+#fldNrSnSt.ok{border-color:#BBF7D0;background:#F0FDF4;color:#15803D}
+#fldNrSnSt.ok .nr-dot{background:#16A34A;box-shadow:0 0 0 3px rgba(22,163,74,.15)}
+#fldNrSnSt.warn{border-color:#FDE68A;background:#FFFBEB;color:#B45309}
+#fldNrSnSt.warn .nr-dot{background:#D97706;box-shadow:0 0 0 3px rgba(217,119,6,.15)}
+#fldNrSnSt.err{border-color:#FECACA;background:#FEF2F2;color:#B91C1C}
+#fldNrSnSt.err .nr-dot{background:#DC2626;box-shadow:0 0 0 3px rgba(220,38,38,.15)}
+@keyframes nrSnPulse{0%,100%{opacity:1}50%{opacity:.3}}
+#fldNrSnMeta{margin:0 0 10px;line-height:1.5}
+#fldNrSn.bad{border-color:#FCA5A5;background:#FFF5F5}
 #termCard.term-fold{border-top:1px solid var(--line)}
 #termCard .term-sum{display:flex;align-items:center;gap:8px;padding:9px 14px;cursor:pointer;list-style:none;
   font-size:12.5px;font-weight:600;color:var(--text-2)}
@@ -493,6 +509,17 @@ svg{flex:0 0 auto}
 #profileDetail .kv2{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;font-size:12.5px}
 #profileDetail .kv2 dt{color:var(--text-3);margin:0}
 #profileDetail .kv2 dd{margin:0;color:var(--text);word-break:break-all}
+/* 2026-11-05：整机档案弹窗支持表格/列表渲染（出厂配置 103 行装箱单、维修工单明细） */
+#profileDetail .dlg.wide{width:min(940px,100%)}
+/* 宽弹窗里让外层 .dlg 单独滚动（.dlg 已 overflow:auto），内层不再自带滚动条，避免双滚动条争夺 */
+#profileDetail .dlg.wide .pf-scroll{max-height:none;overflow:visible;border:0}
+#profileDetail .dlg.wide .pf-tbl th{position:static}
+#profileDetail .pf-scroll{max-height:46vh;overflow:auto;border:1px solid #E2E5EA;border-radius:8px}
+#profileDetail .pf-tbl{width:100%;border-collapse:collapse;font-size:12px}
+#profileDetail .pf-tbl th,#profileDetail .pf-tbl td{border-bottom:1px solid #EDEFF2;padding:4px 7px;text-align:left;vertical-align:top}
+#profileDetail .pf-tbl th{color:var(--text-3);font-weight:600;background:#F7F8FA;position:sticky;top:0;z-index:1}
+#profileDetail .pf-tbl tr:last-child td{border-bottom:0}
+#profileDetail .pf-list{margin:0;padding-left:16px}
 
 /* 调用记录折叠（2026-10-27） */
 #resultCard.collapsed .card-body { display: none; }
@@ -763,6 +790,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
         <div class="objbar">
           <div class="kv"><span>SN</span><b class="num" id="oSn">—</b></div>
           <div class="kv"><span>机型</span><b id="oModel">—</b></div>
+          <div class="kv"><span>MTM</span><b class="num" id="oMtm">—</b></div>
           <div class="kv"><span>客户</span><b id="oCust">—</b></div>
           <div class="kv"><span>工单</span><b class="num" id="oOrder">—</b></div>
           <div class="kv"><span>桥接器</span><b id="oBridge">—</b></div>
@@ -882,7 +910,7 @@ body[data-mode="ai"] #aiInputRow { order: 3; }
         <span class="badge" id="aiChatState">未连接</span></div>
       <div class="card-body tight">
         <div id="aiMsgs" class="ai-msgs">
-          <div class="ai-msg bot">我是二线复核搭档：能基于现场已采证据交叉核对、必要时再向客户机补采，判断根因后给你可选的处置方向——确认后我再动手。</div>
+          <div class="ai-msg bot">我是二线复核搭档：核对现场证据，必要时补采，判断根因后给处置方向。</div>
         </div>
         <div class="row" id="aiInputRow" style="gap:6px">
           <input class="input" id="aiIn" name="np-ai-question" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="输入问题，回车发送" style="flex:1" data-noautofill readonly>
@@ -2241,7 +2269,7 @@ window.NP_TIERS = {
   const DATA = window.NP_DATA || [];
   const TIERS = window.NP_TIERS || {};
   const KEY = 'nexpert_v03';
-  const BUILD = 'v0.16.8 · 2026-11-04 · 驱动下载改 POST 取链 + 页内下载（SN 不进日志/历史）'
+  const BUILD = 'v0.17.0 · 2026-11-05 · SN 官网校验三色灯 + 整机档案接魔方/官网'
   const DEMO = location.protocol === 'file:';
 
   const PHASES = [
@@ -2859,6 +2887,7 @@ window.NP_TIERS = {
             if (js.client_org) NP.state.room.cust = js.client_org;
             if (js.sn) NP.state.room.sn = js.sn;
             if (js.machine_model) NP.state.room.model = js.machine_model;
+            if (js.mtm) NP.state.room.mtm = js.mtm;
             paintTop();
           }
         } catch (e) { }
@@ -2879,6 +2908,7 @@ window.NP_TIERS = {
         const r = NP.state.room;
         if (js.sn) r.sn = js.sn;
         if (js.machine_model) r.model = js.machine_model;
+        if (js.mtm) r.mtm = js.mtm;
         if (js.client_org) r.cust = js.client_org;
         if (js.ticket_no) r.order = js.ticket_no;
         if (js.room_name) r.name = js.room_name;
@@ -2888,7 +2918,9 @@ window.NP_TIERS = {
         setT('oSn', r.sn || '—');
         setT('oModel', r.model || '—');
         setT('oCust', r.cust || '—');
-        setT('oOrder', r.order || '—');
+        const _oc = parseInt(window.__openTicketCnt || 0, 10);
+        setT('oOrder', (r.order && r.order !== '—') ? r.order
+              : (_oc > 0 ? (_oc + ' 个进行中（单号待查）') : '无进行中工单'));
         const eh = document.querySelector('.objhead');
         if (eh) {
           eh.classList.remove('no-room');
@@ -3069,7 +3101,7 @@ window.NP_TIERS = {
         if (!Array.isArray(list)) return [];
         S.realRooms = list.map(r => ({
           code: r.room_code, sn: r.sn, order: r.ticket_no || r.order || '',
-          model: r.machine_model || '', cust: r.engineer_username || '',
+          model: r.machine_model || '', mtm: r.mtm || '', cust: r.engineer_username || '',
           engineer: r.engineer_username || '',
           plat: (r.os || 'windows').toLowerCase().indexOf('linux') >= 0 ? 'linux' : 'windows',
           status: r.status || 'active',
@@ -3079,7 +3111,7 @@ window.NP_TIERS = {
         // 房间索引落缓存：下次进同一房间首帧就能显示完整信息，不会先空后填（视觉跳动）
         try {
           const idx = {};
-          S.realRooms.forEach(r => { idx[r.code] = { sn: r.sn, model: r.model, order: r.order, engineer: r.engineer, cust: r.cust }; });
+          S.realRooms.forEach(r => { idx[r.code] = { sn: r.sn, model: r.model, mtm: r.mtm, order: r.order, engineer: r.engineer, cust: r.cust }; });
           localStorage.setItem('nexpert_room_index', JSON.stringify(idx));
         } catch (e) { }
         emit('rooms');
@@ -3201,16 +3233,16 @@ window.NP_TIERS = {
         _b.classList.toggle('st-off', _hasRoom && !s.bridge.online); }
     }
     if (!_hasRoom) {
-      objText('#oRoom', '未创建'); objText('#oSn', '—'); objText('#oModel', '—');
+      objText('#oRoom', '未创建'); objText('#oSn', '—'); objText('#oModel', '—'); objText('#oMtm', '—');
       document.querySelector('.objhead')?.classList.add('no-room');
       objText('#oCust', '—'); objText('#oOrder', '—'); objText('#oBridge', '—');
     } else {
-      objText('#oRoom', r.code); objText('#oSn', r.sn); objText('#oModel', r.model);
+      objText('#oRoom', r.code); objText('#oSn', r.sn); objText('#oModel', r.model); objText('#oMtm', r.mtm || '—');
       (function(){ const eh=document.querySelector('.objhead'); if(!eh) return;
         eh.classList.remove('no-room');
         const nm = r.name || r.room_name || '';
         objText('#oRoomName', nm || '—'); eh.title = nm || ''; })();
-      objText('#oCust', r.cust); objText('#oOrder', r.order);
+      objText('#oCust', r.cust); objText('#oOrder', r.order && r.order !== '—' ? r.order : '无进行中工单');
       objText('#oBridge', s.bridge.online
         ? ('已连接' + (s.bridge.latency != null ? ' · ' + s.bridge.latency + ' ms' : ''))
         : '待连接');
@@ -4998,19 +5030,61 @@ window.NP_TIERS = {
      数据来自 /api/machine_profile；三项接口未配置时显示「未接入」，不影响其它功能。
      每一项契约：{configured, ok, summary, detail, error, fetched_at, hint} */
   let PROFILE = null, PROFILE_LOADING = false, PROFILE_KEY = '';
+  /* 2026-11-05：弹窗值渲染——数组转列表/表格（134 行装箱单不再挤成一串 JSON） */
+  /* 2026-11-05：官网档案（联想 ASP）作为补充源——只取出厂配置简称（保修百分比按主人要求不做） */
+  function pfAsp() {
+    const a = (PROFILE && PROFILE.sources && PROFILE.sources.asp) || null;
+    return (a && a.ok && a.detail) ? a.detail : null;
+  }
+  function pfAspConfigDesc() {
+    try {
+      const a = pfAsp();
+      return (a && a['出厂配置简称']) || '';
+    } catch (e) { return ''; }
+  }
+  function pfFmtVal(v) {
+    if (v === null || v === undefined || v === '') return '<span class="faint">—</span>';
+    if (Array.isArray(v)) {
+      if (!v.length) return '<span class="faint">无</span>';
+      if (v.every(x => x && typeof x === 'object' && !Array.isArray(x))) {
+        const keys = Object.keys(v[0]);
+        const th = keys.map(k => '<th>' + NP.esc(k) + '</th>').join('');
+        const tb = v.map(row => '<tr>' + keys.map(k =>
+          '<td>' + NP.esc(String(row[k] == null ? '' : row[k])) + '</td>').join('') + '</tr>').join('');
+        return '<div class="pf-scroll"><table class="pf-tbl"><thead><tr>' + th +
+               '</tr></thead><tbody>' + tb + '</tbody></table></div>';
+      }
+      return '<ul class="pf-list">' + v.map(x => '<li>' + NP.esc(String(x)) + '</li>').join('') + '</ul>';
+    }
+    if (typeof v === 'object') {
+      return '<pre class="small" style="white-space:pre-wrap;margin:0">' + NP.esc(JSON.stringify(v, null, 1)) + '</pre>';
+    }
+    return NP.esc(String(v));
+  }
   function profileShowDetail(kind) {
     const src = PROFILE && PROFILE.sources ? PROFILE.sources[kind] : null;
     if (!src) return;
     const box = document.getElementById('profileDetail'); if (!box) return;
+    const dlg = box.querySelector('.dlg');
+    if (dlg) dlg.classList.toggle('wide', kind === 'factory');
     document.getElementById('pdIcon').innerHTML =
       NP.icon(kind === 'warranty' ? 'shield' : (kind === 'factory' ? 'package' : 'file'), 15);
     document.getElementById('pdTitle').textContent = (src.label || '详情') + ' · SN ' + (src.sn || '—');
-    const kv = Object.keys(src.detail || {}).map(k => {
-      const v = src.detail[k];
-      const txt = (v && typeof v === 'object') ? JSON.stringify(v) : String(v == null ? '' : v);
-      return '<dt>' + NP.esc(k) + '</dt><dd>' + NP.esc(txt) + '</dd>';
+    /* 2026-11-05：保修详情里并入联想官网（ASP）的出厂配置简称（保修百分比按主人要求不做） */
+    const det = Object.assign({}, src.detail || {});
+    if (kind === 'warranty' && typeof pfAsp === 'function') {
+      const a = pfAsp();
+      if (a && a['出厂配置简称']) det['官网出厂配置'] = a['出厂配置简称'];
+    }
+    const kv = Object.keys(det).map(k => {
+      return '<dt>' + NP.esc(k) + '</dt><dd>' + pfFmtVal(det[k]) + '</dd>';
     }).join('');
     const lines = [];
+    if (kind === 'factory') {
+      const cd = pfAspConfigDesc();
+      if (cd) lines.push('<div class="small" style="margin-bottom:6px"><b>官网配置：</b>' + NP.esc(cd) +
+        ' <span class="faint">（来源：联想官网 ASP）</span></div>');
+    }
     if (src.summary) lines.push('<div class="small" style="margin-bottom:8px">' + NP.esc(src.summary) + '</div>');
     if (src.hint) lines.push('<div class="note info" style="margin-bottom:8px">' + NP.esc(src.hint) + '</div>');
     if (src.error) lines.push('<div class="note danger" style="margin-bottom:8px">' + NP.esc(src.error) + '</div>');
@@ -5023,12 +5097,16 @@ window.NP_TIERS = {
     const card = document.getElementById('profileCard'); if (!card) return;
     const sn = (NP.state.room || {}).sn || '';
     const src = (PROFILE && PROFILE.sources) || {};
+    const denied = !!(PROFILE && PROFILE.permitted === false);
     card.querySelectorAll('.pf-row').forEach(row => {
       const k = row.dataset.k;
       const v = row.querySelector('.pf-v');
       const s = src[k];
       v.className = 'pf-v';
       v.onclick = null;
+      /* 2026-11-05：权限不足（现场端/CC/游客）与查询中 两种状态 */
+      if (denied) { v.textContent = PROFILE.message || '仅二线账号可查'; v.classList.add('na'); return; }
+      if (!s && PROFILE_LOADING && sn) { v.textContent = '查询中…'; v.classList.add('na'); return; }
       if (!sn) { v.textContent = '填 SN 后可查'; v.classList.add('na'); return; }
       if (!s) { v.textContent = '—'; v.classList.add('na'); return; }
       if (!s.configured) { v.textContent = s.summary || '未接入内部查询接口'; v.classList.add('na'); }
@@ -5043,9 +5121,21 @@ window.NP_TIERS = {
     if (PROFILE_LOADING) return;
     if (!force && PROFILE && PROFILE_KEY === key) return;
     PROFILE_LOADING = true; PROFILE_KEY = key;
+    profileRender();                      /* 2026-11-05：先出「查询中…」，配置查询实测约 50 秒 */
     try { PROFILE = await NP.apiGet('/api/machine_profile?room_code=' + encodeURIComponent(room)); }
     catch (e) { PROFILE = null; }
     finally { PROFILE_LOADING = false; profileRender(); }
+    /* 2026-11-05 修正：工单栏只显示「进行中工单」；历史维修单归「历史维修记录」卡片，绝不回填历史单号。
+       魔方只给「进行中工单数」不给单号——有在修工单但拿不到单号时如实显示「N 个进行中」，不谎报"无"。 */
+    try {
+      const cnt = parseInt((PROFILE && PROFILE.open_ticket_count) || '0', 10);
+      window.__openTicketCnt = cnt;                       // 跨 <script> 块共享（paintTop 在另一块）
+      const oe = document.getElementById('oOrder');
+      const cur = oe ? oe.textContent.trim() : '';
+      if (oe && cnt > 0 && !/^\d{6,}$/.test(cur) && cur.indexOf('个进行中') < 0) {
+        oe.textContent = cnt + ' 个进行中（单号待查）';
+      }
+    } catch (e) { }
   }
   NP.loadProfile = loadProfile;
   {
@@ -5314,6 +5404,7 @@ window.NP_TIERS = {
       sn: sp.get('sn') || cached.sn || '—',
       order: sp.get('ticket') || cached.order || '—',
       model: sp.get('model') || cached.model || '',
+      mtm: cached.mtm || '',
       cust: cached.cust || '',
       engineer: cached.engineer || '',
       name: cached.name || '',        // 2026-11-04：房间名称（标题行悬停提示用）
@@ -5758,34 +5849,18 @@ window.NP_TIERS = {
     <div class="card-head" style="flex:0 0 auto"><span class="card-title">新建房间</span><span class="spacer"></span>
       <button class="btn sm ghost" id="fldNrClose">关闭</button></div>
     <div class="card-body">
-      <!-- 2026-10-30：手动只填「客户单位」+「SN」；工单号与机型改为自动识别（可手动接管） -->
+      <!-- 2026-11-05：只需填「客户单位」+「SN」；机型/MTM/保修由联想官网按 SN 校验带回，
+           工单号进入房间后由魔方（IPS/SF）自动补 -->
       <label class="small faint">客户单位名称 <b style="color:#B91C1C">*</b></label>
-      <input class="input" id="fldNrOrg" name="np-org" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="" style="width:100%;margin:4px 0 10px">
+      <input class="input" id="fldNrOrg" name="np-org" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="例：湖北电视台" style="width:100%;margin:4px 0 10px">
 
       <label class="small faint">SN 序列号 <b style="color:#B91C1C">*</b></label>
-      <input class="input" id="fldNrSn" placeholder="" style="width:100%;margin:4px 0 10px">
-
-      <div class="row" style="align-items:center;gap:6px;margin-bottom:4px">
-        <label class="small faint" style="margin:0">工单号</label>
-        <span class="badge hidden" id="fldNrTicketTag"></span>
-        <span class="spacer" style="flex:1"></span>
-        <button class="btn sm ghost nr-auto" id="fldNrTicketAuto" disabled title="先填 SN">自动识别</button>
-        <label class="small faint" style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0">
-          <input type="checkbox" id="fldNrTicketManual"> 手动填写
-        </label>
+      <input class="input" id="fldNrSn" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" placeholder="例：PC0WZMAB / GM09NMT9" style="width:100%;margin:4px 0 6px">
+      <div id="fldNrSnSt" class="idle">
+        <span class="nr-dot"></span>
+        <span class="nr-txt">输入 SN 后自动校验（联想官网）</span>
       </div>
-      <input class="input" id="fldNrTicket" disabled placeholder="先填 SN，再点右侧「自动识别」" style="width:100%;margin:0 0 10px">
-
-      <div class="row" style="align-items:center;gap:6px;margin-bottom:4px">
-        <label class="small faint" style="margin:0">机器型号</label>
-        <span class="badge hidden" id="fldNrModelTag"></span>
-        <span class="spacer" style="flex:1"></span>
-        <button class="btn sm ghost nr-auto" id="fldNrModelAuto" disabled title="先填 SN">自动识别</button>
-        <label class="small faint" style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0">
-          <input type="checkbox" id="fldNrModelManual"> 手动填写
-        </label>
-      </div>
-      <input class="input" id="fldNrModel" disabled placeholder="先填 SN，再点右侧「自动识别」" style="width:100%;margin:0 0 10px">
+      <div class="small faint" id="fldNrSnMeta" style="display:none"></div>
 
       <label class="small faint">客户机系统</label>
       <select class="input" id="fldNrOs" style="width:100%;margin:4px 0 12px">
@@ -6116,113 +6191,135 @@ window.NP_TIERS = {
       $('#fldNrMsg').textContent = '';
       const o = $('#fldNrOrg'); if (o) { o.value = ''; }
       const s = $('#fldNrSn'); if (s) s.value = '';
-      const t = $('#fldNrTicketManual'), m = $('#fldNrModelManual');
-      if (t) { t.checked = false; t.dispatchEvent(new Event('change')); }
-      if (m) { m.checked = false; m.dispatchEvent(new Event('change')); }
-      ['#fldNrTicketTag', '#fldNrModelTag'].forEach(s => { const e = $(s); if (e) { e.textContent = ''; e.className = 'badge hidden'; } });
-      if (typeof nrSyncAutoButtons === 'function') nrSyncAutoButtons();
+      NR_SN = { code: '', seq: NR_SN.seq + 1, state: 'idle', data: null };
+      nrSnPaint('idle', '输入 SN 后自动校验（联想官网）', '');
       paintNrName();
       if (o) o.focus(); else if (s) s.focus();
     }
   };
   ['#fldNewRoom', '#noRoomNew', '#emptyNewBtn'].forEach(s => $(s) && $(s).addEventListener('click', () => showNR(true)));
   ['#fldNrClose', '#fldNrCancel'].forEach(s => $(s) && $(s).addEventListener('click', () => showNR(false)));
-  /* 2026-10-30：工单号 / 机型 默认「自动识别」，勾选手动填写才能输入；房间名实时预览 */
-  function bindNrManual(chkId, inputId, tagId) {
-    const chk = $('#' + chkId), inp = $('#' + inputId), tag = $('#' + tagId);
-    if (!chk || !inp) return;
-    const sync = () => {
-      inp.disabled = !chk.checked;
-      if (tag) {
-        tag.textContent = chk.checked ? '手动填写' : '自动识别';
-        tag.className = 'badge' + (chk.checked ? ' write' : '');
-      }
-      if (!chk.checked) inp.value = '';
-      paintNrName();
-    };
-    chk.addEventListener('change', sync);
-    inp.addEventListener('input', paintNrName);
-    sync();
-  }
   function paintNrName() {
     const el = $('#fldNrNamePrev');
     if (!el) return;
-    const org = ($('#fldNrOrg') && $('#fldNrOrg').value.trim()) || '未填单位';
-    const md = ($('#fldNrModel') && $('#fldNrModel').value.trim()) || '未识别机型';
-    const sn = ($('#fldNrSn') && $('#fldNrSn').value.trim()) || 'SN';
+    const org = ($('#fldNrOrg') && $('#fldNrOrg').value.trim()) || '';
+    const sn = ($('#fldNrSn') && $('#fldNrSn').value.trim().toUpperCase()) || 'SN';
+    const md = (NR_SN.data && NR_SN.data.machine) || '机型待校验';
     const now = new Date();
     const mmdd = String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
-    el.textContent = org + '-' + md + '-' + sn + '-' + mmdd;
+    el.textContent = [org, md, sn, mmdd].filter(Boolean).join('-');
   }
-  bindNrManual('fldNrTicketManual', 'fldNrTicket', 'fldNrTicketTag');
-  bindNrManual('fldNrModelManual', 'fldNrModel', 'fldNrModelTag');
 
-  /* 2026-10-30：自动识别（演示版）——填完 SN 即可点，不依赖房间/桥接器。
-     底层目前返回演示数据，接口接好后把 mock 换成真实请求即可。 */
-  const NR_DEMO_MODELS = ['P3 Tower', 'K3 Pro', 'P5 Tower', 'M90t Gen 3'];
-  function nrDemoDetect(kind) {
-    const snInput = $('#fldNrSn');
-    const sn = (snInput && snInput.value.trim()) || '';
-    if (!sn) return;
-    const isTicket = kind === 'ticket';
-    const inp = isTicket ? $('#fldNrTicket') : $('#fldNrModel');
-    const btn = isTicket ? $('#fldNrTicketAuto') : $('#fldNrModelAuto');
-    const tag = isTicket ? $('#fldNrTicketTag') : $('#fldNrModelTag');
-    const manual = isTicket ? $('#fldNrTicketManual') : $('#fldNrModelManual');
-    if (!inp || !btn) return;
-    if (manual && manual.checked) {   // 手动模式下不覆盖用户输入
-      tag && (tag.textContent = '手动填写');
-      return;
+  /* 2026-11-05：SN 官网校验（联想官网 ASP）
+     · 有效且在保 → 绿；有效但已过保 → 黄（仍可创建）；无效 → 红，禁止创建
+     · 官网连不上 → 红（主人决定：不可用即拦截；待优化 T8）
+     · 机型 / MTM 由校验结果带回，创建时由服务端落库，房间名一次到位 */
+  let NR_SN = { code: '', seq: 0, state: 'idle', data: null, ctrl: null, timer: null };
+  const NR_SN_TIP = {
+    idle: '输入 SN 后自动校验（联想官网）',
+    checking: '正在校验…'
+  };
+  function nrSnPaint(state, text, meta) {
+    const box = $('#fldNrSnSt'), st = $('#fldNrSnSt .nr-txt'), snEl = $('#fldNrSn'), mt = $('#fldNrSnMeta');
+    if (box) { box.className = state; }
+    if (st) st.textContent = text || NR_SN_TIP[state] || '';
+    if (mt) {
+      if (meta) { mt.style.display = ''; mt.innerHTML = meta; }
+      else { mt.style.display = 'none'; mt.innerHTML = ''; }
     }
-    btn.classList.add('busy'); btn.textContent = '识别中…'; btn.disabled = true;
-    setTimeout(() => {
-      const now = new Date();
-      const md = String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0');
-      const tail = sn.slice(-3).toUpperCase();
-      let val;
-      if (isTicket) {
-        // 演示：联想工单号 18 位 = 日期(YYYYMMDD) + 服务站编号(6) + 排序号(4)
-        const ymd = now.getFullYear() + md;
-        const station = '317001';                            // 演示服务站编号（后续可按账号/配置取）
-        let h2 = 0; for (const ch of sn) h2 = (h2 * 37 + ch.charCodeAt(0)) % 9000;
-        const seq = String(1000 + h2);                       // 演示排序号（按 SN 稳定）
-        val = ymd + station + seq;
+    if (snEl) snEl.classList.toggle('bad', state === 'err');
+    const btn = $('#fldNrOk');
+    if (btn) btn.disabled = !(state === 'ok' || state === 'warn');
+    NR_SN.state = state;
+  }
+  function nrSnReset(tip) {
+    NR_SN.code = ''; NR_SN.data = null;
+    nrSnPaint('idle', tip || NR_SN_TIP.idle, '');
+  }
+  async function nrSnCheck() {
+    const raw = (($('#fldNrSn') && $('#fldNrSn').value) || '').trim().toUpperCase();
+    const snEl = $('#fldNrSn');
+    if (snEl && snEl.value !== raw) snEl.value = raw;
+    if (NR_SN.ctrl) { try { NR_SN.ctrl.abort(); } catch (e) { } NR_SN.ctrl = null; }
+    if (!raw) { nrSnReset(); paintNrName(); return; }
+    if (!/^[A-Z0-9]{6,25}$/.test(raw)) {
+      NR_SN.code = raw; NR_SN.data = null;
+      nrSnPaint('err', raw.length < 6 || raw.length > 25 ? '主机编号长度应为 6~25 位' : '主机编号只能包含字母和数字', '');
+      paintNrName(); return;
+    }
+    const seq = ++NR_SN.seq;
+    const ctrl = new AbortController(); NR_SN.ctrl = ctrl;
+    nrSnPaint('checking', NR_SN_TIP.checking, '');
+    let data = null, netErr = null;
+    try {
+      const r = await fetch('/api/sn_check?sn=' + encodeURIComponent(raw), { credentials: 'same-origin', signal: ctrl.signal });
+      data = await r.json().catch(() => null);
+      if (!r.ok && !data) netErr = 'HTTP ' + r.status;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;      // 已被下一次输入取代
+      netErr = (e && e.message) || String(e);
+    }
+    if (seq !== NR_SN.seq) return;                    // 过期结果丢弃
+    if (netErr || !data) {
+      NR_SN.code = raw; NR_SN.data = null;
+      nrSnPaint('err', '无法连接联想官网校验，请稍后重试（当前不允许创建房间）', '');
+      paintNrName(); return;
+    }
+    if (data.unavailable) {
+      NR_SN.code = raw; NR_SN.data = null;
+      nrSnPaint('err', data.message || '联想官网暂时不可用，无法校验', '');
+      paintNrName(); return;
+    }
+    NR_SN.code = raw; NR_SN.data = data;
+    if (!data.valid) {
+      // 官网原文带一句"设备型号暂仅支持服务器"的噪声，前端给干净口径，原文放悬停提示
+      const tip = (data.reason === 'not_found')
+        ? '联想官网未查询到该主机编号，请核对后重试'
+        : (data.message || '主机编号无效');
+      nrSnPaint('err', tip, '');
+      const box = $('#fldNrSnSt'); if (box && data.message) box.title = data.message;
+    } else {
+      let meta = [NP.esc(data.machine || '—'), data.mtm ? ('MTM ' + NP.esc(data.mtm)) : '',
+                  data.product_date ? ('生产 ' + NP.esc(data.product_date)) : ''].filter(Boolean).join(' · ');
+      if (data.config_desc) meta += '<br>出厂配置：' + NP.esc(data.config_desc);
+      if (data.in_warranty) {
+        nrSnPaint('ok', 'SN 有效 · 在保 · 保修至 ' + (data.warranty_end || '—'), meta);
       } else {
-        let h = 0; for (const ch of sn) h = (h * 31 + ch.charCodeAt(0)) % 9973;
-        val = NR_DEMO_MODELS[h % NR_DEMO_MODELS.length];      // 演示：按 SN 稳定取一个机型
+        nrSnPaint('warn', 'SN 有效 · 已过保 · 保修至 ' + (data.warranty_end || '—'), meta);
       }
-      inp.value = val;
-      if (tag) { tag.textContent = '演示数据'; tag.className = 'badge write'; }
-      btn.classList.remove('busy'); btn.textContent = '自动识别'; btn.disabled = false;
-      paintNrName();
-    }, 550);
+    }
+    paintNrName();
   }
-  function nrSyncAutoButtons() {
-    const sn = (($('#fldNrSn') && $('#fldNrSn').value) || '').trim();
-    ['#fldNrTicketAuto', '#fldNrModelAuto'].forEach(s => {
-      const b = $(s); if (!b) return;
-      b.disabled = !sn;
-      b.title = sn ? '按 SN 自动识别（当前为演示数据）' : '先填 SN';
-    });
+  {
+    const snEl = $('#fldNrSn');
+    if (snEl) {
+      snEl.addEventListener('input', () => {
+        clearTimeout(NR_SN.timer);
+        const v = (snEl.value || '').trim();
+        if (!v) { nrSnReset(); paintNrName(); return; }
+        nrSnPaint('checking', '正在校验…', '');
+        NR_SN.timer = setTimeout(nrSnCheck, 500);
+      });
+      snEl.addEventListener('blur', () => { clearTimeout(NR_SN.timer); if ((snEl.value || '').trim()) nrSnCheck(); });
+    }
+    const orgEl = $('#fldNrOrg');
+    if (orgEl) orgEl.addEventListener('input', paintNrName);
   }
-  ['#fldNrTicketAuto', '#fldNrModelAuto'].forEach(s => {
-    const b = $(s); if (b) b.addEventListener('click', () => nrDemoDetect(s.indexOf('Ticket') >= 0 ? 'ticket' : 'model'));
-  });
-  { const snEl = $('#fldNrSn'); if (snEl) snEl.addEventListener('input', nrSyncAutoButtons); }
-  nrSyncAutoButtons();
-  ['#fldNrOrg', '#fldNrSn', '#fldNrModel'].forEach(s => { const e = $(s); if (e) e.addEventListener('input', paintNrName); });
-  paintNrName();
 
   if ($('#fldNrOk')) $('#fldNrOk').addEventListener('click', () => {
     const org = ($('#fldNrOrg').value || '').trim();
     const sn = $('#fldNrSn').value.trim();
-    const tk = $('#fldNrTicket').disabled ? '' : $('#fldNrTicket').value.trim();
-    const md = $('#fldNrModel').disabled ? '' : $('#fldNrModel').value.trim();
     const os = $('#fldNrOs').value;
     if (!org) { $('#fldNrMsg').textContent = '客户单位名称必填'; return; }
     if (!sn) { $('#fldNrMsg').textContent = 'SN 序列号必填'; return; }
+    /* 2026-11-05：SN 必须通过联想官网校验才能建房（红/灰态一律拦下） */
+    if (NR_SN.code !== sn.toUpperCase() || !(NR_SN.state === 'ok' || NR_SN.state === 'warn')) {
+      $('#fldNrMsg').textContent = '请先等待 SN 校验通过（绿/黄）后再创建房间';
+      nrSnCheck();
+      return;
+    }
     const btn = $('#fldNrOk'); btn.disabled = true; $('#fldNrMsg').textContent = '创建中…';
-    api('/api/rooms', { sn, ticket_no: tk, machine_model: md, os, client_org: org })
+    api('/api/rooms', { sn, os, client_org: org })
       .then(j => {
         const code = j.room_code;
         const kind = curBatKind();
@@ -6241,7 +6338,7 @@ window.NP_TIERS = {
               'style="margin-left:6px">下载连接文件</a>' +
               '<a class="btn sm ghost" id="nrGoBtn" style="margin-left:4px" ' +
               'href="/expert?room=' + encodeURIComponent(code) + '&sn=' + encodeURIComponent(sn) +
-              '&ticket=' + encodeURIComponent(tk) + '&created=' + encodeURIComponent(kind) + '">进入房间</a>' +
+              '&created=' + encodeURIComponent(kind) + '">进入房间</a>' +
               '<div class="small faint" style="margin-top:5px">若浏览器没有自动下载，点上面按钮；文件名 ' + NP.esc(dlName) + '</div>';
             // 先尝试自动下载（允许就省一步），失败也不影响用户手动点
             try {
@@ -6256,7 +6353,7 @@ window.NP_TIERS = {
           window.__nrNavTimer = setTimeout(() => {
             if (!document.body.contains($('#fldNrMsg'))) return;
             location.href = '/expert?room=' + encodeURIComponent(code)
-              + '&sn=' + encodeURIComponent(sn) + '&ticket=' + encodeURIComponent(tk)
+              + '&sn=' + encodeURIComponent(sn)
               + '&created=' + encodeURIComponent(kind);
           }, kind === 'none' ? 800 : 4000);
         } catch (e) { }

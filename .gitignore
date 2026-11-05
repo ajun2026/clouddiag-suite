@@ -44,3 +44,7 @@ desktop.ini
 # 如需随仓库分发编译好的桥接器，请保留下面两行注释状态
 # static/clouddiag-bridge-*
 # clouddiag-bridge/clouddiag-bridge-*
+
+# ═══════ 魔方适配层运行时（含会话 cookie，绝不入库）═══════
+mofang-profile/state/
+mofang-profile/.env

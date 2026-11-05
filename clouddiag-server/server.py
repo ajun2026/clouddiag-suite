@@ -177,6 +177,8 @@ def init_db():
     _ensure_column(conn, "rooms", "status", "status TEXT DEFAULT 'active'")
     _ensure_column(conn, "rooms", "idle_at", "idle_at TEXT DEFAULT NULL")
     _ensure_column(conn, "rooms", "os", "os TEXT DEFAULT ''")  # 部署适配：老库自动补列（2026-08-27 社区反馈）
+    # 2026-11-05：MTM（官网购机型号代码）——创建房间时由联想官网带回来，刷写/查驱动用
+    _ensure_column(conn, "rooms", "mtm", "mtm TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_engineer ON rooms(engineer_username, created_at)")
     # 用户反馈表（测试反馈收集）
     conn.execute("""
@@ -1318,7 +1320,7 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.6.7"
+APP_VERSION = "1.6.8"
 
 app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -3438,8 +3440,18 @@ PROFILE_SOURCES = {
         "label": "历史维修记录",
         "ttl": 3600,
     },
+    # 2026-11-05：联想官网档案（补充源）——只提供机型/MTM/生产日期/保修起止/剩余保修比例/出厂配置简称
+    #   不单独占左栏一行，供「保修」「出厂配置」两处渲染时补充与比对；官网不可用则静默降级
+    "asp": {
+        "url_env": "PROFILE_ASP_URL",
+        "token_env": "PROFILE_WARRANTY_TOKEN",
+        "label": "官网档案",
+        "ttl": 1800,
+    },
 }
 _PROFILE_CACHE = {}
+# 查询超时（秒）：默认 20；魔方服务适配层「出厂配置」实测约 50 秒，用 PROFILE_TIMEOUT 调到 180
+_PROFILE_TIMEOUT = float(os.getenv("PROFILE_TIMEOUT", "20"))
 
 
 def _profile_empty(kind: str, sn: str, why: str = "") -> dict:
@@ -3479,7 +3491,7 @@ async def _profile_fetch(kind: str, sn: str) -> dict:
         headers = {"Accept": "application/json"}
         if token:
             headers["Authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
-        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(_PROFILE_TIMEOUT, connect=15.0)) as client:
             resp = await client.get(url, params={"sn": sn}, headers=headers)
         if resp.status_code >= 400:
             return {**_profile_empty(kind, sn, f"接口返回 HTTP {resp.status_code}"), "ok": False,
@@ -3492,6 +3504,11 @@ async def _profile_fetch(kind: str, sn: str) -> dict:
                "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                "summary": summary or "已获取", "detail": detail or {},
                "sn": sn, "label": cfg["label"], "url_env": cfg["url_env"]}
+        # 2026-11-05：空结果不写缓存——否则一次解析失败的「已获取+全空」会在 TTL 内一直显示
+        if not detail or not summary:
+            out["ok"] = False
+            out["summary"] = summary or "数据源返回空结果"
+            return out
         _PROFILE_CACHE[ck] = {"at": now, "data": out}
         return out
     except Exception as e:
@@ -3941,10 +3958,15 @@ async def room_file_purge_on_close(request: Request):
 
 @app.get("/api/machine_profile")
 async def api_machine_profile(room_code: str = "", request: Request = None):
-    """整机档案：按房间的 SN 查保修 / 出厂配置 / 历史维修单（骨架版，接口可配）。"""
+    """整机档案：按房间的 SN 查保修 / 出厂配置 / 历史维修单。
+    权限：仅二线（expert）与管理员可查——数据来自 IPS/SF，不对现场端开放。"""
     user = _require_user(request)
     if not user:
         return JSONResponse({"error": "未登录"}, status_code=401)
+    if (user.get("role") or "") not in ("expert", "admin"):
+        return {"sn": "", "room_code": str(room_code or "").upper(), "sources": {},
+                "any_configured": False, "permitted": False,
+                "message": "整机档案仅二线（专家）账号可查"} 
     code = str(room_code or "").upper().strip()
     sn = ""
     if code:
@@ -3960,13 +3982,26 @@ async def api_machine_profile(room_code: str = "", request: Request = None):
             except Exception:
                 sn = ""
     sn = str(sn or "").strip()
+    _kinds = list(PROFILE_SOURCES.keys())
+    _res = await asyncio.gather(*[_profile_fetch(k, sn) for k in _kinds], return_exceptions=True)
     parts = {}
-    for kind in PROFILE_SOURCES:
-        try:
-            parts[kind] = await _profile_fetch(kind, sn)
-        except Exception as e:
-            parts[kind] = {**_profile_empty(kind, sn, f"异常：{e}"), "error": str(e)}
+    for _k, _r in zip(_kinds, _res):
+        if isinstance(_r, BaseException):
+            parts[_k] = {**_profile_empty(_k, sn, f"异常：{_r}"), "error": str(_r)}
+        else:
+            parts[_k] = _r
+    # 2026-11-05 修正：**绝不**把历史维修单号写进 rooms.ticket_no
+    #   「工单」这一栏的语义是「进行中工单」，历史单只在「历史维修记录」卡片里展示。
+    #   魔方目前只给「进行中工单数」（不给单号），所以这里只回报数量，不落库。
+    #   ⚠️ 待办 T9：若要做到左栏显示真实进行中工单号，需另加一次魔方「进行中工单」查询。
+    _open_cnt = ""
+    try:
+        _wd = (parts.get("warranty", {}).get("detail") or {})
+        _open_cnt = str(_wd.get("进行中工单") or "").strip()
+    except Exception:
+        pass
     return {"sn": sn, "room_code": code, "sources": parts,
+            "open_ticket_count": _open_cnt,
             "any_configured": any(v.get("configured") for v in parts.values())}
 
 
@@ -4001,6 +4036,87 @@ async def debug_log(request: Request):
     return {"ok": True}
 
 
+# ══════════════════════════════════════════════════════════════════════
+# SN 有效性校验（2026-11-05）：创建房间前用「联想官网 ASP 接口」核对主机编号
+#   · 官网有效且在保 → 绿灯；有效但过保 → 黄灯；无效 → 红灯并禁止创建
+#   · 官网连不上 → 同样禁止创建（主人 2026-11-05 决定）
+#     ⚠️ 待优化 T8：官网抖动会挡住全公司建房，后续再评估放宽策略（docs/待办清单.md）
+# ══════════════════════════════════════════════════════════════════════
+SN_CHECK_URL = os.getenv("SN_CHECK_URL", "http://127.0.0.1:8081/asp_warranty")
+SN_CHECK_TOKEN = os.getenv("SN_CHECK_TOKEN", "") or os.getenv("PROFILE_WARRANTY_TOKEN", "")
+SN_CHECK_TIMEOUT = float(os.getenv("SN_CHECK_TIMEOUT", "8"))
+
+
+class SNCheckUnavailable(Exception):
+    """官网连不上 / 校验服务不可用——与「SN 无效」区分开。"""
+
+
+async def _sn_check(sn: str) -> dict:
+    headers = {"Accept": "application/json"}
+    if SN_CHECK_TOKEN:
+        headers["Authorization"] = f"Bearer {SN_CHECK_TOKEN}"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(SN_CHECK_TIMEOUT, connect=5.0)) as client:
+            r = await client.get(SN_CHECK_URL, params={"sn": sn}, headers=headers)
+    except Exception as e:
+        raise SNCheckUnavailable(f"{type(e).__name__}: {e}")
+    if r.status_code == 503:
+        try:
+            msg = (r.json() or {}).get("message") or "联想官网无响应"
+        except Exception:
+            msg = "联想官网无响应"
+        raise SNCheckUnavailable(msg)
+    if r.status_code >= 400:
+        raise SNCheckUnavailable(f"校验服务返回 HTTP {r.status_code}")
+    try:
+        return r.json()
+    except Exception:
+        raise SNCheckUnavailable("校验服务返回非 JSON")
+
+
+def _sn_check_desc(res: dict) -> str:
+    """轨迹里要写清楚：通过联想官网校验 SN 是否有效、保修情况、MTM。"""
+    sn = res.get("sn") or ""
+    if not res.get("valid"):
+        return f"通过联想官网校验主机编号 {sn}：无效（{res.get('message') or '官网未查询到该设备'}）"
+    wtxt = ("在保 · 保修至 " + str(res.get("warranty_end") or "—")) if res.get("in_warranty") \
+        else ("已过保 · 保修至 " + str(res.get("warranty_end") or "—"))
+    return (f"通过联想官网校验主机编号 {sn}：有效 · {wtxt} · "
+            f"机型 {res.get('machine') or '—'} · MTM {res.get('mtm') or '—'} · "
+            f"生产日期 {res.get('product_date') or '—'}")
+
+
+@app.get("/api/sn_check")
+async def api_sn_check(sn: str = "", request: Request = None):
+    """SN 有效性 + 保修状态（联想官网 ASP）。现场端 / 二线端创建房间前调用。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") == "guest":
+        return JSONResponse({"error": "游客无此权限"}, status_code=403)
+    sn = (sn or "").strip().upper()
+    try:
+        res = await _sn_check(sn)
+    except SNCheckUnavailable as e:
+        run_logger.warning(f"[sn_check] 官网不可用 sn={sn}: {e}")
+        return JSONResponse({"ok": False, "valid": False, "unavailable": True, "sn": sn,
+                             "message": f"无法连接联想官网，暂时不能校验主机编号（{e}）"},
+                            status_code=503)
+    try:
+        record_event("sn.check",
+                     {"sn": sn, "valid": bool(res.get("valid")),
+                      "in_warranty": res.get("in_warranty"),
+                      "machine": res.get("machine"), "mtm": res.get("mtm"),
+                      "product_date": res.get("product_date"),
+                      "warranty_end": res.get("warranty_end"),
+                      "desc": _sn_check_desc(res)},
+                     actor=user["username"], actor_role=user.get("role", ""),
+                     stream=f"user:{user['username']}")
+    except Exception:
+        pass
+    return res
+
+
 @app.post("/api/rooms")
 async def create_room(request: Request):
     """创建房间：需登录，必填 SN + 工单号（型号选填），生成 8 位房间码并绑定业务信息。"""
@@ -4026,18 +4142,18 @@ async def create_room(request: Request):
             return None
         return v
 
+    # 2026-11-05：创建房间只需「客户单位 + SN + 客户机系统」
+    #   工单号 / 机器型号 不再由用户填写——机型与 MTM 由联想官网按 SN 校验时带回，
+    #   工单号在进入房间后由魔方（IPS/SF）自动补。
     sn = _s(body.get("sn"), 64)
-    ticket_no = _s(body.get("ticket_no"), 64)
-    machine_model = _s(body.get("machine_model"), 128)
     client_org = _s(body.get("client_org"), 64)
     if sn is None:
         return JSONResponse({"error": "SN 含非法字符或超过 64 字符"}, status_code=400)
-    if ticket_no is None:
-        return JSONResponse({"error": "工单号含非法字符或超过 64 字符"}, status_code=400)
-    if machine_model is None:
-        return JSONResponse({"error": "机型含非法字符或超过 128 字符"}, status_code=400)
     if client_org is None:
         return JSONResponse({"error": "客户单位含非法字符或超过 64 字符"}, status_code=400)
+    ticket_no = ""
+    machine_model = ""
+    mtm = ""
     # 客户机系统（创建时选择——连接后 identify 自动纠正）：windows / linux
     os_choice = (body.get("os") or "windows").strip().lower()
     if os_choice not in ("windows", "linux"):
@@ -4055,12 +4171,33 @@ async def create_room(request: Request):
         validity_days = 30
     if not sn:
         return JSONResponse({"error": "SN 序列号必填"}, status_code=400)
-    # 2026-10-30：工单号/机型改为「自动识别」字段——允许为空（识别到之后再补），不再强制必填
-    ticket_no = ticket_no or ""
-    machine_model = machine_model or ""
-    # 人类可读房间名：客户单位-机型-SN-日期（缺项用「未识别」占位，长度截断到 96）
+    if not client_org:
+        return JSONResponse({"error": "客户单位名称必填"}, status_code=400)
+    sn = sn.strip().upper()
+    # 服务端复校验（防绕过前端直接 POST）——以联想官网为准
+    try:
+        _chk = await _sn_check(sn)
+    except SNCheckUnavailable as e:
+        run_logger.warning(f"[rooms] SN 校验不可用，拒绝建房 sn={sn}: {e}")
+        return JSONResponse({"error": f"无法连接联想官网校验主机编号，暂时不能创建房间（{e}）",
+                             "unavailable": True}, status_code=503)
+    if not _chk.get("valid"):
+        try:
+            record_event("sn.check",
+                         {"sn": sn, "valid": False,
+                          "desc": _sn_check_desc(_chk)},
+                         actor=user["username"], actor_role=user.get("role", ""),
+                         stream=f"user:{user['username']}")
+        except Exception:
+            pass
+        return JSONResponse({"error": _chk.get("message") or "主机编号未通过联想官网校验",
+                             "invalid": True, "sn": sn}, status_code=400)
+    machine_model = (_chk.get("machine") or "").strip()
+    mtm = (_chk.get("mtm") or "").strip()
+    ticket_no = ""
+    # 人类可读房间名：客户单位-机型-SN-日期
     _md = datetime.now().strftime("%m%d")
-    room_name = "-".join([client_org or "未填单位", machine_model or "未识别机型", sn, _md])[:96]
+    room_name = "-".join([x for x in (client_org, machine_model, sn, _md) if x])[:96]
     # 生成唯一 8 位房间码（内存 + 数据库双向查重）
     code = None
     for _ in range(50):
@@ -4075,9 +4212,9 @@ async def create_room(request: Request):
     try:
         conn = _db_connect()
         conn.execute(
-            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, engineer_username, expires_at, os, client_org, room_name) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (code, sn, ticket_no, machine_model, user["username"], expires_at, os_choice, client_org or "", room_name),
+            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, mtm, engineer_username, expires_at, os, client_org, room_name) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (code, sn, ticket_no, machine_model, mtm, user["username"], expires_at, os_choice, client_org or "", room_name),
         )
         conn.commit()
         conn.close()
@@ -4090,7 +4227,9 @@ async def create_room(request: Request):
     # 2026-11-03：建房入轨迹（时间轴的起点）
     try:
         record_event("room.created",
-                     {"sn": sn, "ticket_no": ticket_no, "model": machine_model,
+                     {"sn": sn, "ticket_no": ticket_no, "model": machine_model, "mtm": mtm,
+                      "warranty": ("在保 · 至 " + str(_chk.get("warranty_end") or "")) if _chk.get("in_warranty")
+                      else ("已过保 · " + str(_chk.get("warranty_end") or "—")),
                       "org": client_org or "", "room_name": room_name, "os": os_choice,
                       "days": validity_days},
                      room_code=code, actor=user["username"], actor_role=user.get("role", ""),
@@ -4098,6 +4237,8 @@ async def create_room(request: Request):
     except Exception:
         pass
     return {"room_code": code, "sn": sn, "ticket_no": ticket_no, "machine_model": machine_model,
+            "mtm": mtm, "in_warranty": bool(_chk.get("in_warranty")),
+            "warranty_end": _chk.get("warranty_end") or "",
             "client_org": client_org or "", "room_name": room_name,
             "expires_at": expires_at, "days_left": room_days_left(expires_at), "os": os_choice}
 
@@ -4327,6 +4468,7 @@ async def my_rooms(request: Request):
             "sn": d["sn"],
             "ticket_no": d["ticket_no"],
             "machine_model": d["machine_model"],
+            "mtm": (d["mtm"] if "mtm" in d.keys() else "") or "",
             "engineer_username": d["engineer_username"],
             "client_org": d.get("client_org") or "",
             "room_name": d.get("room_name") or "",
@@ -4484,6 +4626,7 @@ async def room_connect(room_code: str, request: Request):
         "sn": row["sn"] or "",
         "ticket_no": row["ticket_no"] or "",
         "machine_model": row["machine_model"] or "",
+        "mtm": (row["mtm"] if "mtm" in row.keys() else "") or "",
         "os": row["os"] if "os" in row.keys() else "",
         "engineer_username": row["engineer_username"] or "",
         # 2026-11-04：房间名称一并返回（二线台左栏与现场台统一展示需要）
@@ -5060,7 +5203,7 @@ async def expert_rooms(request: Request):
     except Exception:
         size = 20
 
-    sel = ("SELECT room_code, sn, ticket_no, machine_model, os, engineer_username, status, "
+    sel = ("SELECT room_code, sn, ticket_no, machine_model, mtm, os, engineer_username, status, "
            "escalated_to, escalated_at, report_version, closed_at, created_at, "
            "COALESCE(client_org,'') AS client_org, COALESCE(room_name,'') AS room_name FROM rooms ")
     try:
@@ -5157,7 +5300,7 @@ async def joinable_rooms(request: Request):
     try:
         conn = _db_connect()
         rows = conn.execute(
-            "SELECT room_code, sn, ticket_no, machine_model, os, engineer_username, status, created_at, "
+            "SELECT room_code, sn, ticket_no, machine_model, mtm, os, engineer_username, status, created_at, "
             "COALESCE(room_name,'') AS room_name, COALESCE(client_org,'') AS client_org "
             "FROM rooms WHERE COALESCE(status,'') != 'archived' "
             "AND created_at >= datetime('now','localtime','-30 days') "
