@@ -1318,7 +1318,7 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.6.6"
+APP_VERSION = "1.6.7"
 
 app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -1984,7 +1984,7 @@ async def admin_reset_password(request: Request, username: str):
 
 
 AI_QA_SYSTEM = (
-    "你是联想售后现场工程师的排障搭档（Nexpert 现场作业台 AI）。你的用户是正在客户现场的人，"
+    "你是售后现场工程师的排障搭档（Nexpert 现场作业台 AI）。你的用户是正在客户现场的人，"
     "他要的是**你替他把问题查清楚、给出下一步选项**，不是要一份证据清单。\n"
     "【每次回答的固定结构】\n"
     "1) **一句结论/进展**：直接说你的判断或你刚查到了什么（有新发现就写发现，没进展就直说）。\n"
@@ -7663,8 +7663,8 @@ async def _fetch_lenovo_drivers(search_key: str):
     return drivers, os_options
 
 
-@app.get("/api/tools/drivers/sign")
-async def tools_drivers_sign(request: Request, search_key: str = "", name: str = "", version: str = ""):
+@app.post("/api/tools/drivers/sign")
+async def tools_drivers_sign(request: Request):
     """按 SN/MT 实时签发某个驱动的官网下载直链（302 跳转）。
 
     为什么必须实时签：联想 CDN 的下载直链带时效 token（driverdl2025...?token=...），
@@ -7673,9 +7673,13 @@ async def tools_drivers_sign(request: Request, search_key: str = "", name: str =
     user = _require_user(request)
     if not user:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    key = (search_key or "").strip()
-    want_name = (name or "").strip()
-    want_ver = (version or "").strip()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    key = str(body.get("search_key") or "").strip()
+    want_name = str(body.get("name") or "").strip()
+    want_ver = str(body.get("version") or "").strip()
     if not key:
         return JSONResponse({"error": "缺少 search_key（SN 或机型）"}, status_code=400)
     if not want_name:
@@ -7701,7 +7705,9 @@ async def tools_drivers_sign(request: Request, search_key: str = "", name: str =
         # 有话直说：不是"无直链"这种含糊文案，而是官网确实没给这个驱动的下载文件
         return JSONResponse({"error": "联想官网该机型未返回这个驱动的下载地址（可能该版本已下架，请在官网按机型手动查找）"},
                             status_code=404)
-    return RedirectResponse(hit["url"], status_code=302)
+    # 2026-11-04（审查 P3-1）：POST 传参 + 返回 JSON 直链，SN 不进 access log 与浏览器历史；
+    #   前端拿到 url 后自行触发下载（页面不跳转）。
+    return JSONResponse({"ok": True, "url": hit["url"], "name": hit.get("name", ""), "version": hit.get("version", "")})
 
 
 @app.post("/api/tools/drivers/fetch")
@@ -8337,7 +8343,7 @@ async def tools_dump_analyze(request: Request):
 
 @app.post("/api/tools/raid")
 async def tools_raid(request: Request):
-    """RAID 信息抓取（联想售后三件套：IntelVROCCli / rstcli64 / storcli64）——自动分发到客户机执行。
+    """RAID 信息抓取（售后三件套：IntelVROCCli / rstcli64 / storcli64）——自动分发到客户机执行。
     覆盖：Intel VROC / Intel RSTe / Broadcom(LSI) RAID。只读操作。"""
     user = _require_user(request)
     if not user:
