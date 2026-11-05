@@ -1318,7 +1318,7 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.6.5"
+APP_VERSION = "1.6.6"
 
 app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -2157,6 +2157,10 @@ def _ai_digest_tool_output(tool_key: str, js) -> str:
 # 2026-11-04：房间级「用户已确认忽略」话题（如设备身份不一致），避免 AI 每轮重复唠叨
 _AI_MUTE: dict = {}   # room_code -> set(topic)
 _MUTE_RE = re.compile(r"先不管|先不管它|不用管|别管|忽略|不重要|先别提|测试阶段|无所谓")
+# 2026-11-04（审查 P2-2）：原来只要句子里出现上面任一口头禅就永久屏蔽身份告警，
+#   一句"这个无所谓，先看显卡"就会把"拿错机器/工单与 SN 不符"的风险提醒关掉，且没有解除入口。
+#   现在要求同时命中身份类关键词才算数。
+_IDENT_KW_RE = re.compile(r"SN|MTM|序列号|工单|型号|机型|身份|不一致|不符|拿错|设备信息", re.I)
 
 
 def _ai_history(room_code: str, limit: int = 6) -> list:
@@ -2238,7 +2242,7 @@ async def ai_qa(request: Request):
         pass
     # 用户已明确表示忽略的话题 → 写入房间级静音表，并在本轮 prompt 里强制约束
     _q_text = str(question or "")
-    if _MUTE_RE.search(_q_text):
+    if _MUTE_RE.search(_q_text) and _IDENT_KW_RE.search(_q_text):
         _AI_MUTE.setdefault(room_code, set()).add("identity")
     _sys_extra = ""
     if "identity" in _AI_MUTE.get(room_code, set()):
@@ -2415,6 +2419,7 @@ async def admin_delete_room(request: Request):
         # Also drop any in-memory room (disconnect if active)
         if room_code in rooms:
             r = rooms.pop(room_code, None)
+            _AI_MUTE.pop(room_code, None)   # 审查 P2-3：房间码会回收复用，不清会串状态
             if r:
                 for ws in (getattr(r, "browser_ws", None), getattr(r, "bridge_ws", None)):
                     try:
@@ -3775,6 +3780,34 @@ PREVIEW_KEEP = int(os.getenv("PREVIEW_KEEP", "3") or 3)
 SHOT_RETENTION_DAYS = int(os.getenv("SHOT_RETENTION_DAYS", "7") or 7)
 
 
+def _prune_preview_of_room(dl_dir, just_saved: str):
+    """只清理「这一帧所属房间」的历史观察帧（审查 P2-4）。
+
+    文件名形如 nexpert-preview-<room>-<ts>.jpg；用前缀 glob 代替全目录扫描，
+    多房间并发观察时开销与房间数无关。
+    """
+    try:
+        nm = os.path.basename(just_saved)
+        parts = nm.split("-")
+        if len(parts) < 3:
+            return 0
+        room = parts[2]
+        files = sorted(dl_dir.glob(f"nexpert-preview-{room}-*"), key=lambda p: p.name, reverse=True)
+        removed = 0
+        keep = max(1, PREVIEW_KEEP)
+        for i, fp in enumerate(files):
+            if i < keep or fp.name == nm:
+                continue
+            try:
+                fp.unlink()
+                removed += 1
+            except Exception:
+                pass
+        return removed
+    except Exception:
+        return 0
+
+
 def _prune_shot_files(dl_dir, just_saved: str = ""):
     """清理 static/downloads 里的截图文件：观察帧留最新 PREVIEW_KEEP 帧，截图按天数保留。"""
     try:
@@ -4050,6 +4083,7 @@ async def create_room(request: Request):
         conn.close()
     except Exception as e:
         rooms.pop(code, None)
+        _AI_MUTE.pop(code, None)
         run_logger.error(f"Room create DB error: {e}")
         return JSONResponse({"error": f"创建失败: {e}"}, status_code=500)
     run_logger.info(f"Room created: {code} by {user['username']} (SN={sn}, ticket={ticket_no}, days={validity_days}, os={os_choice})")
@@ -11032,8 +11066,10 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                                 target.write_bytes(raw)
                                 saved = f"/static/downloads/{safe_name}"
                                 # 截图类文件写入后立刻剪枝，避免每 2 秒一帧长期堆积
-                                if safe_name.startswith("nexpert-"):
-                                    _prune_shot_files(dl_dir, safe_name)
+                                if safe_name.startswith("nexpert-preview-"):
+                                    # 审查 P2-4：原来每帧都 glob 整个 downloads 目录，多房间并发观察时是 IO 热点。
+                                    #   观察帧按 <room> 前缀只扫自己的；高清截图交给每小时 purge。
+                                    _prune_preview_of_room(dl_dir, safe_name)
                                 run_logger.info(f"[{room_code}] file saved to {target} ({len(raw)} bytes)")
                             except Exception as e:
                                 run_logger.error(f"[{room_code}] file save failed: {e}")
