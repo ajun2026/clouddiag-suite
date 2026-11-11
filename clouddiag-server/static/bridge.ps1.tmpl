@@ -25,7 +25,7 @@ param(
     [string]$Room   = $env:BRIDGE_ROOM
 )
 
-$Version   = "1.4.4"
+$Version   = "1.4.5"
 $ServerUrl = if ($Server) { $Server } else { "{{WS_URL}}" }
 $script:ws = $null
 $script:exiting = $false
@@ -93,6 +93,12 @@ function Ws-Connect {
     $tcp = New-Object System.Net.Sockets.TcpClient
     $tcp.NoDelay = $true
     $tcp.Connect($Uri.Host, $Uri.Port)
+    # 2026-11-10 (v1.4.5)：接收超时——半死连接自愈
+    # 服务端每 25 秒发业务 ping，正常情况下读端不会 60 秒没数据。
+    # 若服务端重启/网络中断/对端静默关闭，raw 读会一直阻塞（老版本的僵尸态：
+    # 窗口还显示"Connected"，服务端早已认为离线，命令发不下来、也不重连）。
+    # 60 秒收不到任何帧 → Read 抛 IOException → 外层循环重连。
+    try { $tcp.ReceiveTimeout = 60000 } catch { }
     $stream = $tcp.GetStream()
     if ($isTls) {
         # TLS 1.2 handshake (wss). Default cert validation (Let's Encrypt CA is trusted).
@@ -623,8 +629,17 @@ function Run-Bridge {
     $lastHb = Get-Date
 
     while (-not $script:exiting -and $script:ws.Connected) {
-        $text = Receive-Text
-        if ($null -eq $text) { break }
+        $text = $null
+        try {
+            $text = Receive-Text
+        } catch {
+            # v1.4.5：接收超时/对端静默关闭 —— 明确报出来再退出重连，
+            # 不再静默卡死（老版本会一直"Connected"但实际已失联）
+            Write-Host ("Receive failed: " + $_.Exception.Message) -ForegroundColor Yellow
+            Write-Audit ("receive failed: " + $_.Exception.Message)
+            break
+        }
+        if ($null -eq $text) { Write-Audit "server closed the socket (close frame)"; break }
         if (-not $text) { continue }
 
         # opportunistic heartbeat: piggy-back on any server message

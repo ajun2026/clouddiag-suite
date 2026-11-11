@@ -99,6 +99,15 @@ async def factory(sn: str = Query(""), authorization: str | None = Header(None))
     return JSONResponse(await _run(mofang.factory, sn, key="factory"))
 
 
+@app.get("/ticket")
+async def ticket(sn: str = Query(""), authorization: str | None = Header(None)):
+    """当前进行中工单（2026-11-08 新增）。
+    走魔方「查询SN：{sn} 工单」问句——与「保修」问句返回的结构不同，只有这个问句带进行中工单段。
+    返回 {ok, summary, count, tickets[], warranty{}, detail, cache}；失败不缓存。"""
+    _auth(authorization)
+    return JSONResponse(await _run(mofang.ticket, sn, key="ticket"))
+
+
 @app.get("/asp_warranty")
 async def asp_warranty(sn: str = Query(""), authorization: str | None = Header(None)):
     """联想官网 ASP：SN 有效性 + 保修状态 + 机型/MTM/生产日期。官网不可用返回 503。"""

@@ -4,6 +4,7 @@ FastAPI + WebSocket + Agent Core
 Features: 49 tools, Tier 2/3 approval, SQLite chat history, admin dashboard
 """
 import asyncio
+import contextvars
 import uuid
 import base64
 import gzip
@@ -19,6 +20,7 @@ import os
 import pathlib
 import re
 import secrets
+import subprocess
 import sqlite3
 import time
 import urllib.parse
@@ -78,6 +80,27 @@ AGENT_BRAIN = os.getenv("AGENT_BRAIN", "hermes")  # hermes（默认）| deepseek
 
 # HTTP 桥接接口共享密钥（Hermes 通过 curl 调 /api/bridge/execute 时校验）
 BRIDGE_HTTP_SECRET = os.getenv("BRIDGE_HTTP_SECRET", "")
+
+
+# 2026-11-06（审查 P1）：主密钥曾原样进 system prompt；改为按房间签发 2 小时短时票
+def room_bridge_ticket(room_code: str, ttl: int = 7200) -> str:
+    exp = int(time.time()) + ttl
+    msg = f"{str(room_code).upper()}|{exp}"
+    sig = hmac.new((BRIDGE_HTTP_SECRET or "no-secret").encode(), msg.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{str(room_code).upper()}.{exp}.{sig}"
+
+
+def verify_room_bridge_ticket(ticket: str) -> str:
+    try:
+        room, exp_s, sig = str(ticket or "").strip().split(".", 2)
+        exp = int(exp_s)
+    except Exception:
+        return ""
+    if exp < int(time.time()):
+        return ""
+    msg = f"{room.upper()}|{exp}"
+    want = hmac.new((BRIDGE_HTTP_SECRET or "no-secret").encode(), msg.encode(), hashlib.sha256).hexdigest()[:32]
+    return room.upper() if hmac.compare_digest(sig, want) else ""
 
 SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
@@ -176,7 +199,22 @@ def init_db():
     _ensure_column(conn, "rooms", "token_expires_at", "token_expires_at TEXT DEFAULT NULL")
     _ensure_column(conn, "rooms", "status", "status TEXT DEFAULT 'active'")
     _ensure_column(conn, "rooms", "idle_at", "idle_at TEXT DEFAULT NULL")
-    _ensure_column(conn, "rooms", "os", "os TEXT DEFAULT ''")  # 部署适配：老库自动补列（2026-08-27 社区反馈）
+    _ensure_column(conn, "rooms", "os", "os TEXT DEFAULT ''")
+    # 2026-11-06（审查 P0）：这 5 列被专家台队列/升级/结单三处 SQL 使用，CREATE TABLE 与 ensure 都没有
+    _ensure_column(conn, "rooms", "escalated_to", "escalated_to TEXT DEFAULT NULL")
+    _ensure_column(conn, "rooms", "escalated_at", "escalated_at TEXT DEFAULT NULL")
+    _ensure_column(conn, "rooms", "report_path", "report_path TEXT DEFAULT NULL")
+    _ensure_column(conn, "rooms", "report_version", "report_version INTEGER DEFAULT 0")
+    _ensure_column(conn, "rooms", "closed_at", "closed_at TEXT DEFAULT NULL")
+    # 2026-11-08：工单来源 + 日志包绑定
+    _ensure_column(conn, "rooms", "ticket_source", "ticket_source TEXT DEFAULT ''")
+    _ensure_column(conn, "rooms", "ticket_checked_at", "ticket_checked_at TEXT DEFAULT ''")
+    _ensure_column(conn, "rooms", "log_job_id", "log_job_id TEXT DEFAULT ''")
+    _ensure_column(conn, "rooms", "log_job_name", "log_job_name TEXT DEFAULT ''")  # 部署适配：老库自动补列（2026-08-27 社区反馈）
+    # 2026-11-10：ThinkLogParser 投递结果
+    _ensure_column(conn, "rooms", "thinklog_log_id", "thinklog_log_id TEXT DEFAULT ''")
+    _ensure_column(conn, "rooms", "thinklog_url", "thinklog_url TEXT DEFAULT ''")
+    _ensure_column(conn, "rooms", "thinklog_at", "thinklog_at TEXT DEFAULT ''")
     # 2026-11-05：MTM（官网购机型号代码）——创建房间时由联想官网带回来，刷写/查驱动用
     _ensure_column(conn, "rooms", "mtm", "mtm TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_engineer ON rooms(engineer_username, created_at)")
@@ -376,8 +414,14 @@ def record_event(kind: str, data: dict = None, *, room_code: str = "", actor: st
         return ""
 
 
-def _ev_actor(request) -> tuple:
-    """从 cookie 取当前用户（事件用）。"""
+def _ev_actor(request, room_code: str = "") -> tuple:
+    """事件 actor：优先看「谁触发的」（AI 经内部调用时也带登录用户身份，不能直接当人）。
+
+    2026-11-09：AI 调工具走同一批内部端点，若只看 cookie 会把 AI 干的活记成人干的。
+    """
+    w = _trig_get(room_code) if room_code else {}
+    if w.get("by") == "ai":
+        return "ai", "assistant"
     try:
         u = _require_user(request)
         if u:
@@ -1320,9 +1364,25 @@ def generate_room_code() -> str:
 # FastAPI app
 # ============================================================
 # 2026-09-27：版本号单一来源（P3-1：原管理后台与启动日志硬编码 v1.0.0，与 /api/health 不一致）
-APP_VERSION = "1.6.8"
+APP_VERSION = "1.8.4"
 
 app = FastAPI(title="Cloud AI Remote Diagnostics", version=APP_VERSION, docs_url=None, redoc_url=None, openapi_url=None)
+
+
+# 2026-11-10：静态页面（控制台/轨迹等）禁用浏览器缓存——改动后刷新即生效，
+# 避免"我改了但他看到的还是旧页面"（曾导致误判布局没修好）
+@app.middleware("http")
+async def _no_cache_html(request: Request, call_next):
+    resp = await call_next(request)
+    try:
+        path = request.url.path
+        if path.startswith("/static/") and "text/html" in (resp.headers.get("content-type") or ""):
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+    except Exception:
+        pass
+    return resp
 
 # ============================================================
 # HTTPS 迁移防护：非授权 Host（IP 直连 8000）→ 提示页，禁止使用
@@ -2042,7 +2102,18 @@ def _is_workstation_model(model: str) -> bool:
     return bool(_WS_MODEL_PAT.search(str(model or "")))
 
 
-def _ai_tool_specs(platform: str, model: str = ""):
+LOG_AI_TOOLS = [
+    {"key": "log_list_files", "tool": "list_files", "desc": "列出日志包内全部文件（路径+大小）"},
+    {"key": "log_read_text", "tool": "read_text_file", "desc": "读日志包内某个文本文件：arguments={filename}"},
+    {"key": "log_read_evtx", "tool": "read_evtx_events", "desc": "按事件ID读 EVTX：arguments={evtx_name,event_id,limit}"},
+    {"key": "log_read_report", "tool": "read_report", "desc": "读已生成的结构化报告：arguments={type}"},
+    {"key": "log_read_dump", "tool": "read_dump_file", "desc": "读蓝屏转储解析结果：arguments={filename}"},
+    {"key": "log_run_analysis", "tool": "run_analysis",
+     "desc": "按需运行本地分析器并返回摘要：arguments={type=overview|diagnostics|siolog|summary|dump}"},
+]
+
+
+def _ai_tool_specs(platform: str, model: str = "", log_job_id: str = ""):
     """按平台挑可用工具 + 生成 OpenAI tools 定义。
     2026-10-27：RAID 不做常规采集（已移出）；SIO 仅工作站机型才给。"""
     plat = "linux" if platform == "linux" else "win"
@@ -2066,11 +2137,53 @@ def _ai_tool_specs(platform: str, model: str = ""):
             },
         },
     }]
+    if log_job_id:
+        for lt in LOG_AI_TOOLS:
+            tools.append({"type": "function", "function": {
+                "name": lt["key"], "description": lt["desc"] + "（日志包已绑定本房间）",
+                "parameters": {"type": "object",
+                               "properties": {k: {"type": "string"} for k in
+                                              ("filename", "evtx_name", "event_id", "type", "limit")},
+                               "required": []}}})
     return avail, tools
 
 
-async def _ai_run_tool(room_code: str, tool_key: str, internal_token: str, username: str) -> str:
+async def _ai_run_tool(room_code: str, tool_key: str, internal_token: str, username: str, args: dict = None) -> str:
     """经内部 HTTP 调现有端点（复用真实采集逻辑），返回给模型的文本。"""
+    _lt = next((x for x in LOG_AI_TOOLS if x["key"] == tool_key), None)
+    if _lt:
+        conn = _db_connect()
+        try:
+            _r = conn.execute("SELECT log_job_id FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+            job_id = ((_r["log_job_id"] if _r else "") or "").strip()
+        finally:
+            conn.close()
+        if not job_id:
+            return "[本房间未绑定日志包，无法使用日志工具]"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+                resp = await client.post(f"{LOG_ANALYZER_URL}/api/tool_exec",
+                                         json={"job_id": job_id, "tool": _lt["tool"], "arguments": args or {}},
+                                         headers={"X-Internal-Token": LOG_INTERNAL_TOKEN})
+            js = resp.json() if resp.content else {}
+        except Exception as e:
+            return f"[日志工具调用失败: {type(e).__name__}: {e}]"
+        if resp.status_code >= 400:
+            return f"[日志工具失败 HTTP {resp.status_code}: {str(js)[:200]}]"
+        # 2026-11-09：日志读取也要进轨迹（否则"AI 读了日志"在轨迹里看不到）
+        try:
+            _res_txt = str(js.get("result") or "")
+            record_event("ai.log_read",
+                         {"tool": _lt["tool"], "job_id": job_id, "chars": len(_res_txt),
+                          "preview": _res_txt[:200],
+                          "_who": {"by": "ai", "user": "ai", "via": "ai_tool",
+                                   "turn": _AI_TURN.get("cur") or ""}},
+                         room_code=room_code, actor="ai", actor_role="assistant",
+                         turn=(_AI_TURN.get("cur") or ""), stream=f"room:{room_code}",
+                         parent=(_AI_TURN.get("cur") or ""))
+        except Exception:
+            pass
+        return str(js.get("result") or "")[:40000]
     spec = next((x for x in AI_READONLY_TOOLS if x["key"] == tool_key), None)
     if not spec:
         return f"[工具不存在: {tool_key}]"
@@ -2079,7 +2192,8 @@ async def _ai_run_tool(room_code: str, tool_key: str, internal_token: str, usern
             resp = await client.post(
                 f"http://127.0.0.1:{os.getenv('PORT', '8000')}{spec['path']}",
                 json={"room_code": room_code},
-                headers={"X-Internal-Token": internal_token},
+                headers={"X-Internal-Token": internal_token,
+                         "X-Trigger": f"ai:{(_AI_TURN.get('cur') or '')}"},
             )
         try:
             js = resp.json()
@@ -2196,13 +2310,14 @@ async def ai_qa(request: Request):
         return JSONResponse({"error": "invalid_json"}, status_code=400)
     room_code = str(body.get("room_code", "")).upper()
     question = (body.get("question") or "").strip()[:500]
+    _qa_parent = str(body.get("parent_evt") or "")[:64]   # 2026-11-09：触发本轮 AI 的人点击事件 id
     if not room_code or not question:
         return JSONResponse({"error": "缺少房间码或问题"}, status_code=400)
 
     try:
         conn = _db_connect()
         row = conn.execute(
-            "SELECT sn, ticket_no, machine_model, engineer_username, status, os FROM rooms WHERE room_code=?",
+            "SELECT sn, ticket_no, machine_model, engineer_username, status, os, log_job_id, log_job_name FROM rooms WHERE room_code=?",
             (room_code,)).fetchone()
         msgs = conn.execute(
             "SELECT tool_name, content, created_at FROM messages "
@@ -2232,14 +2347,35 @@ async def ai_qa(request: Request):
     ctx = (f"【房间】{room_code} · SN {_clean(row['sn'])} · 机型 {_clean(row['machine_model'])}"
            f" · 工单 {_clean(row['ticket_no'])} · 平台 {platform} · 状态 {row['status'] or 'active'}")
     ctx += f"\n【已采集证据（最近 {len(msgs)} 条）】\n{evidence}"
+    _log_job = ""
+    try:
+        _log_job = (row["log_job_id"] or "").strip()
+    except Exception:
+        _log_job = ""
+    if _log_job:
+        _lname = ""
+        try:
+            _lname = row["log_job_name"] or ""
+        except Exception:
+            _lname = ""
+        ctx += (f"\n【已绑定日志包】job={_log_job} 文件={_lname or '未命名'}"
+                "\n  可用工具：log_list_files / log_read_text / log_read_evtx / log_read_report / log_read_dump"
+                "\n  要下结论前优先用 log_* 工具查证，回答里写清 来源文件 + 时间 + 事件ID。")
 
-    avail, tools = _ai_tool_specs(platform, row["machine_model"])
+    avail, tools = _ai_tool_specs(platform, row["machine_model"], _log_job)
     # P0 事件：AI 提问（现场台走 /api/ai_qa，不是 WS chat —— 两条路都要记）
     _ev_turn = ""
     try:
-        _ev_turn = record_event("ai.turn", {"q": question, "via": "ai_qa"},
+        _turn_data = {"q": question, "via": "ai_qa",
+                      "_who": {"by": "human", "user": user["username"], "role": user["role"],
+                               "via": ("ai_accept" if _qa_parent else "free_mode")}}
+        if _qa_parent:
+            _turn_data["_who"]["parent_click"] = _qa_parent
+        _ev_turn = record_event("ai.turn", _turn_data,
                                 room_code=room_code, actor=user["username"], actor_role=user["role"],
-                                stream=f"room:{room_code}")
+                                stream=f"room:{room_code}", parent=_qa_parent)
+        _AI_TURN["cur"] = _ev_turn or ""
+        _AI_TURN["parent"] = _qa_parent or ""
     except Exception:
         pass
     # 用户已明确表示忽略的话题 → 写入房间级静音表，并在本轮 prompt 里强制约束
@@ -2298,9 +2434,10 @@ async def ai_qa(request: Request):
                         args = json.loads(c["function"]["arguments"] or "{}")
                     except Exception:
                         args = {}
-                    tk = args.get("tool", "")
+                    fn_name = str((c.get("function") or {}).get("name") or "")
+                    tk = fn_name if fn_name in {x["key"] for x in LOG_AI_TOOLS} else args.get("tool", "")
                     run_logger.info(f"[{room_code}] ai_qa 调工具 {tk}（用户 {user['username']}）: {args.get('why','')[:60]}")
-                    result = await _ai_run_tool(room_code, tk, internal, user["username"])
+                    result = await _ai_run_tool(room_code, tk, internal, user["username"], args)
                     used_tools.append(tk)
                     save_message(room_code, "tool", f"[AI 采集] {result[:500]}", f"AI-{tk}", 1)
                     messages.append({"role": "tool", "tool_call_id": c.get("id", ""),
@@ -3440,6 +3577,12 @@ PROFILE_SOURCES = {
         "label": "历史维修记录",
         "ttl": 3600,
     },
+    "ticket": {
+        "url_env": "PROFILE_TICKET_URL",
+        "token_env": "PROFILE_TICKET_TOKEN",
+        "label": "当前工单",
+        "ttl": 600,
+    },
     # 2026-11-05：联想官网档案（补充源）——只提供机型/MTM/生产日期/保修起止/剩余保修比例/出厂配置简称
     #   不单独占左栏一行，供「保修」「出厂配置」两处渲染时补充与比对；官网不可用则静默降级
     "asp": {
@@ -3581,8 +3724,16 @@ async def room_file_chunk(request: Request, file: UploadFile = File(...)):
     if not user:
         return JSONResponse({"error": "未登录"}, status_code=401)
     room_code = str(request.query_params.get("room", "")).upper()
-    fid = str(request.query_params.get("fid", ""))
-    seq = int(request.query_params.get("seq", "0") or 0)
+    _fid_raw = str(request.query_params.get("fid", ""))
+    fid = re.sub(r"[^A-Za-z0-9_-]", "", _fid_raw)[:40]
+    if not fid or fid != _fid_raw:
+        return JSONResponse({"error": "fid 非法（只允许字母数字_-，最长40）"}, status_code=400)
+    _seq_raw = str(request.query_params.get("seq", "0") or "0")
+    if not _seq_raw.isdigit():
+        return JSONResponse({"error": "seq 非法"}, status_code=400)
+    seq = int(_seq_raw)
+    if seq < 0 or seq > 100000:
+        return JSONResponse({"error": "seq 超出范围"}, status_code=400)
     ok, role, why = _rf_perm(room_code, user)
     if not ok:
         return JSONResponse({"error": why}, status_code=403)
@@ -3595,14 +3746,18 @@ async def room_file_chunk(request: Request, file: UploadFile = File(...)):
     part = os.path.join(d, f".{fid}.part{seq:05d}")
     with open(part, "wb") as f:
         f.write(data)
-    st = _ROOM_FILE_PARTS.setdefault(fid, {"parts": [], "size": 0, "room": room_code, "user": user["username"]})
+    _ck = (room_code, fid)
+    st = _ROOM_FILE_PARTS.get(_ck)
+    if st and st.get("user") and st["user"] != user["username"]:
+        return JSONResponse({"error": "该 fid 属于其他用户的传输"}, status_code=409)
+    st = _ROOM_FILE_PARTS.setdefault(_ck, {"parts": [], "size": 0, "room": room_code, "user": user["username"]})
     st["parts"].append(part)
     st["size"] += len(data)
     if st["size"] > ROOM_FILE_MAX:
         for x in st["parts"]:
             try: os.remove(x)
             except Exception: pass
-        _ROOM_FILE_PARTS.pop(fid, None)
+        _ROOM_FILE_PARTS.pop((room_code, fid), None)
         return JSONResponse({"error": "超过单文件 500MB 上限"}, status_code=413)
     return {"ok": True, "received": len(data), "accumulated": st["size"]}
 
@@ -3624,7 +3779,8 @@ async def room_file_commit(request: Request):
     ok, role, why = _rf_perm(room_code, user)
     if not ok:
         return JSONResponse({"error": why}, status_code=403)
-    st = _ROOM_FILE_PARTS.get(fid)
+    fid = re.sub(r"[^A-Za-z0-9_-]", "", str(body.get("fid", "") or ""))[:40]
+    st = _ROOM_FILE_PARTS.get((room_code, fid))
     if not st or not st["parts"]:
         return JSONResponse({"error": "没有找到上传分块"}, status_code=400)
     rid = "f" + uuid.uuid4().hex[:12]
@@ -3647,7 +3803,7 @@ async def room_file_commit(request: Request):
         for part in st["parts"]:
             try: os.remove(part)
             except Exception: pass
-        _ROOM_FILE_PARTS.pop(fid, None)
+        _ROOM_FILE_PARTS.pop((room_code, fid), None)
     except Exception as e:
         run_logger.error(f"[{room_code}] room file commit 失败：{e}")
         return JSONResponse({"error": f"合并失败: {e}"}, status_code=500)
@@ -3959,14 +4115,18 @@ async def room_file_purge_on_close(request: Request):
 @app.get("/api/machine_profile")
 async def api_machine_profile(room_code: str = "", request: Request = None):
     """整机档案：按房间的 SN 查保修 / 出厂配置 / 历史维修单。
-    权限：仅二线（expert）与管理员可查——数据来自 IPS/SF，不对现场端开放。"""
+
+    2026-11-10（主人口径调整）：现场工程师也需要看整机档案——现场判定要不要
+    报修/换件，靠的就是保修状态、出厂配置和维修历史。故权限从"仅 expert/admin"
+    放开到 expert / admin / field。游客（guest）仍然拦截。
+    """
     user = _require_user(request)
     if not user:
         return JSONResponse({"error": "未登录"}, status_code=401)
-    if (user.get("role") or "") not in ("expert", "admin"):
+    if (user.get("role") or "") not in ("expert", "admin", "field"):
         return {"sn": "", "room_code": str(room_code or "").upper(), "sources": {},
                 "any_configured": False, "permitted": False,
-                "message": "整机档案仅二线（专家）账号可查"} 
+                "message": "整机档案仅工程师账号可查（游客无权限）"}
     code = str(room_code or "").upper().strip()
     sn = ""
     if code:
@@ -3990,19 +4150,310 @@ async def api_machine_profile(room_code: str = "", request: Request = None):
             parts[_k] = {**_profile_empty(_k, sn, f"异常：{_r}"), "error": str(_r)}
         else:
             parts[_k] = _r
-    # 2026-11-05 修正：**绝不**把历史维修单号写进 rooms.ticket_no
-    #   「工单」这一栏的语义是「进行中工单」，历史单只在「历史维修记录」卡片里展示。
-    #   魔方目前只给「进行中工单数」（不给单号），所以这里只回报数量，不落库。
-    #   ⚠️ 待办 T9：若要做到左栏显示真实进行中工单号，需另加一次魔方「进行中工单」查询。
-    _open_cnt = ""
+    # ══════════════════════════════════════════════════════════════════
+    # 工单栏（2026-11-08）：数据源改为魔方「工单」问句（parts["ticket"]），三态展示
+    #   优先级：房间人工填写的单号 > 魔方查到的进行中工单 > 待确认
+    # ══════════════════════════════════════════════════════════════════
+    _rep_det = parts.get("repair", {}).get("detail") or {}
+    _rep_items = _rep_det.get("工单明细") if isinstance(_rep_det, dict) else None
+    _rep_total = len([x for x in _rep_items if isinstance(x, dict)]) if isinstance(_rep_items, list) else 0
+
+    _tpart = parts.get("ticket", {}) or {}
+    _open_tickets, _ticket_state, _ticket_note = [], "unknown", ""
+    _room_ticket, _room_ticket_src = "", ""
     try:
-        _wd = (parts.get("warranty", {}).get("detail") or {})
-        _open_cnt = str(_wd.get("进行中工单") or "").strip()
+        _c = _db_connect()
+        _rw = _c.execute("SELECT ticket_no, ticket_source FROM rooms WHERE room_code=?", (code,)).fetchone()
+        _c.close()
+        if _rw:
+            _room_ticket = str(_rw["ticket_no"] or "").strip()
+            _room_ticket_src = str(_rw["ticket_source"] or "").strip()
     except Exception:
         pass
+
+    if not TICKET_SOURCE_RELIABLE:
+        _ticket_state = "unavailable"
+        _ticket_note = "工单状态数据源开关已关闭（TICKET_SOURCE_RELIABLE=0）"
+    elif _tpart.get("configured") and _tpart.get("ok"):
+        _tdet = _tpart.get("detail") or {}
+        _tl = _tdet.get("工单明细") if isinstance(_tdet, dict) else None
+        for _t in (_tl if isinstance(_tl, list) else []):
+            if not isinstance(_t, dict):
+                continue
+            _open_tickets.append({"ticket_no": str(_t.get("工单号") or "").strip(),
+                                  "opened_at": str(_t.get("开单时间") or "").strip(),
+                                  "fault": str(_t.get("故障描述") or "").strip()[:120],
+                                  "customer": str(_t.get("企业名称") or "").strip(),
+                                  "engineer": str(_t.get("SDM") or "").strip(),
+                                  "why": "魔方工单问句"})
+        _open_tickets.sort(key=lambda x: x.get("opened_at") or "", reverse=True)
+        if _open_tickets:
+            _ticket_state = "open"
+            _ticket_note = f"魔方查询：{len(_open_tickets)} 个进行中工单"
+        else:
+            _ticket_state = "closed"
+            _ticket_note = "魔方查询：无进行中工单"
+    else:
+        _ticket_state = "unknown"
+        _ticket_note = f"工单查询失败：{_tpart.get('error') or _tpart.get('summary') or '魔方无响应'}"
+
+    if _room_ticket and (_room_ticket_src == "manual" or not _open_tickets):
+        _auto = _open_tickets[0]["ticket_no"] if _open_tickets else ""
+        _open_tickets = [{"ticket_no": _room_ticket, "opened_at": "", "fault": "", "customer": "",
+                          "engineer": "", "why": "人工填写" if _room_ticket_src == "manual" else "房间登记"}]
+        _ticket_state = "open"
+        _ticket_note = ("工单号由人工填写" + (f"，魔方查询值为 {_auto}" if _auto and _auto != _room_ticket else ""))
+
+    _open_cnt = str(len(_open_tickets)) if _ticket_state == "open" else ("0" if _ticket_state == "closed" else "")
     return {"sn": sn, "room_code": code, "sources": parts,
+            "ticket_source": _room_ticket_src,
             "open_ticket_count": _open_cnt,
+            "ticket_state": _ticket_state,
+            "open_tickets": _open_tickets,
+            "ticket_note": _ticket_note,
+            "repair_total": _rep_total,
             "any_configured": any(v.get("configured") for v in parts.values())}
+
+
+@app.post("/api/log_upload")
+async def api_log_upload(request: Request):
+    """上传日志包并绑定房间：浏览器 → 主服务（验权限）→ 日志分析服务"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if (user.get("role") or "") == "guest":
+        return JSONResponse({"error": "游客无此权限"}, status_code=403)
+    try:
+        form = await request.form()
+    except Exception as e:
+        return JSONResponse({"error": f"表单解析失败：{e}"}, status_code=400)
+    room_code = str(form.get("room_code") or "").strip().upper()
+    up = form.get("file")
+    if not room_code:
+        return JSONResponse({"error": "room_code 必填（日志包必须绑定房间）"}, status_code=400)
+    if up is None or not hasattr(up, "filename"):
+        return JSONResponse({"error": "未收到文件"}, status_code=400)
+    if not can_access_room(user, room_code):
+        return JSONResponse({"error": "无权向该房间上传日志"}, status_code=403)
+    sn = ""
+    try:
+        conn = _db_connect()
+        r = conn.execute("SELECT sn FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        conn.close()
+        sn = (r["sn"] if r else "") or ""
+    except Exception:
+        pass
+    raw = await up.read()
+    files = {"file": (up.filename, raw, getattr(up, "content_type", "") or "application/octet-stream")}
+    headers = {"X-Internal-Token": LOG_INTERNAL_TOKEN,
+               "X-Log-Analyzer-User": user["username"],
+               "X-Log-Analyzer-Role": user.get("role", "engineer")}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(LOG_UPLOAD_TIMEOUT, connect=15.0)) as client:
+            r = await client.post(f"{LOG_ANALYZER_URL}/api/upload", files=files,
+                                  data={"room_code": room_code, "sn": sn}, headers=headers)
+        js = r.json() if r.content else {}
+    except Exception as e:
+        return JSONResponse({"error": f"日志服务不可用：{type(e).__name__}: {e}"}, status_code=502)
+    if r.status_code >= 400 or not js.get("job_id"):
+        return JSONResponse({"error": js.get("error") or f"上传失败 HTTP {r.status_code}"},
+                            status_code=400 if r.status_code < 500 else 502)
+    job_id = str(js["job_id"]); job_name = str(up.filename or "")
+    try:
+        conn = _db_connect()
+        conn.execute("UPDATE rooms SET log_job_id=?, log_job_name=? WHERE room_code=?",
+                     (job_id, job_name, room_code))
+        conn.commit(); conn.close()
+    except Exception as e:
+        run_logger.error(f"[{room_code}] 绑定日志包失败: {e}")
+    try:
+        record_event("log.uploaded", {"job_id": job_id, "filename": job_name, "size_mb": js.get("size_mb"),
+                                      "os_type": js.get("os_type"), "evtx": js.get("evtx_count")},
+                     room_code=room_code, actor=user["username"], actor_role=user.get("role", ""),
+                     stream=f"room:{room_code}")
+    except Exception:
+        pass
+    return {"ok": True, "room_code": room_code, "job_id": job_id, "filename": job_name,
+            "size_mb": js.get("size_mb"), "os_type": js.get("os_type"),
+            "evtx_count": js.get("evtx_count"), "message": js.get("message") or "日志包已上传并绑定本房间"}
+
+
+@app.get("/api/room_log")
+async def api_room_log(room_code: str = "", request: Request = None):
+    """房间绑定的日志包信息（左栏用）"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    rc = (room_code or "").strip().upper()
+    if not rc:
+        return JSONResponse({"error": "room_code 必填"}, status_code=400)
+    if not can_access_room(user, rc):
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
+    conn = _db_connect()
+    try:
+        r = conn.execute("SELECT log_job_id, log_job_name, sn FROM rooms WHERE room_code=?", (rc,)).fetchone()
+    finally:
+        conn.close()
+    job_id = ((r["log_job_id"] if r else "") or "").strip()
+    if not job_id:
+        # 2026-11-10：未绑定但房间确实上传过日志包时，按文件名自愈补写（AI 日志工具与 ThinkLog 投递都依赖它）
+        try:
+            job_id = _heal_log_binding(rc) or ""
+        except Exception:
+            job_id = ""
+    out = {"room_code": rc, "sn": (r["sn"] if r else "") or "",
+           "job_id": job_id, "job_name": ((r["log_job_name"] if r else "") or ""),
+           "bound": bool(job_id), "os_type": "", "status": "", "tool_stats": {}}
+    if job_id:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+                st = await client.get(f"{LOG_ANALYZER_URL}/api/tool_stats/{job_id}",
+                                      headers={"X-Internal-Token": LOG_INTERNAL_TOKEN})
+            if st.status_code == 200:
+                out["tool_stats"] = (st.json() or {}).get("stats") or {}
+        except Exception:
+            pass
+    return out
+
+
+@app.get("/api/sn_history")
+async def api_sn_history(sn: str = "", request: Request = None, days: int = 0, only_active: int = 0):
+    """SN 履历：工单记录 × 本系统 AI 咨询记录"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if (user.get("role") or "") not in ("expert", "admin"):
+        return JSONResponse({"permitted": False, "message": "SN 履历仅二线（专家）账号可查"}, status_code=403)
+    sn = (sn or "").strip().upper()
+    if not sn or len(sn) > 64:
+        return JSONResponse({"error": "SN 为空或过长"}, status_code=400)
+    conn = _db_connect()
+    try:
+        where, args = "upper(sn)=?", [sn]
+        if days and days > 0:
+            where += " AND created_at >= datetime('now', ?)"
+            args.append(f"-{int(days)} days")
+        rows = conn.execute(
+            "SELECT room_code, sn, created_at, closed_at, status, engineer_username, client_org,"
+            " ticket_no, ticket_source, machine_model, mtm FROM rooms WHERE " + where +
+            " ORDER BY created_at DESC", args).fetchall()
+        consults = []
+        for r in rows:
+            rc = r["room_code"]
+            g = {k: c for k, c in conn.execute(
+                "SELECT kind, COUNT(*) FROM events WHERE room_code=? GROUP BY kind", (rc,))}
+            m_user = conn.execute("SELECT COUNT(*) FROM messages WHERE room_code=? AND role='user'", (rc,)).fetchone()[0]
+            m_ai = conn.execute("SELECT COUNT(*) FROM messages WHERE room_code=? AND role='ai'", (rc,)).fetchone()[0]
+            m_all = conn.execute("SELECT COUNT(*) FROM messages WHERE room_code=?", (rc,)).fetchone()[0]
+            m_tool = conn.execute("SELECT COUNT(*) FROM messages WHERE room_code=? AND role='tool'", (rc,)).fetchone()[0]
+            first_q = conn.execute(
+                "SELECT content FROM messages WHERE room_code=? AND role='user' ORDER BY id LIMIT 1", (rc,)).fetchone()
+            tools = [x[0] for x in conn.execute(
+                "SELECT DISTINCT tool_name FROM messages WHERE room_code=? AND role='tool' AND coalesce(tool_name,'')<>'' LIMIT 12",
+                (rc,)) if x[0]]
+            concl = []
+            for (cd,) in conn.execute(
+                    "SELECT data FROM events WHERE room_code=? AND kind='diag.conclude' ORDER BY id DESC LIMIT 6", (rc,)):
+                try:
+                    j = json.loads(cd) or {}
+                except Exception:
+                    j = {}
+                if j.get("headline"):
+                    concl.append({"action": j.get("action_key") or "", "level": j.get("level") or "",
+                                  "headline": str(j.get("headline"))[:160]})
+            ai_turns = int(g.get("ai.turn", 0)); op_calls = int(g.get("op.call", 0))
+            diag_steps = int(g.get("diag.step.start", 0))
+            has_activity = bool(ai_turns or op_calls or m_user or m_ai or m_tool or diag_steps)
+            last_ev = conn.execute("SELECT MAX(ts_srv) FROM events WHERE room_code=?", (rc,)).fetchone()[0]
+            consults.append({
+                "room_code": rc, "created_at": r["created_at"] or "", "closed_at": r["closed_at"] or "",
+                "status": r["status"] or "", "engineer": r["engineer_username"] or "",
+                "client_org": r["client_org"] or "", "model": r["machine_model"] or "", "mtm": r["mtm"] or "",
+                "ticket_no": r["ticket_no"] or "", "ticket_source": r["ticket_source"] or "",
+                "has_activity": has_activity,
+                "msgs": m_all, "msgs_user": int(m_user), "msgs_ai": int(m_ai), "msgs_tool": int(m_tool),
+                "ai_turns": ai_turns, "op_calls": op_calls, "op_errors": int(g.get("op.error", 0)),
+                "approvals": int(g.get("approval.request", 0)), "diag_steps": diag_steps,
+                "has_bridge": bool(g.get("bridge.connect", 0)), "concludes": concl,
+                "first_q": (first_q[0][:200] if first_q else ""), "tools": tools, "last_ts": int(last_ev or 0)})
+    finally:
+        conn.close()
+    if only_active:
+        consults = [c for c in consults if c["has_activity"]]
+
+    rep, opn = await asyncio.gather(_profile_fetch("repair", sn), _sn_ticket(sn), return_exceptions=True)
+    if isinstance(rep, BaseException):
+        rep = {"ok": False, "error": str(rep), "detail": {}}
+    if isinstance(opn, BaseException):
+        opn = {"ok": False, "error": str(opn)}
+    hist = []
+    rdet = (rep.get("detail") or {}) if isinstance(rep, dict) else {}
+    ritems = rdet.get("工单明细") if isinstance(rdet, dict) else None
+    for it in (ritems if isinstance(ritems, list) else []):
+        if not isinstance(it, dict):
+            continue
+        hist.append({"ticket_no": str(it.get("工单号") or ""), "opened_at": str(it.get("开单时间") or ""),
+                     "fault": str(it.get("故障描述") or "")[:160], "solution": str(it.get("解决方案") or "")[:200],
+                     "customer": str(it.get("企业名称") or ""), "engineer": str(it.get("SDM") or ""),
+                     "closed": bool(str(it.get("解决方案") or "").strip())})
+    open_tk = []
+    for it in ((opn.get("tickets") or []) if isinstance(opn, dict) else []):
+        open_tk.append({"ticket_no": str(it.get("工单号") or ""), "opened_at": str(it.get("开单时间") or ""),
+                        "fault": str(it.get("故障描述") or "")[:160]})
+    open_nos = {t["ticket_no"] for t in open_tk if t["ticket_no"]}
+    for c in consults:
+        link = None
+        if c["ticket_no"] and (c["ticket_no"] in open_nos or any(t["ticket_no"] == c["ticket_no"] for t in hist)):
+            link = {"ticket_no": c["ticket_no"], "strength": "strong", "why": "房间登记的工单号"}
+        elif open_tk:
+            cdate = (c["created_at"] or "")[:10]
+            cand = [t for t in open_tk if t["opened_at"] and cdate and cdate >= t["opened_at"]]
+            if cand:
+                link = {"ticket_no": cand[0]["ticket_no"], "strength": "weak", "why": "同 SN 且咨询晚于开单时间（推断）"}
+        c["link"] = link
+    active = [c for c in consults if c["has_activity"]]
+    return {"sn": sn, "rooms_total": len(consults), "consulted": bool(active),
+            "consult_count": len(active), "empty_room_count": len(consults) - len(active),
+            "last_consult_at": max([c["created_at"] for c in active], default=""),
+            "consults": consults,
+            "tickets": {"open": open_tk, "history": hist,
+                        "open_ok": bool(isinstance(opn, dict) and opn.get("ok")),
+                        "history_ok": bool(isinstance(rep, dict) and rep.get("ok")),
+                        "open_error": "" if (isinstance(opn, dict) and opn.get("ok")) else str((opn or {}).get("error") or ""),
+                        "history_error": "" if (isinstance(rep, dict) and rep.get("ok")) else str((rep or {}).get("error") or "")}}
+
+
+@app.get("/api/sn_history/detail")
+async def api_sn_history_detail(room_code: str = "", request: Request = None, limit: int = 200):
+    """某次咨询的原始内容（对话 + 命令与结果）。前端二次确认后才调。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if (user.get("role") or "") not in ("expert", "admin"):
+        return JSONResponse({"error": "仅二线（专家）账号可查"}, status_code=403)
+    rc = (room_code or "").strip().upper()
+    if not rc:
+        return JSONResponse({"error": "room_code 必填"}, status_code=400)
+    limit = max(1, min(int(limit or 200), 500))
+    conn = _db_connect()
+    try:
+        msgs = [{"role": m["role"], "tool": m["tool_name"] or "", "content": (m["content"] or "")[:1500],
+                 "at": m["created_at"]}
+                for m in conn.execute("SELECT role, tool_name, content, created_at FROM messages WHERE room_code=?"
+                                      " AND role IN ('user','ai','tool') ORDER BY id LIMIT ?", (rc, limit))]
+        ops = []
+        for e in conn.execute("SELECT kind, ts_srv, data FROM events WHERE room_code=?"
+                              " AND kind IN ('op.call','op.result','op.error','diag.conclude','approval.request',"
+                              "'approval.approve','approval.deny') ORDER BY seq LIMIT ?", (rc, limit)):
+            try:
+                j = json.loads(e["data"]) or {}
+            except Exception:
+                j = {"raw": str(e["data"])[:300]}
+            ops.append({"kind": e["kind"], "ts": e["ts_srv"], "data": j})
+    finally:
+        conn.close()
+    return {"room_code": rc, "messages": msgs, "ops": ops,
+            "truncated": len(msgs) >= limit or len(ops) >= limit}
 
 
 @app.get("/api/quick_diagnoses")
@@ -4042,6 +4493,33 @@ async def debug_log(request: Request):
 #   · 官网连不上 → 同样禁止创建（主人 2026-11-05 决定）
 #     ⚠️ 待优化 T8：官网抖动会挡住全公司建房，后续再评估放宽策略（docs/待办清单.md）
 # ══════════════════════════════════════════════════════════════════════
+# 工单状态数据源（2026-11-08）：魔方「查询SN：x 工单」问句实测 7~12 秒、真值 2/2
+TICKET_SOURCE_RELIABLE = os.getenv("TICKET_SOURCE_RELIABLE", "0").strip() in ("1", "true", "yes", "on")
+TICKET_CHECK_URL = os.getenv("TICKET_CHECK_URL", "http://127.0.0.1:8081/ticket")
+TICKET_CHECK_TOKEN = os.getenv("TICKET_CHECK_TOKEN", "") or os.getenv("PROFILE_WARRANTY_TOKEN", "")
+TICKET_CHECK_TIMEOUT = float(os.getenv("TICKET_CHECK_TIMEOUT", "30"))
+
+# 日志分析服务（2026-11-08）：自由模式通过工具查日志包
+LOG_ANALYZER_URL = os.getenv("LOG_ANALYZER_URL", "http://127.0.0.1:8082").rstrip("/")
+LOG_INTERNAL_TOKEN = os.getenv("LOG_INTERNAL_TOKEN", "")
+LOG_UPLOAD_TIMEOUT = float(os.getenv("LOG_UPLOAD_TIMEOUT", "900"))
+
+# ── ThinkLogParser（联想日志解析平台）投递 2026-11-10 ──
+#   链路：包放本机暂存目录 → 生成带签名的公网下载链接 → 调对方 upload_link，由对方服务器自己来拉
+#   实测：对方网关 60s 超时；我方上行 ~330KB/s → 18MB/52.8s 通过、21MB/60.2s 502。默认限 6MB
+_SRV_DIR = pathlib.Path(os.path.abspath(__file__)).parent
+# 2026-11-10：整包走"异步三段式"（页面手动上传用的那条路，没有 60 秒网关超时限制）
+THINKLOG_SESSION_FILE = os.getenv("THINKLOG_SESSION_FILE",
+                                  str(_SRV_DIR.parent / "mofang-profile" / "state" / "session.json"))
+THINKLOG_SOURCE = os.getenv("THINKLOG_SOURCE", "nextpert")
+THINKLOG_MAX_MB = float(os.getenv("THINKLOG_MAX_MB", "2048"))    # 对方页面规则：单文件 ≤2GB
+THINKLOG_TIMEOUT = float(os.getenv("THINKLOG_TIMEOUT", "1800"))   # 整包上传耗时随体积增长（350KB/s）
+THINKLOG_ENABLE = os.getenv("THINKLOG_ENABLE", "1").strip() not in ("0", "false", "False", "")
+THINKLOG_DIR = pathlib.Path(os.getenv("THINKLOG_DIR", str(_SRV_DIR / "thinklog_out")))
+THINKLOG_VIEW = os.getenv("THINKLOG_VIEW", "https://agent.cube.lenovo.com/thinklog/view?id=")
+LOG_UPLOADS_DIR = pathlib.Path(os.getenv("LOG_UPLOADS_DIR",
+    str(_SRV_DIR.parent / "log-analyzer" / "uploads")))
+
 SN_CHECK_URL = os.getenv("SN_CHECK_URL", "http://127.0.0.1:8081/asp_warranty")
 SN_CHECK_TOKEN = os.getenv("SN_CHECK_TOKEN", "") or os.getenv("PROFILE_WARRANTY_TOKEN", "")
 SN_CHECK_TIMEOUT = float(os.getenv("SN_CHECK_TIMEOUT", "8"))
@@ -4084,6 +4562,68 @@ def _sn_check_desc(res: dict) -> str:
     return (f"通过联想官网校验主机编号 {sn}：有效 · {wtxt} · "
             f"机型 {res.get('machine') or '—'} · MTM {res.get('mtm') or '—'} · "
             f"生产日期 {res.get('product_date') or '—'}")
+
+
+async def _sn_ticket(sn: str) -> dict:
+    """查当前进行中工单。失败不抛异常 —— 工单永不成建房拦路虎。"""
+    headers = {"Accept": "application/json"}
+    if TICKET_CHECK_TOKEN:
+        headers["Authorization"] = f"Bearer {TICKET_CHECK_TOKEN}"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(TICKET_CHECK_TIMEOUT, connect=5.0)) as client:
+            r = await client.get(TICKET_CHECK_URL, params={"sn": sn}, headers=headers)
+        if r.status_code >= 400:
+            return {"ok": False, "error": f"工单查询 HTTP {r.status_code}"}
+        js = r.json() or {}
+        js.setdefault("ok", False)
+        return js
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def _ticket_desc(res: dict, manual: str = "") -> str:
+    if manual:
+        auto = (res.get("tickets") or [{}])[0].get("工单号", "") if res.get("ok") else ""
+        return (f"工单号由人工填写：{manual}" + (f"（魔方自动查询值：{auto}）" if auto else "（魔方未查到进行中工单）"))
+    if not res.get("ok"):
+        return f"查询进行中工单失败：{res.get('error') or res.get('summary') or '魔方无响应'}"
+    ts = res.get("tickets") or []
+    if not ts:
+        return "魔方查询：无进行中工单"
+    t = ts[0]
+    return (f"魔方查询：{res.get('count', len(ts))} 个进行中工单 · 最近 {t.get('工单号')}"
+            f"（{t.get('开单时间')} 开单 · {str(t.get('故障描述') or '')[:40]}）")
+
+
+@app.get("/api/sn_ticket")
+async def api_sn_ticket(sn: str = "", request: Request = None):
+    """创建房间弹窗用：按 SN 查当前进行中工单（魔方 IPS/SF）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if user.get("role") == "guest":
+        return JSONResponse({"error": "游客无此权限"}, status_code=403)
+    sn = (sn or "").strip().upper()
+    if not sn or len(sn) > 64:
+        return JSONResponse({"ok": False, "count": 0, "tickets": [], "message": "SN 为空或过长"}, status_code=400)
+    res = await _sn_ticket(sn)
+    out = {"ok": bool(res.get("ok")), "sn": sn,
+           "count": int(res.get("count") or 0),
+           "tickets": res.get("tickets") or [],
+           "summary": res.get("summary") or "",
+           "cached": bool(res.get("cache")),
+           "warranty": res.get("warranty") or {},
+           "message": "" if res.get("ok") else (res.get("error") or res.get("summary") or "工单查询失败")}
+    try:
+        record_event("ticket.check",
+                     {"sn": sn, "ok": out["ok"], "count": out["count"],
+                      "ticket_no": (out["tickets"][0].get("工单号") if out["tickets"] else ""),
+                      "desc": _ticket_desc(res)},
+                     actor=user["username"], actor_role=user.get("role", ""),
+                     stream=f"user:{user['username']}")
+    except Exception:
+        pass
+    return out
 
 
 @app.get("/api/sn_check")
@@ -4194,7 +4734,21 @@ async def create_room(request: Request):
                              "invalid": True, "sn": sn}, status_code=400)
     machine_model = (_chk.get("machine") or "").strip()
     mtm = (_chk.get("mtm") or "").strip()
+    # 2026-11-08：工单号来源（人工优先）——人工填的 > 魔方自动查到的 > 留空
+    _manual_ticket = _s(body.get("ticket_no"), 40)
+    if _manual_ticket is None:
+        return JSONResponse({"error": "工单号含非法字符或超过 40 字符"}, status_code=400)
+    _manual_ticket = (_manual_ticket or "").strip()
     ticket_no = ""
+    ticket_source = ""
+    _tres = {}
+    if _manual_ticket:
+        ticket_no, ticket_source = _manual_ticket, "manual"
+    else:
+        _tres = await _sn_ticket(sn)
+        if _tres.get("ok") and (_tres.get("tickets") or []):
+            ticket_no, ticket_source = str(_tres["tickets"][0].get("工单号") or ""), "mofang"
+    _ticket_checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # 人类可读房间名：客户单位-机型-SN-日期
     _md = datetime.now().strftime("%m%d")
     room_name = "-".join([x for x in (client_org, machine_model, sn, _md) if x])[:96]
@@ -4212,9 +4766,10 @@ async def create_room(request: Request):
     try:
         conn = _db_connect()
         conn.execute(
-            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, mtm, engineer_username, expires_at, os, client_org, room_name) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (code, sn, ticket_no, machine_model, mtm, user["username"], expires_at, os_choice, client_org or "", room_name),
+            "INSERT INTO rooms (room_code, sn, ticket_no, machine_model, mtm, engineer_username, expires_at, os, client_org, room_name, ticket_source, ticket_checked_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (code, sn, ticket_no, machine_model, mtm, user["username"], expires_at, os_choice, client_org or "",
+             room_name, ticket_source, _ticket_checked_at),
         )
         conn.commit()
         conn.close()
@@ -4236,7 +4791,9 @@ async def create_room(request: Request):
                      stream=f"room:{code}")
     except Exception:
         pass
-    return {"room_code": code, "sn": sn, "ticket_no": ticket_no, "machine_model": machine_model,
+    return {"room_code": code, "sn": sn, "ticket_source": ticket_source,
+            "ticket_opened_at": (str((_tres.get("tickets") or [{}])[0].get("开单时间") or "") if _tres.get("ok") else ""),
+            "ticket_fault": (str((_tres.get("tickets") or [{}])[0].get("故障描述") or "")[:60] if _tres.get("ok") else ""), "ticket_no": ticket_no, "machine_model": machine_model,
             "mtm": mtm, "in_warranty": bool(_chk.get("in_warranty")),
             "warranty_end": _chk.get("warranty_end") or "",
             "client_org": client_org or "", "room_name": room_name,
@@ -4315,15 +4872,37 @@ CONNECT_TOKEN_CACHE: dict[str, dict] = {}  # room_code -> {token, exp}
 
 
 def get_or_create_room_token(room_code: str) -> str:
-    """获取房间连接令牌：有效期内复用同一令牌（多次查看/复制命令不互相作废）。"""
+    """获取房间连接令牌：有效期内复用同一令牌（多次查看/复制命令不互相作废）。
+
+    2026-11-10 修复（UYYT9CTD 复现"房间连不回去"）：
+      旧逻辑只看内存缓存 CONNECT_TOKEN_CACHE。房间因浏览器离开 30 分钟被 auto-idle
+      （clear_room_token 清了 DB 里的哈希、status 置 idle）后，缓存条目还在，
+      于是 get_or_create 把**已经作废的旧令牌**原样发回给新下载的 .bat，
+      桥接器拿着旧令牌连 → verify_room_token 直接判死（status=idle / hash=NULL），
+      表现就是"这个房间再也连不上了"。
+      现：缓存命中后还要回查 DB（status 必须 active 且哈希非空），否则重新签发。
+    """
     now = time.time()
     entry = CONNECT_TOKEN_CACHE.get(room_code)
-    if entry and entry["exp"] > now:
+    if entry and entry["exp"] > now and _room_token_cache_usable(room_code):
         return entry["token"]
     token = generate_connect_token()
-    set_room_token(room_code, token)
+    set_room_token(room_code, token)      # 顺带把 status 置回 active、idle_at 清空
     CONNECT_TOKEN_CACHE[room_code] = {"token": token, "exp": now + TOKEN_TTL}
     return token
+
+
+def _room_token_cache_usable(room_code: str) -> bool:
+    """缓存里的令牌在 DB 侧是否仍然有效（房间 active 且哈希还在）。"""
+    try:
+        conn = _db_connect()
+        row = conn.execute(
+            "SELECT connect_token_hash, status FROM rooms WHERE room_code=?", (room_code,)
+        ).fetchone()
+        conn.close()
+        return bool(row and row["status"] == "active" and row["connect_token_hash"])
+    except Exception:
+        return False
 
 
 def token_expiry_str() -> str:
@@ -4345,6 +4924,12 @@ def set_room_token(room_code: str, token: str) -> None:
 
 
 def clear_room_token(room_code: str) -> None:
+    # 2026-11-10：必须连内存缓存一起清——否则 get_or_create_room_token 会把作废令牌
+    # 再发出去，房间从此"连不回去"（UYYT9CTD 复现）。
+    try:
+        CONNECT_TOKEN_CACHE.pop(room_code, None)
+    except Exception:
+        pass
     try:
         conn = _db_connect()
         conn.execute("UPDATE rooms SET connect_token_hash=NULL, token_expires_at=NULL WHERE room_code=?", (room_code,))
@@ -4417,13 +5002,34 @@ def refresh_room_token_expiry(room_code: str) -> None:
 
 
 async def mark_idle_after(room_code: str, room) -> None:
-    """浏览器断开 30min 后无人重连 → 置 idle + 清令牌（防离开后滥用）。"""
+    """浏览器断开后，满足"没人在用"才置 idle + 清令牌（防离开后滥用）。
+
+    2026-11-10（B 方案，主人拍板）：判定条件从"浏览器有没有人"改成
+      **浏览器不在 且 桥接器也不在线** 才算闲置。
+    理由：桥接器还连着说明客户机还在跑、有人在这个房间里干活（现场工程师常在
+    客户机侧操作、换设备看页面），此时把令牌作废会让房间"连不回去"——
+    UYYT9CTD 就是这样废掉的。
+    桥接器在线期间每轮只滚动令牌有效期（refresh_room_token_expiry），不作废。
+    """
+    interval = max(60, int(float(os.getenv("ROOM_IDLE_MINUTES", "30")) * 60))
     try:
-        await asyncio.sleep(30 * 60)
-        if room.browser_ws is None:
-            clear_room_token(room_code)
-            set_room_status(room_code, "idle")
-            run_logger.info(f"[{room_code}] auto-idle: no browser for 30min")
+        await asyncio.sleep(interval)
+        while True:
+            browser_gone = room.browser_ws is None
+            bridge_alive = room.bridge_ws is not None
+            if not browser_gone:
+                return                      # 人回来了，什么都不做
+            if not bridge_alive:
+                clear_room_token(room_code)
+                set_room_status(room_code, "idle")
+                run_logger.info(
+                    f"[{room_code}] auto-idle: 浏览器与桥接器均离线超过 {interval // 60} 分钟")
+                return
+            # 桥接器还在：只续期，不置 idle，下一轮再看
+            refresh_room_token_expiry(room_code)
+            run_logger.info(
+                f"[{room_code}] idle 检查：浏览器不在但桥接器在线，保留房间（令牌续期）")
+            await asyncio.sleep(interval)
     except asyncio.CancelledError:
         pass
 
@@ -4553,6 +5159,96 @@ def can_access_room(user: dict, room_code: str) -> bool:
         return bool(m)
     except Exception:
         return False
+
+
+# ══════════════════════════════════════════════════════════════════════
+# /api/tools/* 统一守卫（2026-11-06 安全审查 P0）：
+#   此前 23 条工具路由只校验「登录了」——不校验房间归属、不拦游客。
+# 2026-11-08：同时登记「谁触发的」，供轨迹页区分人与 AI。
+# ══════════════════════════════════════════════════════════════════════
+_TRIG: dict = {}
+_TRIG_TTL = 120.0
+_AI_TURN = {"cur": "", "parent": ""}
+_OP_META = {}
+_STEP_EV: dict = {}   # 房间 → 当前执行的步骤事件 id（命令行据此挂父级）2026-11-09   # (room, cmd_id) → {"parent": ai回合id, "by": ai/human/bridge}　2026-11-09   # cur=当前 AI 回合事件id；parent=触发本轮的人点击id
+
+
+def _trig_set(room_code: str, by: str, user: str = "", role: str = "", via: str = "", turn: str = ""):
+    if not room_code:
+        return
+    _TRIG[room_code.upper()] = {"by": by, "user": user, "role": role, "via": via,
+                                "turn": turn, "at": time.time()}
+
+
+def _trig_get(room_code: str) -> dict:
+    d = _TRIG.get((room_code or "").upper()) or {}
+    if d and time.time() - d.get("at", 0) > _TRIG_TTL:
+        return {}
+    return d
+
+
+async def _guard_reject(scope, send, code: int, msg: str):
+    from starlette.responses import JSONResponse as _JR
+    await _JR({"error": msg}, status_code=code)(scope, None, send)
+
+
+class _ToolsGuardMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or not str(scope.get("path", "")).startswith("/api/tools/"):
+            return await self.app(scope, receive, send)
+        try:
+            from starlette.requests import Request as _Req
+            req = _Req(scope)
+            user = _require_user(req)
+        except Exception:
+            user = None
+        if not user:
+            return await _guard_reject(scope, send, 401, "未登录")
+        if (user.get("role") or "") == "guest":
+            return await _guard_reject(scope, send, 403, "游客无此权限——房间工具仅限已登录工程师")
+        body = b""
+        try:
+            while True:
+                msg = await receive()
+                body += msg.get("body", b"")
+                if not msg.get("more_body", False):
+                    break
+        except Exception:
+            body = b""
+        room = ""
+        try:
+            room = str((json.loads(body.decode("utf-8") or "{}") or {}).get("room_code") or "").upper().strip()
+        except Exception:
+            room = ""
+        if room and not can_access_room(user, room):
+            return await _guard_reject(scope, send, 403, "无权操作该房间")
+        try:
+            _h = dict(scope.get("headers") or [])
+            _xt = (_h.get(b"x-trigger") or b"").decode("utf-8", "ignore").strip()
+            if room:
+                if _xt.lower().startswith("ai"):
+                    _t = _xt.split(":", 1)[1].strip() if ":" in _xt else ""
+                    _trig_set(room, "ai", "ai", "assistant", "ai_tool", _t)
+                else:
+                    _via = "batch" if "/batch" in scope.get("path", "") else "preset_card"
+                    _trig_set(room, "human", user.get("username", ""), user.get("role", ""), _via, "")
+        except Exception:
+            pass
+        _sent = {"v": False}
+
+        async def _replay():
+            if not _sent["v"]:
+                _sent["v"] = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        return await self.app(scope, _replay, send)
+
+
+app.add_middleware(_ToolsGuardMiddleware)
 
 
 @app.get("/api/room_connect/{room_code}")
@@ -5418,9 +6114,14 @@ async def room_report(room_code: str, request: Request):
 
 @app.get("/api/history/{room_code}")
 async def get_history(request: Request, room_code: str, limit: int = 200):
-    """Get chat history for a room from SQLite.（登录用户可访问）"""
-    if not _require_user(request):
+    """Get chat history for a room from SQLite.（限该房间工程师/管理员/被升级人）"""
+    _u = _require_user(request)
+    if not _u:
         return JSONResponse({"error": "未授权"}, status_code=401)
+    if (_u.get("role") or "") == "guest":
+        return JSONResponse({"error": "游客无此权限"}, status_code=403)
+    if not can_access_room(_u, str(room_code).upper()):
+        return JSONResponse({"error": "无权访问该房间"}, status_code=403)
     messages = get_room_messages(room_code, limit)
     return {"room_code": room_code, "messages": messages}
 
@@ -5437,11 +6138,16 @@ async def list_rooms(request: Request):
 # Admin API
 # ============================================================
 @app.get("/api/diag/{room_code}")
-async def diag_room(room_code: str):
+async def diag_room(room_code: str, request: Request):
     """诊断接口：返回房间的完整健康状态，方便排查 bridge 断链等问题。
 
     无需登录（只含房间级诊断信息，不含聊天内容）。
     """
+    _du = _require_user(request)
+    if not _du or (_du.get("role") or "") == "guest" or not can_access_room(_du, room_code.upper()):
+        return JSONResponse({"room_code": room_code.upper(),
+                             "exists": room_record_exists(room_code.upper()),
+                             "detail": "需登录且为该房间工程师才能查看诊断详情"}, status_code=200)
     room = rooms.get(room_code.upper())
     if not room:
         if room_record_exists(room_code.upper()):
@@ -5994,6 +6700,7 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
     """
     future: asyncio.Future = asyncio.get_event_loop().create_future()
     room.pending_commands[cmd_id] = future
+    cmd_timeout = 0        # 2026-11-10：命令自身的超时（v2 分支赋值），用于决定服务端等多久
 
     # Map tool names bridge doesn't know to bridge's Shell command
     bridge_tool = fn_name
@@ -6022,10 +6729,25 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
     _skip_ev = cmd_id.startswith(("shot", "nshot", "probe"))   # 只跳过截图/预览/探针这类高频内部调用
     if not _skip_ev:
         try:
-            record_event("op.call", {"tool": fn_name,
-                                     "command": (str(fn_args.get("command") or fn_args.get("path") or ""))[:1000]},
-                         room_code=room.code, stream=f"room:{room.code}", actor="bridge",
-                         actor_role="system", step=cmd_id)
+            _w = _trig_get(room.code)
+            _call_data = {"tool": fn_name,
+                          "command": (str(fn_args.get("command") or fn_args.get("path") or ""))[:1000]}
+            if _w:
+                _call_data["_who"] = {k: _w.get(k) for k in ("by", "user", "role", "via", "turn") if _w.get(k)}
+            record_event("op.call", _call_data,
+                         room_code=room.code, stream=f"room:{room.code}",
+                         actor=("ai" if _w.get("by") == "ai" else ((_w.get("user") or "bridge") if _w.get("by") == "human" else "bridge")),
+                         actor_role=("assistant" if _w.get("by") == "ai" else ((_w.get("role") or "system") if _w.get("by") == "human" else "system")),
+                         turn=(_w.get("turn") or ""), step=cmd_id,
+                         parent=((_AI_TURN.get("cur") or "") if _w.get("by") == "ai"
+                                 else (_STEP_EV.get(room.code) or "")))
+            if len(_OP_META) > 4000:
+                _OP_META.clear()
+            _OP_META[(room.code, cmd_id)] = {
+                "parent": ((_AI_TURN.get("cur") or "") if _w.get("by") == "ai"
+                           else (_STEP_EV.get(room.code) or "")),
+                "by": _w.get("by") or "bridge", "turn": _w.get("turn") or "",
+                "user": _w.get("user") or "", "role": _w.get("role") or ""}
         except Exception:
             pass
 
@@ -6078,10 +6800,19 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
         room.record_command(fn_name, "", 0, room.platform, sent=False)
         future.set_result("[error] Bridge not connected")
 
+    # 2026-11-10：等待时长不再写死 240 秒——按命令自身的 timeout 给足（+90 秒余量）。
+    # 背景：日志采集命令下发时 timeout=600（10 分钟档），但这里写死等 240 秒，
+    # 于是 4 分钟就报 "[timeout] Command exceeded 240s"——UI 上却写着"通常 3~10 分钟"，
+    # 自相矛盾（PC… 那台 46 秒采完所以没暴露）。现：max(240, 命令 timeout + 90)，上限 1800。
     try:
-        result = await asyncio.wait_for(future, timeout=240.0)
+        _wait_budget = (float(cmd_timeout) + 90.0) if cmd_timeout else 240.0
+    except Exception:
+        _wait_budget = 240.0
+    _wait_budget = min(max(_wait_budget, 240.0), 1800.0)
+    try:
+        result = await asyncio.wait_for(future, timeout=_wait_budget)
     except asyncio.TimeoutError:
-        result = "[timeout] Command exceeded 240s"
+        result = f"[timeout] Command exceeded {int(_wait_budget)}s"
 
     room.pending_commands.pop(cmd_id, None)
     # 2026-11-03：记录命令结果（事件只存摘要与引用，全文落盘 room_event_blobs/）
@@ -6098,11 +6829,23 @@ async def execute_bridge_command(room: Room, fn_name: str, fn_args: dict, cmd_id
                     _blob = f"{room.code}/{_bid}.txt"
                 except Exception:
                     _blob = ""
-            record_event("op.result", {"tool": fn_name, "chars": len(_txt),
-                                       "preview": _txt[:400], "blob": _blob,
-                                       "sha256": hashlib.sha256(_txt.encode("utf-8", "replace")).hexdigest()[:16]},
+            _w2 = _trig_get(room.code)
+            _extra = {}
+            if _w2:
+                _extra["_who"] = {k: _w2.get(k) for k in ("by", "user", "role", "via", "turn") if _w2.get(k)}
+            _meta = _OP_META.get((room.code, cmd_id)) or {}
+            _by = _meta.get("by") or "bridge"
+            _res_data = {**_extra, "tool": fn_name, "chars": len(_txt),
+                         "preview": _txt[:400], "blob": _blob,
+                         "sha256": hashlib.sha256(_txt.encode("utf-8", "replace")).hexdigest()[:16]}
+            if _by != "bridge":
+                _res_data["_who"] = {k: _meta.get(k) for k in ("by", "user", "role", "turn") if _meta.get(k)}
+            record_event("op.result", _res_data,
                          room_code=room.code, stream=f"room:{room.code}",
-                         actor="bridge", actor_role="system", step=cmd_id)
+                         actor=("ai" if _by == "ai" else (_meta.get("user") or "bridge")),
+                         actor_role=("assistant" if _by == "ai" else (_meta.get("role") or "system")),
+                         step=cmd_id, parent=_meta.get("parent") or "",
+                         turn=_meta.get("turn") or "")
     except Exception:
         pass
     return result
@@ -6357,7 +7100,7 @@ async def run_agent(
 def build_hermes_bridge_guide(room: Room, lang: str = "zh-CN") -> str:
     """构造给 Hermes 的桥接操作指南（注入 system prompt）。lang 控制回复语言。"""
     platform = getattr(room, "platform", "windows")
-    secret = BRIDGE_HTTP_SECRET or "（未配置 BRIDGE_HTTP_SECRET）"
+    secret = room_bridge_ticket(getattr(room, "code", "") or "") if BRIDGE_HTTP_SECRET else "（未配置 BRIDGE_HTTP_SECRET）"
     reply_lang = {
         "zh-CN": "最终用**简体中文** + markdown 给出结论和后续建议",
         "zh-TW": "最終用**繁體中文** + markdown 給出結論和後續建議",
@@ -6381,7 +7124,7 @@ def build_hermes_bridge_guide(room: Room, lang: str = "zh-CN") -> str:
 必须通过本服务器的 HTTP 桥接接口，用 curl 调用：
 
 POST http://127.0.0.1:8000/api/bridge/execute
-Header: X-Bridge-Secret: {secret}
+Header: X-Room-Token: {secret}
 Header: Content-Type: application/json
 Body: {{"room_code": "{room.code}", "tool": "<工具名>", "args": {{...}}}}
 
@@ -6784,8 +7527,9 @@ async def run_agent_hermes(
 # ============================================================
 @app.post("/api/bridge/execute")
 async def api_bridge_execute(request: Request):
-    secret = request.headers.get("X-Bridge-Secret", "")
-    if not BRIDGE_HTTP_SECRET or secret != BRIDGE_HTTP_SECRET:
+    _ticket_room = verify_room_bridge_ticket(request.headers.get("X-Room-Token", ""))
+    _secret = request.headers.get("X-Bridge-Secret", "")
+    if not _ticket_room and not (BRIDGE_HTTP_SECRET and _secret == BRIDGE_HTTP_SECRET):
         return JSONResponse({"status": "error", "error": "unauthorized"}, status_code=401)
 
     try:
@@ -8628,6 +9372,305 @@ async def tools_dump(request: Request):
     return {"ok": True, "log": result or ""}
 
 
+
+# ══════════════════════════════════════════════════════════════════════
+# 硬盘健康（SMART）直读判读 · 2026-11-11
+#   问题：原「硬盘健康检测（SMART）」走 4 步执行计划，输出 146 行 smartctl 原文，
+#        工程师要自己找 05/C5/温度/寿命 —— 与「开机自启动」「驱动版本对账」的
+#        一步直读范式不一致。
+#   现在：一次调用完成采集 + 判读，返回每块盘的结论（正常/注意/危险）+ 依据 + 关键属性。
+#   只读，不修改任何设置。
+# ══════════════════════════════════════════════════════════════════════
+
+def _smart_cmd_for(room, request, platform: str) -> str:
+    """构造 smartctl 采集命令（Windows 分发 smartctl.exe；Linux 自动装 smartmontools）。"""
+    if platform == "linux":
+        return (
+            "command -v smartctl >/dev/null 2>&1 || (sudo apt install -y smartmontools >/dev/null 2>&1 || sudo yum install -y smartmontools >/dev/null 2>&1); "
+            "for d in $(lsblk -d -o NAME -n 2>/dev/null | grep -E '^(sd|nvme|hd)'); do "
+            "echo \"========== /dev/$d ==========\"; "
+            "sudo smartctl -a /dev/$d 2>&1; "
+            "done"
+        )
+    _cands = get_download_candidates(request)
+    return (
+        build_download_prefix_ps(_cands, "/static/tools/smartctl.exe")
+        + "$z = \"$env:TEMP\\smartctl.exe\"; $db = \"$env:TEMP\\smartctl-drivedb.h\"; "
+        f"curl.exe -sL -o $z \"$SRV/static/tools/smartctl.exe\"; "
+        f"curl.exe -sL -o $db \"$SRV/static/tools/smartctl-drivedb.h\" 2>$null; "
+        "if (!(Test-Path $z) -or (Get-Item $z).Length -lt 10000) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
+        "$scan = (& $z --scan) | ForEach-Object { if ($_ -match '^([^\\s]+)') { $matches[1] } }; "
+        "if (!$scan) { Write-Output 'NO_DISK_FOUND'; exit }; "
+        "$out = @(); "
+        "foreach ($disk in $scan) { $out += \"========== $disk ==========\"; "
+        "$out += & $z -a $disk } "
+        "$out -join \"`n\""
+    )
+
+
+async def _smart_collect(room, request, platform: str) -> str:
+    cmd = _smart_cmd_for(room, request, platform)
+    result = await asyncio.wait_for(
+        execute_bridge_command(room, "RunCommand", {"command": cmd, "timeout": 180, "cwd": ""},
+                               f"smart_{int(time.time())}", tier=1),
+        timeout=200,
+    )
+    return result or ""
+
+
+def _smart_int(s: str):
+    s = str(s or "").replace(",", "").strip()
+    m = re.search(r"\d+", s)
+    return int(m.group()) if m else None
+
+
+def _smart_parse_block(dev: str, lines: list) -> dict:
+    """把一块盘的 smartctl 输出解析成结构化判读。"""
+    txt = "\n".join(lines)
+    low = txt.lower()
+    iface = "NVMe" if ("nvme version" in low or "nvme" in dev.lower()) else "SATA / USB"
+
+    def grab(pat):
+        m = re.search(pat, txt, re.I)
+        return m.group(1).strip() if m else ""
+
+    # 介质类型：NVMe 一律 SSD；ATA 盘看 Rotation Rate（"Solid State Device" = SSD，RPM 数字 = 机械盘）
+    # 注意必须在 grab 定义之后取，否则 ATA 盘会 NameError
+    if "nvme" in iface.lower():
+        media = "SSD"
+    else:
+        _rr = grab(r"Rotation Rate:\s*([^\n]+)")
+        media = "SSD" if "solid state" in _rr.lower() else ("HDD" if re.search(r"\d+\s*rpm", _rr, re.I) else "")
+
+    model = grab(r"Model Number:\s*(.+)") or grab(r"Device Model:\s*(.+)") or grab(r"Model Family:\s*(.+)")
+    sn = grab(r"Serial Number:\s*(.+)")
+    fw = grab(r"Firmware Version:\s*(.+)")
+    # 容量数字带千位逗号（512,110,190,592）——正则必须允许逗号，否则 NVMe 容量读不出来
+    cap = (grab(r"Total NVM Capacity:\s*[\d,]+\s*\[([^\]]+)\]")
+           or grab(r"Namespace 1 Size/Capacity:\s*[\d,]+\s*\[([^\]]+)\]")
+           or grab(r"User Capacity:.*\[([^\]]+)\]"))
+    health = grab(r"SMART overall-health self-assessment test result:\s*(\S+)")
+    crit_raw = grab(r"Critical Warning:\s*(0x[0-9a-fA-F]+)")
+    temp = _smart_int(grab(r"Temperature:\s*(\d+)\s*Celsius"))
+    used_pct = _smart_int(grab(r"Percentage Used:\s*(\d+)%"))
+    spare = _smart_int(grab(r"Available Spare:\s*(\d+)%"))
+    spare_thr = _smart_int(grab(r"Available Spare Threshold:\s*(\d+)%"))
+    media_err = _smart_int(grab(r"Media and Data Integrity Errors:\s*([\d,]+)"))
+    poh = _smart_int(grab(r"Power On Hours:\s*([\d,]+)"))
+    written = grab(r"Data Units Written:\s*[\d,]+\s*\[([^\]]+)\]")
+    unsafe_sd = _smart_int(grab(r"Unsafe Shutdowns:\s*([\d,]+)"))
+
+    # ATA 属性表解析（2026-11-11 重写）
+    #   ① NVMe 盘完全跳过（NVMe 没有 ATA 属性表；曾因「Supported Power States」表第 5 档
+    #      被误当成 ID#5 重映射扇区，把健康 SSD 判成坏道）
+    #   ② ATA 盘只在属性表内（ID# ATTRIBUTE_NAME 表头之后）解析，并把厂商判定三列一起读出来：
+    #        VALUE(归一化值) / THRESH(厂商阈值) / WHEN_FAILED(厂商已判失败标记)
+    #      —— 判失败的权力交给厂商，我们只翻译，不自造阈值
+    is_nvme = ("nvme version" in low) or ("smart/health information (nvme" in low) or ("nvme" in dev.lower())
+    ata = {}
+    if not is_nvme:
+        in_attr_tbl = False
+        for ln in lines:
+            if "ATTRIBUTE_NAME" in ln.upper():
+                in_attr_tbl = True
+                continue
+            if not in_attr_tbl:
+                continue
+            p = ln.split()
+            if len(p) < 10 or not p[0].isdigit():
+                continue
+            try:
+                _val = int(p[3]); _thr = int(p[5])
+            except Exception:
+                continue
+            ata[p[0]] = {"name": p[1], "value": _val, "thresh": _thr,
+                         "when": p[8] if len(p) > 8 else "-", "raw": _smart_int(p[-1])}
+    ata_raw = {k: v["raw"] for k, v in ata.items()}
+    # 厂商自己判失败的属性：WHEN_FAILED 非 "-"，或归一化值已跌破厂商阈值
+    vendor_failed = [k for k, v in ata.items()
+                     if str(v["when"]).strip() not in ("-", "",) or (v["thresh"] and v["value"] <= v["thresh"])]
+    realloc = ata_raw.get("5")
+    pending = ata_raw.get("197")
+    offline_unc = ata_raw.get("198")
+    if poh is None:
+        poh = ata_raw.get("9")
+    if temp is None:
+        temp = ata_raw.get("194")
+
+    def _vendor_failed(attr_id: str) -> bool:
+        return attr_id in vendor_failed
+
+    reasons, danger, warn = [], [], []
+
+    # —— 危险：只认设备/厂商自己给出的判定 ——
+    if health and health.upper() not in ("PASSED", "OK"):
+        danger.append(f"SMART 自检结果为 {health}（设备自身判定未通过）")
+    if crit_raw:
+        try:
+            if int(crit_raw, 16) != 0:
+                danger.append(f"NVMe 严重警告标志 {crit_raw} 非零（设备自身报警）")
+        except Exception:
+            pass
+    for _id in vendor_failed:
+        _r = ata[_id]
+        _why = []
+        if str(_r["when"]).strip() not in ("-", ""):
+            _why.append(f"WHEN_FAILED={_r['when']}")
+        if _r["thresh"] and _r["value"] <= _r["thresh"]:
+            _why.append(f"VALUE {_r['value']} ≤ 厂商阈值 {_r['thresh']}")
+        danger.append(f"属性 {_id} {_r['name']} 已被厂商判失败（{'；'.join(_why)}，原始值 {_r['raw']}）")
+    if media_err:
+        danger.append(f"介质完整性错误 {media_err} 次（设备自身计数）")
+    if spare is not None and spare_thr is not None and spare <= spare_thr:
+        danger.append(f"可用备用块 {spare}% 已降到厂商阈值 {spare_thr}% 及以下")
+    if used_pct is not None and used_pct >= 95:
+        danger.append(f"闪存寿命已消耗 {used_pct}%（接近磨穿）")
+
+    # —— 注意：计数非零但厂商未判失败（事实 + 厂商结论都写清楚，不越权下结论）——
+    if realloc and not _vendor_failed("5"):
+        danger_word = "坏块" if media == "SSD" else "坏道"
+        warn.append(f"重映射扇区 {realloc} 个（存储介质已替换过{danger_word}，厂商尚未判失败）")
+    if pending and not _vendor_failed("197"):
+        warn.append(f"待定扇区 {pending} 个（读写不稳定待确认，厂商尚未判失败）")
+    if offline_unc and not _vendor_failed("198"):
+        warn.append(f"无法纠正扇区 {offline_unc} 个（厂商尚未判失败）")
+    if used_pct is not None and 80 <= used_pct < 95:
+        warn.append(f"闪存寿命已消耗 {used_pct}%，接近寿命末期")
+    if spare is not None and 100 > spare > (spare_thr or 0):
+        warn.append(f"可用备用块已消耗（当前 {spare}%）")
+    if temp is not None and temp >= 60:
+        warn.append(f"温度偏高（{temp}℃）")
+
+    # —— 正常依据 ——
+    if health and health.upper() in ("PASSED", "OK"):
+        reasons.append(f"SMART 自检通过（{health}）")
+    if not is_nvme:
+        if realloc == 0:
+            reasons.append("重映射扇区 0")
+        if pending == 0:
+            reasons.append("待定扇区 0")
+        if offline_unc == 0:
+            reasons.append("无法纠正扇区 0")
+        if not vendor_failed:
+            reasons.append("无属性触发厂商阈值")
+    # 2026-11-11：寿命/备用块/温度/通电/写入额已在 metrics 单独展示，这里不再重复
+    if media_err == 0:
+        reasons.append("介质错误 0 次")
+    if poh:
+        reasons.append(f"通电约 {round(poh / 24 / 365, 1)} 年")
+    if unsafe_sd:
+        reasons.append(f"异常掉电 {unsafe_sd} 次")
+
+    if danger:
+        verdict, level = "危险", "danger"
+        headline = "硬盘存在明确故障迹象，" + danger[0]
+    elif warn:
+        verdict, level = "注意", "warn"
+        headline = "硬盘仍可用，但" + warn[0]
+    elif health or used_pct is not None or realloc is not None or ata:
+        verdict, level = "正常", "ok"
+        headline = ("固态盘健康，未发现坏块或寿命风险" if media == "SSD"
+                    else "硬盘健康，未发现坏道或寿命风险")
+    else:
+        verdict, level = "无法判读", "plain"
+        headline = "smartctl 未返回可判读的健康信息"
+
+    return {
+        "dev": dev,
+        "iface": iface,
+        "media": media,
+        "model": model or "（未读取到型号）",
+        "sn": sn,
+        "fw": fw,
+        "capacity": cap,
+        "health": health,
+        "verdict": verdict,
+        "level": level,
+        "headline": headline,
+        "danger": danger,
+        "warn": warn,
+        "reasons": reasons[:10],
+        "metrics": {
+            "寿命已用": (f"{used_pct}%" if used_pct is not None else ""),
+            "备用块": (f"{spare}%" if spare is not None else ""),
+            "温度": (f"{temp}℃" if temp is not None else ""),
+            "通电时长": (f"{poh} 小时" if poh else ""),
+            "重映射扇区": (str(realloc) if realloc is not None else ""),
+            "待定扇区": (str(pending) if pending is not None else ""),
+            "累计写入": written,
+        },
+        "raw": txt,
+    }
+
+
+def _smart_parse(text: str) -> list:
+    disks, cur_dev, cur = [], None, []
+    for ln in (text or "").splitlines():
+        m = re.match(r"^=+\s*(\S+)\s*=+$", ln.strip())
+        if m:
+            if cur_dev:
+                disks.append(_smart_parse_block(cur_dev, cur))
+            cur_dev, cur = m.group(1), []
+            continue
+        if cur_dev is not None:
+            cur.append(ln)
+    if cur_dev:
+        disks.append(_smart_parse_block(cur_dev, cur))
+    return disks
+
+
+@app.post("/api/tools/smart/assess")
+async def tools_smart_assess(request: Request):
+    """硬盘健康直读判读：采集 SMART 并返回每块盘的结论 + 依据（只读）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    room_code = str(body.get("room_code", "")).upper()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+    platform = (room.machine or {}).get("platform", room.platform)
+
+    began = time.time()
+    try:
+        raw = await _smart_collect(room, request, platform)
+    except Exception as e:
+        return JSONResponse({"error": f"采集失败：{type(e).__name__}: {e}"[:300]}, status_code=502)
+    if "DOWNLOAD_FAIL" in raw:
+        return JSONResponse({"error": "smartctl 工具下载失败（客户机网络异常）", "log": raw[:300]}, status_code=500)
+    if "NO_DISK_FOUND" in raw:
+        return JSONResponse({"error": "未发现可检测的物理磁盘"}, status_code=404)
+
+    disks = _smart_parse(raw)
+    for d in disks:
+        d.pop("raw", None)   # 原始文本单独返回，避免逐盘重复
+    summary = {
+        "total": len(disks),
+        "ok": sum(1 for d in disks if d["level"] == "ok"),
+        "warn": sum(1 for d in disks if d["level"] == "warn"),
+        "danger": sum(1 for d in disks if d["level"] == "danger"),
+        "unknown": sum(1 for d in disks if d["level"] == "plain"),
+        "platform": platform,
+        "seconds": round(time.time() - began, 1),
+        "raw_len": len(raw),
+    }
+    try:
+        record_event("smart.assess",
+                     {"summary": {k: summary[k] for k in ("total", "ok", "warn", "danger")},
+                      "_who": {"by": "human", "user": user.get("username") or "", "role": user.get("role") or ""}},
+                     room_code=room_code, actor=user.get("username") or "field",
+                     actor_role=user.get("role") or "field", stream=f"room:{room_code}")
+    except Exception:
+        pass
+    return {"ok": True, "summary": summary, "disks": disks, "raw": raw}
+
+
 @app.post("/api/tools/smart")
 async def tools_smart(request: Request):
     """硬盘健康检测（SMART）——Windows 分发 smartctl.exe；Linux 自动安装 smartmontools 后执行。
@@ -8650,33 +9693,8 @@ async def tools_smart(request: Request):
 
     platform = (room.machine or {}).get("platform", room.platform)
     public_url = get_public_url(request)
-
-    if platform == "linux":
-        cmd = (
-            "command -v smartctl >/dev/null 2>&1 || (sudo apt install -y smartmontools >/dev/null 2>&1 || sudo yum install -y smartmontools >/dev/null 2>&1); "
-            "for d in $(lsblk -d -o NAME -n 2>/dev/null | grep -E '^(sd|nvme|hd)'); do "
-            "echo \"========== /dev/$d ==========\"; "
-            "sudo smartctl -a /dev/$d 2>&1; "
-            "done"
-        )
-    else:
-        # 2026-09-26：工具下载改为【多候选地址降级】+【内容校验】。
-        # 改前问题：① 硬用 public_url（HTTPS+443 被中间设备拦截时必然失败）；
-        #           ② 只用 Test-Path 判断（下载到错误页/0 字节也算"存在"）。
-        _cands = get_download_candidates(request)
-        cmd = (
-            build_download_prefix_ps(_cands, "/static/tools/smartctl.exe")
-            + "$z = \"$env:TEMP\\smartctl.exe\"; $db = \"$env:TEMP\\smartctl-drivedb.h\"; "
-            f"curl.exe -sL -o $z \"$SRV/static/tools/smartctl.exe\"; "
-            f"curl.exe -sL -o $db \"$SRV/static/tools/smartctl-drivedb.h\" 2>$null; "
-            "if (!(Test-Path $z) -or (Get-Item $z).Length -lt 10000) { Write-Output 'DOWNLOAD_FAIL'; exit }; "
-            "$scan = (& $z --scan) | ForEach-Object { if ($_ -match '^([^\\s]+)') { $matches[1] } }; "
-            "if (!$scan) { Write-Output 'NO_DISK_FOUND'; exit }; "
-            "$out = @(); "
-            "foreach ($disk in $scan) { $out += \"========== $disk ==========\"; "
-            "$out += & $z -a $disk } "
-            "$out -join \"`n\""
-        )
+    # 2026-11-11：命令构造抽到 _smart_cmd_for()，与 /api/tools/smart/assess 共用一份
+    cmd = _smart_cmd_for(room, request, platform)
 
     run_logger.info(f"[{room_code}] tools_smart: platform={platform}, exec start")
     try:
@@ -8810,11 +9828,11 @@ async def tools_tslog(request: Request):
     run_logger.info(f"[{room_code}] tools_tslog: exec start (ThinkStation log collection)")
     try:
         result = await asyncio.wait_for(
-            execute_bridge_command(room, "Shell", {"command": cmd, "timeout": 600, "cwd": ""}, f"tslog_{int(time.time())}", tier=1),
+            execute_bridge_command(room, "Shell", {"command": cmd, "timeout": 900, "cwd": ""}, f"tslog_{int(time.time())}", tier=1),
             timeout=650,
         )
     except asyncio.TimeoutError:
-        run_logger.error(f"[{room_code}] tools_tslog timed out (10 min)")
+        run_logger.error(f"[{room_code}] tools_tslog timed out (15 min)")
         return JSONResponse({"error": "采集超时（10 分钟）——请确认客户机网络与磁盘空间"}, status_code=504)
     except Exception as e:
         run_logger.error(f"[{room_code}] tools_tslog error: {e}")
@@ -8902,6 +9920,21 @@ async def tools_upload(request: Request):
         room.pending_commands.pop(fid, None)
     if result.startswith("[upjob]"):
         job_id = result.split("job=")[1].strip()
+        # 2026-11-10：上传即绑定房间（原来只有浏览器上传那条路写 log_job_id，
+        #   控制台「上传到 IDG」这条路漏了 → ThinkLogParser 投递和 AI 日志工具都报"未绑定"）
+        try:
+            conn = _db_connect()
+            try:
+                conn.execute("UPDATE rooms SET log_job_id=?, log_job_name=? WHERE room_code=?",
+                             (job_id, path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1], room_code))
+                conn.commit()
+            finally:
+                conn.close()
+            record_event("log.bound", {"job_id": job_id, "source": "tools_upload"},
+                         room_code=room_code, actor=user.get("username", ""),
+                         actor_role=user.get("role", ""), stream=f"room:{room_code}")
+        except Exception as e:
+            run_logger.warning(f"[{room_code}] 日志包绑定失败：{e}")
         return JSONResponse({"ok": True, "job_id": job_id,
                              "analyze_url": f"/log-analyzer/analyze/{job_id}"})
     # 失败原因（IDG 上传失败 / bridge 报错）原样透出，不再伪装成"超时"
@@ -10066,6 +11099,8 @@ tr.bad td.l{{color:var(--bad);font-weight:600}}
 
 # ── 前端埋点上报（2026-11-03）：调用记录 / 原始日志里已有的信息，统一进轨迹 ──
 # 只接受白名单 kind，长度受限；actor 一律取登录会话，前端传什么用户名都不认
+_COLLECT_PARENT = {}   # 房间 → 本轮采集的「人点击」父事件 id（2026-11-09）
+
 _UI_EVENT_KINDS = {
     "approval.request", "approval.approve", "approval.deny",
     "room.escalate", "gate.confirm", "gate.blocked",
@@ -10108,14 +11143,40 @@ async def post_room_event(request: Request):
             data[str(k)[:32]] = [_clip(i, 80) for i in list(v)[:10]]
         else:
             data[str(k)[:32]] = _clip(v, 300)
+    # 2026-11-09：日志抓取补「人点击」父事件——客户机上那条采集命令由此缩进挂在人的操作下
+    #           若采集是 AI 计划驱动（_TRIG.by=ai），父事件标注为 AI
+    parent_evt = ""
+    try:
+        if kind == "artifact.collect.start":
+            _w = _trig_get(room_code)
+            _by = "ai" if _w.get("by") == "ai" else "human"
+            _lbl = _clip(raw.get("tool") or "IDG 日志采集", 60)
+            _who = {"by": _by,
+                    "user": ("ai" if _by == "ai" else user.get("username", "")),
+                    "role": user.get("role", "") if _by == "human" else "assistant",
+                    "via": "ai_plan" if _by == "ai" else "collect"}
+            parent_evt = record_event("ui.click",
+                                      {"label": _lbl, "kind": "collect",
+                                       "origin": ("ai_plan" if _by == "ai" else "human"),
+                                       "_who": _who},
+                                      room_code=room_code, actor=user.get("username", ""),
+                                      actor_role=user.get("role", ""),
+                                      stream=f"room:{room_code}") or ""
+            _COLLECT_PARENT[room_code] = parent_evt
+            data["_who"] = dict(_who, parent_click=parent_evt)
+        elif kind == "artifact.collect.end" and _COLLECT_PARENT.get(room_code):
+            parent_evt = _COLLECT_PARENT.pop(room_code)
+    except Exception:
+        parent_evt = ""
     try:
         record_event(kind, data, room_code=room_code,
                      actor=user.get("username", ""), actor_role=user.get("role", ""),
                      stream=f"room:{room_code}",
-                     turn=_clip(body.get("turn"), 40), step=_clip(body.get("step"), 60))
+                     turn=_clip(body.get("turn"), 40), step=_clip(body.get("step"), 60),
+                     parent=parent_evt)
     except Exception as e:
         return JSONResponse({"error": f"记录失败：{e}"}, status_code=500)
-    return {"ok": True, "kind": kind}
+    return {"ok": True, "kind": kind, "event_id": parent_evt or None}
 
 
 @app.get("/api/room/report/{room_code}")
@@ -10475,10 +11536,10 @@ ACTION_STEP_SPECS = {
     ],
     # 开机自启动
     "startup": [
-        # 2026-11-04 修：原命令是「双层 powershell 包装 + Format-Table」，输出无结构且中文变 GBK 乱码，
-        #   解析层拿不到行（rows=0），页面只能糊一坨文本。改成单层 PowerShell + ConvertTo-Json。
-        {"label": "注册表启动项", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$x=Get-CimInstance Win32_StartupCommand|Select-Object Name,Command,Location,User;if($x){$x|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
-        {"label": "启动耗时（BootTime）", "cmd": "$ErrorActionPreference='SilentlyContinue';[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;try{$e=Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Diagnostics-Performance/Operational';Id=100} -MaxEvents 5;if($e){$e|ForEach-Object{$m=$_.Message;$bt='';$mm=[regex]::Match($m,'(?i)(?:BootTime|\u542f\u52a8\u8017\u65f6|Boot Duration)[^0-9]{0,20}(\d{3,7})\s*ms');if($mm.Success){$bt=$mm.Groups[1].Value}else{$mm2=[regex]::Match($m,'(\d{3,7})\s*ms');if($mm2.Success){$bt=$mm2.Groups[1].Value}};[pscustomobject]@{time=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm');bootMs=$bt}}|ConvertTo-Json -Compress -Depth 3}else{'[]'}}catch{[pscustomobject]@{error=$_.FullyQualifiedErrorId;type=$_.Exception.GetType().Name}|ConvertTo-Json -Compress}"},
+        # 2026-11-11（修正）：上一版命令里的 ${h} 插值与反斜杠转义把 PowerShell 解析搞崩了
+        #   （ParserError: InvalidVariableReference）。现改为：显式两条注册表路径、
+        #   带 state（启用/已禁用）、单条结果也强制输出 JSON 数组。
+        {"label": "启动项清单（分类，可禁用）", "cmd": "$ErrorActionPreference='SilentlyContinue'; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8; $out=@(); $sa=@{}; $rp=':\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run'; foreach($h in @('HKCU','HKLM')){ $p=$h + $rp; $k=Get-Item -LiteralPath $p -ErrorAction SilentlyContinue; if($k){ foreach($n in $k.GetValueNames()){ $v=$k.GetValue($n); $st='启用'; if($v -and $v.Length -gt 0 -and $v[0] -eq 3){ $st='已禁用' }; $sa[$h + '|' + $n]=$st; } } } $sys='^(Microsoft|Windows|Intel|NVIDIA|AMD|Realtek|Dell|Lenovo|Synaptics|Conexant|Cypress)$'; Get-CimInstance Win32_StartupCommand | ForEach-Object { $cmd=[string]$_.Command; $v=''; if($cmd -match '\\\\([^\\\\]+)\\\\[^\\\\]+$'){ $v=$Matches[1] }; $loc=[string]$_.Location; $hive=''; if($loc -like 'HKU*'){ $hive='HKCU' } elseif($loc -like 'HKLM*'){ $hive='HKLM' }; $state='启用'; if($hive -ne ''){ $kk=$hive + '|' + [string]$_.Name; if($sa.ContainsKey($kk)){ $state=$sa[$kk] } }; $isSys = (($v -match $sys) -or ($cmd -match '%windir%|%SystemRoot%|\\\\Windows\\\\|system32|SysWOW64')); $out += [pscustomobject]@{ group=$(if($isSys){'Windows 系统'}else{'第三方（可禁用）'}); kind='run'; hive=$hive; name=[string]$_.Name; source=$loc; vendor=$v; state=$state; can_disable=$(if($isSys){'否'}else{'是'}); detail=$cmd }; }; Get-ScheduledTask | Where-Object { $_.Triggers.CimClass.CimClassName -contains 'MSFT_TaskLogonTrigger' } | ForEach-Object { $isMs = ($_.TaskPath -like '\\Microsoft\\*'); $state='启用'; if($_.State -eq 'Disabled'){ $state='已禁用' }; $out += [pscustomobject]@{ group=$(if($isMs){'Windows 计划任务'}else{'第三方计划任务（可禁用）'}); kind='task'; hive=''; name=[string]$_.TaskName; source=[string]$_.TaskPath; vendor=''; state=$state; can_disable=$(if($isMs){'否'}else{'是'}); detail='登录触发' }; }; Get-CimInstance Win32_Service | Where-Object { $_.StartMode -eq 'Auto' } | ForEach-Object { $pp=[string]$_.PathName; $isSys = ($pp -match 'system32|SysWOW64'); $out += [pscustomobject]@{ group=$(if($isSys){'Windows 服务'}else{'第三方服务'}); kind='service'; hive=''; name=[string]$_.Name; source='Auto'; vendor=''; state='启用'; can_disable=$(if($isSys){'否'}else{'需确认'}); detail=$pp }; }; if($out.Count -eq 0){ '[]' } elseif($out.Count -eq 1){ '[' + (ConvertTo-Json -InputObject $out[0] -Compress -Depth 3) + ']' } else { ConvertTo-Json -InputObject @($out) -Compress -Depth 3 }"},
     ],
     # 系统问题（系统信息与激活）
     "system": [
@@ -10542,6 +11603,619 @@ async def action_steps(action_key: str, request: Request):
             "steps": [{"index": i, "label": s["label"]} for i, s in enumerate(spec)]}
 
 
+@app.post("/api/ui/click")
+async def api_ui_click(request: Request):
+    """记录「人点了什么」（2026-11-09）
+    · 人在界面上点预设卡 / 运行计划 / 批量执行 / 日志抓取 → 先落一条 ui.click
+    · 返回事件 id 作为父级：其后自动执行的步骤挂 parent=该 id，轨迹里就能缩进显示
+    · 若该计划是 AI 生成的，传 origin='ai_plan'，则子事件标记为 AI 驱动
+    """
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper().strip()
+    label = str(body.get("label", ""))[:120]
+    kind = str(body.get("kind", "preset_card"))[:32]          # preset_card / plan_run / batch / collect / manual
+    origin = str(body.get("origin", "human"))[:32]            # human / ai_plan
+    action_key = str(body.get("action_key", ""))[:64]
+    tier = str(body.get("tier", ""))[:16]
+    if not room_code or not label:
+        return JSONResponse({"error": "缺少房间码或操作名称"}, status_code=400)
+    if not can_access_room(user, room_code) and (user.get("role") or "") != "admin":
+        return JSONResponse({"error": "无权操作该房间"}, status_code=403)
+    ev_id = record_event("ui.click",
+                         {"label": label, "kind": kind, "origin": origin,
+                          "action_key": action_key, "tier": tier,
+                          "_who": {"by": "human", "user": user["username"], "role": user.get("role", ""), "via": kind}},
+                         room_code=room_code, actor=user["username"], actor_role=user.get("role", ""),
+                         stream=f"room:{room_code}")
+    return {"ok": True, "event_id": ev_id, "room_code": room_code}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ThinkLogParser 投递（2026-11-10，方案 A）
+#   对方文档：POST /thinklog/api/upload_link，body {"data":{...upload_file:[{file_url,file_name}]}}
+#   鉴权：Cookie fastgpt_token = 用对方提供的密钥自签的 JWT（HS256，7 天有效，不涉及任何人工号密码）
+#   对方会主动来拉我们给的 URL；网关 60s 超时，故默认只发 ≤6MB（自动生成 slim 包）
+# ══════════════════════════════════════════════════════════════════════
+
+def _heal_log_binding(room_code: str) -> str:
+    """按"日志包文件名"去 log-analyzer 的 reports/history.json 反查 job_id，并补写 rooms 绑定。
+
+    背景：控制台「上传到 IDG」原来没有写 rooms.log_job_id，导致老房间 ThinkLogParser 投递
+    和 AI 日志工具都报"未绑定"。事件里只有文件名，没有 job_id，所以用文件名反查。
+    """
+    import json as _json
+    conn = _db_connect()
+    try:
+        rows = conn.execute(
+            "SELECT data FROM events WHERE room_code=? AND kind IN "
+            "('artifact.collect.end','artifact.uploaded','log.uploaded') "
+            "ORDER BY ts_srv DESC LIMIT 30", (room_code,)).fetchall()
+    finally:
+        conn.close()
+    names = []
+    for r in rows:
+        try:
+            d = _json.loads(r["data"] or "{}")
+        except Exception:
+            continue
+        for k in ("filename", "name"):
+            v = str(d.get(k) or "").strip()
+            if v and v not in names:
+                names.append(v)
+    if not names:
+        return ""
+    hist_path = LOG_UPLOADS_DIR.parent / "reports" / "history.json"
+    if not hist_path.exists():
+        return ""
+    try:
+        hist = _json.loads(hist_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    if not isinstance(hist, list):
+        return ""
+    # log-analyzer 入库时会把文件名改成 bup_<hash>_<原时间戳>.7z，所以用"文件名主干"做包含匹配
+    for name in names:
+        stem = name.rsplit(".", 1)[0]
+        if len(stem) < 8:
+            continue
+        for h in hist:
+            hf = str(h.get("filename") or "")
+            if stem not in hf and hf.rsplit(".", 1)[0] not in stem:
+                continue
+            jid = str(h.get("job_id") or "").strip()
+            if not jid:
+                continue
+            conn = _db_connect()
+            try:
+                conn.execute("UPDATE rooms SET log_job_id=?, log_job_name=? WHERE room_code=?",
+                             (jid, name, room_code))
+                conn.commit()
+            finally:
+                conn.close()
+            run_logger.info(f"[{room_code}] 日志包绑定自愈：{name} → job={jid}")
+            record_event("log.bound", {"job_id": jid, "source": "heal", "filename": name},
+                         room_code=room_code, actor="system", actor_role="system",
+                         stream=f"room:{room_code}")
+            return jid
+    return ""
+
+
+def _thinklog_pkg(job_id: str, sn: str, max_mb: float = None, model: str = "") -> dict:
+    """准备投递包：整包 ≤THINKLOG_MAX_MB 直接发；否则只挑 System/Application.evtx + 根目录文本重打 zip。
+
+    2026-11-11：文件名按平台惯例带上机型（平台自己上传的是 hash_机型_SN_…），
+    这样 ThinkLogParser 列表里一眼能看出是哪台机器。平台会在前面再加 hash。
+    """
+    import shutil
+    import tempfile
+    import zipfile
+    src = None
+    for cand in LOG_UPLOADS_DIR.glob(f"{job_id}.*"):
+        if cand.is_file():
+            src = cand
+            break
+    if not src:
+        return {"ok": False, "error": f"找不到日志包文件（{LOG_UPLOADS_DIR}/{job_id}.*）"}
+    limit = int((THINKLOG_MAX_MB if max_mb is None else max_mb) * 1024 * 1024)
+    size = src.stat().st_size
+    safe = (sn or "LOG").replace("/", "-")[:20]
+    _m = re.sub(r"[^A-Za-z0-9.\-]+", "", str(model or ""))[:28]
+    stem = f"{_m}_{safe}_{job_id}" if _m else f"{safe}_{job_id}"
+    if size <= limit:
+        return {"ok": True, "path": src, "name": f"{stem}{src.suffix}", "mode": "full",
+                "size_mb": round(size / 1048576, 2)}
+    # 超限 → slim：解包挑关键 EVTX + 文本
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="tlslim_"))
+    try:
+        r = subprocess.run(["7z", "x", "-y", f"-o{tmp}", str(src)],
+                           capture_output=True, timeout=600)
+        if r.returncode != 0:
+            return {"ok": False, "error": f"解包失败：{(r.stderr or r.stdout)[:160]}"}
+        picks = []
+        evtx_dir = None
+        for d in tmp.rglob("oslog"):
+            if d.is_dir():
+                evtx_dir = d
+                break
+        if evtx_dir:
+            for nm in ("System.evtx", "Application.evtx"):
+                f = evtx_dir / nm
+                if f.exists():
+                    picks.append(f)
+        for f in sorted(tmp.rglob("*.txt"))[:6]:
+            picks.append(f)
+        if not picks:
+            return {"ok": False, "error": "包内没有可投递的 EVTX/文本（请人工上传完整包）"}
+        for drop in (None, 1):     # 第一次带 Application；仍超限就去掉它
+            use = picks if drop is None else [p for p in picks if p.name != "Application.evtx"]
+            out = tmp / f"{stem}_slim.zip"
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+                for f in use:
+                    arc = "tslog/" + (f.name if f.parent.name == "oslog" else f.name)
+                    z.write(f, arcname=arc)
+            if out.stat().st_size <= limit:
+                cur = out
+                break
+            cur = out
+        if cur.stat().st_size > limit:
+            return {"ok": False, "error": f"slim 包仍有 {round(cur.stat().st_size/1048576,2)}MB，超过 {THINKLOG_MAX_MB}MB 上限，请人工上传"}
+        keep = THINKLOG_DIR / ("slim_src_" + job_id + ".zip")
+        keep.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cur, keep)
+        return {"ok": True, "path": keep, "name": f"{safe}_{job_id}_slim.zip", "mode": "slim",
+                "size_mb": round(keep.stat().st_size / 1048576, 2)}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+
+# ══════════════════════════════════════════════════════════════════════
+# ThinkLogParser 投递（2026-11-11 改造：改用 TLP CLI 0.4.0 直传）
+#   取代原来的「自签 JWT + /api/upload_link + /api/info + /api/query 轮询」三段式。
+#   变化：
+#     · 单包上限从 6MB 安全线提到 2 GiB（客户机/服务器出口带宽仍是物理瓶颈）
+#     · 8 MiB 分块 + 服务端持久偏移，断网重跑同 request_id 即续传
+#     · 幂等：同账号 + 同文件 + 同 request_id 返回原 logid，不重复入库
+#     · 平台侧日志类型自动识别（我们的 tslog 7z → IDG）
+#   注意：授权是账号级（当前 A05375，三个月上限），过期需人重新 login。
+# ══════════════════════════════════════════════════════════════════════
+
+TLP_BIN = os.getenv("TLP_BIN", str(pathlib.Path.home() / ".local" / "bin" / "tlp"))
+TLP_CONFIG = os.getenv("TLP_CONFIG", "")
+TLP_TIMEOUT = float(os.getenv("TLP_TIMEOUT", "1800"))
+TLP_SEARCH_BASE = os.getenv("TLP_SEARCH_BASE", "https://agent-dev.cube.lenovo.com/thinklog/search")
+
+# ══════════════════════════════════════════════════════════════════════
+# IDG 包事件超限 → 自动裁剪重打（2026-11-11）
+#   现象：平台对单包 IDG 事件缓存有上限（50 万条 / 1 GiB / 单条 1 MiB），
+#        联想官方 tslog 采集器会导出 400+ 个渠道，实测一台普通台式机就是 50.7 万条，
+#        整包被拒（"IDG 事件缓存超限…请按设备或时间拆包"）。
+#   做法：只在这种错误出现时才动手 —— 解包 → 逐文件数事件 → 按「噪音渠道优先」裁剪到 48 万条以下
+#        → 用 7z 重打（保留 tslog/ 目录结构，平台仍识别为 IDG）→ 重传一次。
+#   永不裁剪：System / Application / Security / HardwareEvents / Setup / Kernel-PnP / Storport，
+#            以及包内所有非 EVTX 文件（txt、dump、配置快照）。
+# ══════════════════════════════════════════════════════════════════════
+
+# 2026-11-11：tempfile / shutil 在 server.py 里原本只有函数内局部 import，
+#   这里补上模块级别名，避免 IDG 裁剪时 NameError（第一次实测就踩到了）
+import tempfile
+import shutil
+
+IDG_EVENT_LIMIT = int(os.getenv("IDG_EVENT_LIMIT", "500000"))
+IDG_EVENT_TARGET = int(os.getenv("IDG_EVENT_TARGET", "470000"))
+# 上传前预扫（2026-11-11 主人定）：先数事件，超阈值先裁再传，省掉一次必然失败的上传
+IDG_PRESCAN = os.getenv("IDG_PRESCAN", "1").strip() not in ("0", "false", "False", "")
+# 包大于此值不做预扫（解包可能吃掉大量磁盘/时间），退回"上传失败后再裁"的兜底路径
+IDG_PRESCAN_MAX_MB = float(os.getenv("IDG_PRESCAN_MAX_MB", "400"))
+IDG_PY = os.getenv("IDG_PY", "/home/ubuntu/projects/clouddiag-suite/log-analyzer/venv/bin/python")
+
+# 优先裁剪的噪音渠道（高频运维日志，事件量大、排障价值低）
+IDG_NOISE = (
+    "hyper-v-vmswitch", "hyper-v-compute", "hyper-v-worker",
+    "store%4operational", "ntfs%4operational", "staterepository",
+    "smbclient", "smbserver", "winnat", "winhttp",
+    "powershell%4operational", "windows powershell",
+    "windows defender", "appxdeployment", "appmodel",
+    "bits-client", "diagnosis-scripted", "taskscheduler",
+    "kernel-event-tracing", "winsock", "tcpip", "dhcp",
+)
+# 永不裁剪的关键渠道
+IDG_KEEP = (
+    "system.evtx", "application.evtx", "security.evtx", "hardwareevents.evtx",
+    "setup.evtx", "kernel-pnp", "kernel-pnp%4deviceconfiguration",
+    "storport", "disk.evtx", "volmgr", "ntfs.evtx", "whea",
+)
+
+_IDG_COUNT_SCRIPT = r"""
+import sys, os, json
+from Evtx.Evtx import Evtx
+root = sys.argv[1]
+out = {}
+for dirpath, _dirs, files in os.walk(root):
+    for f in files:
+        if not f.lower().endswith(".evtx"):
+            continue
+        p = os.path.join(dirpath, f)
+        rel = os.path.relpath(p, root)
+        n = 0
+        try:
+            with Evtx(p) as log:
+                for _ in log.records():
+                    n += 1
+        except Exception:
+            n = -1
+        out[rel] = [n, os.path.getsize(p)]
+print(json.dumps(out))
+"""
+
+
+def _idg_count_events(root_dir: str) -> dict:
+    """统计目录下每个 EVTX 的事件条数（返回 {相对路径: [条数, 字节数]}）。"""
+    script = pathlib.Path(tempfile.gettempdir()) / "idg_count_evtx.py"
+    script.write_text(_IDG_COUNT_SCRIPT, encoding="utf-8")
+    py = IDG_PY if pathlib.Path(IDG_PY).exists() else "python3"
+    try:
+        r = subprocess.run([py, str(script), root_dir], capture_output=True, text=True, timeout=600)
+        if r.returncode != 0 or not r.stdout.strip():
+            run_logger.warning(f"IDG 事件统计失败：{(r.stderr or '')[:200]}")
+            return {}
+        return json.loads(r.stdout)
+    except Exception as e:
+        run_logger.warning(f"IDG 事件统计异常：{e}")
+        return {}
+
+
+def _idg_trim(pkg_path, target: int = None) -> dict:
+    """把 IDG 包裁剪到 target 条事件以内，返回 {ok, path, dropped[], before, after, note}。"""
+    target = target or IDG_EVENT_TARGET
+    src = pathlib.Path(pkg_path)
+    if not src.exists():
+        return {"ok": False, "note": f"包不存在：{src}"}
+    if IDG_PRESCAN_MAX_MB and src.stat().st_size / 1048576 > IDG_PRESCAN_MAX_MB:
+        return {"ok": True, "path": str(src), "dropped": [], "before": 0, "after": 0,
+                "note": f"包超过 {int(IDG_PRESCAN_MAX_MB)}MB，跳过预扫"}
+    # 快速判断是否 IDG 结构（含 tslog/ 或 oslog/），非 IDG 包不必解包数事件
+    try:
+        _l = subprocess.run(["7z", "l", str(src)], capture_output=True, text=True, timeout=180)
+        _low = (_l.stdout or "").lower()
+        if "oslog" not in _low and "tslog" not in _low:
+            return {"ok": True, "path": str(src), "dropped": [], "before": 0, "after": 0,
+                    "note": "非 IDG 结构，跳过事件预扫"}
+    except Exception:
+        pass
+    work = pathlib.Path(tempfile.mkdtemp(prefix="idgtrim_"))
+    try:
+        r = subprocess.run(["7z", "x", "-y", f"-o{work}", str(src)],
+                           capture_output=True, text=True, timeout=900)
+        if r.returncode != 0:
+            return {"ok": False, "note": f"解包失败：{(r.stderr or r.stdout)[:160]}"}
+        counts = _idg_count_events(str(work))
+        if not counts:
+            return {"ok": False, "note": "事件统计失败（缺 python-evtx 或包内无 EVTX）"}
+        total = sum(v[0] for v in counts.values() if v[0] > 0)
+        if total <= target:
+            return {"ok": True, "path": str(src), "dropped": [], "before": total, "after": total, "note": "未超限"}
+
+        def _is_noise(rel: str) -> bool:
+            low = rel.lower()
+            return any(k in low for k in IDG_NOISE)
+
+        def _is_keep(rel: str) -> bool:
+            low = rel.lower()
+            return any(k in low for k in IDG_KEEP)
+
+        # 候选：噪音渠道优先（事件多的先砍），其次其它非关键渠道；关键渠道一律不动
+        cand = [(rel, n) for rel, (n, _sz) in counts.items() if n > 0 and not _is_keep(rel)]
+        cand.sort(key=lambda x: (0 if _is_noise(x[0]) else 1, -x[1]))
+        cur, dropped = total, []
+        for rel, n in cand:
+            if cur <= target:
+                break
+            fp = work / rel
+            try:
+                fp.unlink(missing_ok=True)
+                cur -= n
+                dropped.append({"file": rel, "events": n})
+            except Exception:
+                continue
+        if cur > target:
+            return {"ok": False, "note": f"仅裁噪音渠道后仍有 {cur} 条（关键渠道占比过高），需按设备/时间拆包",
+                    "before": total, "after": cur}
+
+        out = pathlib.Path(tempfile.gettempdir()) / (src.stem + "_trim.7z")
+        # 保留 tslog/ 目录结构重打（平台按目录结构识别 IDG 类型）
+        r2 = subprocess.run(["7z", "a", "-t7z", "-mx=5", str(out), "."],
+                            cwd=str(work), capture_output=True, text=True, timeout=900)
+        if r2.returncode != 0 or not out.exists():
+            return {"ok": False, "note": f"重打包失败：{(r2.stderr or r2.stdout)[:160]}"}
+        return {"ok": True, "path": str(out), "dropped": dropped,
+                "before": total, "after": cur,
+                "note": f"裁掉 {len(dropped)} 个渠道，事件 {total} → {cur} 条"}
+    except Exception as e:
+        return {"ok": False, "note": f"{type(e).__name__}: {e}"[:200]}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+# 房间级投递状态（进程内；页面轮询读取）
+_TLP_STATE: dict = {}
+_TLP_LOCK = asyncio.Lock()
+
+
+def _tlp_request_id(room_code: str) -> str:
+    """请求编号：8–80 位字母/数字/短横线/下划线。带房间码与时间戳，便于人工追溯与续传。"""
+    return ("cds-" + (room_code or "room").lower() + "-" + datetime.now().strftime("%Y%m%d%H%M%S"))[:80]
+
+
+def _json_tail(txt: str):
+    """从 CLI 输出里取最后一个 JSON 对象（stdout 理论上是纯 JSON，容错处理登录提示等噪声）。"""
+    txt = (txt or "").strip()
+    if not txt:
+        return None
+    try:
+        return json.loads(txt)
+    except Exception:
+        pass
+    depth, start = 0, -1
+    best = None
+    for i, ch in enumerate(txt):
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start >= 0:
+                try:
+                    best = json.loads(txt[start:i + 1])
+                except Exception:
+                    pass
+    return best
+
+
+async def _tlp_upload(path, request_id: str) -> dict:
+    """调用 tlp logs upload。返回 {ok, logid, log_type, name} 或 {ok:False, error}。"""
+    if not pathlib.Path(TLP_BIN).exists():
+        return {"ok": False, "error": f"未找到 TLP CLI（{TLP_BIN}），请先安装 tlp"}
+    cmd = [TLP_BIN, "logs", "upload", str(path), "--request-id", request_id]
+    if TLP_CONFIG:
+        cmd += ["--config", TLP_CONFIG]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    except Exception as e:
+        return {"ok": False, "error": f"启动 tlp 失败：{type(e).__name__}: {e}"[:300]}
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=TLP_TIMEOUT)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return {"ok": False,
+                "error": f"上传超时（>{int(TLP_TIMEOUT)} 秒）。可用同一 request_id 重跑续传：{request_id}"}
+    txt = (out or b"").decode("utf-8", "ignore")
+    err_txt = (err or b"").decode("utf-8", "ignore")
+    js = _json_tail(txt) or {}
+    if js.get("status") == "succeeded" and js.get("logid"):
+        return {"ok": True, "logid": str(js.get("logid")), "log_type": str(js.get("log_type") or ""),
+                "name": str(js.get("name") or ""), "request_id": request_id}
+    msg = (js.get("error") or "").strip() or (err_txt.strip().splitlines()[-1] if err_txt.strip() else "") \
+        or (txt.strip()[:200] if txt.strip() else f"tlp 退出码 {proc.returncode}")
+    if js.get("status"):
+        msg = f"状态 {js.get('status')}：{msg}" if msg else f"状态 {js.get('status')}"
+    return {"ok": False, "error": msg[:300], "request_id": request_id}
+
+
+async def _tlp_upload_status(request_id: str) -> dict:
+    """查询 request_id 的结果（用于超时/断网后确认是否已入库）。"""
+    if not pathlib.Path(TLP_BIN).exists():
+        return {"ok": False, "error": "未找到 TLP CLI"}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            TLP_BIN, "logs", "upload-status", request_id,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:200]}
+    return {"ok": True, "raw": _json_tail((out or b"").decode("utf-8", "ignore"))}
+
+
+def _tlp_state_put(room_code: str, **kw):
+    st = _TLP_STATE.setdefault(room_code, {})
+    st.update(kw)
+
+
+async def _tlp_deliver(room_code: str, path, original, request_id: str, row, user) -> None:
+    """后台任务：上传到 ThinkLogParser 并落库/记轨迹。"""
+    began = time.time()
+    _tlp_state_put(room_code, stage="uploading", request_id=request_id,
+                   name=pathlib.Path(path).name, started=began, error="")
+    # ── 上传前预扫（方案 B）：先数事件，超阈值先裁再传，避免一次必然失败的上传 ──
+    up_path = path
+    if IDG_PRESCAN:
+        _tlp_state_put(room_code, stage="uploading", note="正在检查事件条数…", error="")
+        try:
+            _pre = await asyncio.get_event_loop().run_in_executor(None, lambda: _idg_trim(path))
+            if _pre.get("ok") and _pre.get("path") and str(_pre["path"]) != str(path):
+                _tlp_state_put(room_code, trimmed={"before": _pre.get("before"),
+                                                   "after": _pre.get("after"),
+                                                   "dropped": [d["file"] for d in (_pre.get("dropped") or [])][:20],
+                                                   "note": _pre.get("note"), "prechecked": True})
+                up_path = _pre["path"]
+            elif _pre.get("ok"):
+                _tlp_state_put(room_code, note="")
+        except Exception as e:
+            run_logger.warning(f"[{room_code}] IDG 预扫异常：{e}")
+    _tlp_state_put(room_code, note="")     # 预扫结束，进入实际上传
+    res = await _tlp_upload(up_path, request_id)
+    if up_path != path:
+        try:
+            pathlib.Path(up_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+    # 2026-11-11：兜底 —— 预扫没拦住（或跳过预扫）时，命中超限仍自动裁剪重传一次
+    if not res.get("ok") and "缓存超限" in str(res.get("error") or ""):
+        _tlp_state_put(room_code, stage="uploading", note="平台事件超限，正在按渠道裁剪后重传…", error="")
+        try:
+            trim = await asyncio.get_event_loop().run_in_executor(None, lambda: _idg_trim(path))
+            if trim.get("ok") and str(trim.get("path")) != str(path):
+                _tlp_state_put(room_code, trimmed={"before": trim.get("before"),
+                                                   "after": trim.get("after"),
+                                                   "dropped": [d["file"] for d in (trim.get("dropped") or [])][:20],
+                                                   "note": trim.get("note")})
+                res2 = await _tlp_upload(trim["path"], (request_id + "-t")[:80])
+                try:
+                    pathlib.Path(trim["path"]).unlink(missing_ok=True)
+                except Exception:
+                    pass
+                res = res2
+            elif trim.get("ok"):
+                pass
+            else:
+                res = {"ok": False, "error": (res.get("error") or "") + "｜自动裁剪失败：" + str(trim.get("note"))[:160]}
+        except Exception as e:
+            res = {"ok": False, "error": (res.get("error") or "") + f"｜自动裁剪异常：{type(e).__name__}: {e}"[:160]}
+    # 清理临时硬链接（不是原始包时）
+    if str(path) != str(original):
+        try:
+            pathlib.Path(path).unlink(missing_ok=True)
+        except Exception:
+            pass
+    elapsed = round(time.time() - began, 1)
+    if not res.get("ok"):
+        err = res.get("error") or "上传失败"
+        _tlp_state_put(room_code, stage="failed", error=err, seconds=elapsed)
+        try:
+            record_event("thinklog.sent",
+                         {"ok": False, "stage": "upload", "note": err[:160], "seconds": elapsed,
+                          "request_id": request_id, "via": "tlp"},
+                         room_code=room_code, actor=user.get("username", ""),
+                         actor_role=user.get("role", ""), stream=f"room:{room_code}")
+        except Exception:
+            pass
+        return
+    logid = res.get("logid") or ""
+    log_type = res.get("log_type") or ""
+    view_url = (THINKLOG_VIEW + logid) if logid else ""
+    conn = _db_connect()
+    try:
+        conn.execute("UPDATE rooms SET thinklog_log_id=?, thinklog_url=?, thinklog_at=? WHERE room_code=?",
+                     (logid, view_url, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), room_code))
+        conn.commit()
+    finally:
+        conn.close()
+    _tlp_state_put(room_code, stage="done", log_id=logid, url=view_url, log_type=log_type,
+                   seconds=elapsed, request_id=request_id, search_base=TLP_SEARCH_BASE, error="")
+    try:
+        record_event("thinklog.sent",
+                     {"ok": True, "log_id": logid, "log_type": log_type, "seconds": elapsed,
+                      "request_id": request_id, "via": "tlp", "sn": row["sn"] or "",
+                      "note": ""},
+                     room_code=room_code, actor=user.get("username", ""),
+                     actor_role=user.get("role", ""), stream=f"room:{room_code}")
+    except Exception:
+        pass
+
+
+@app.get("/api/thinklog/state")
+async def thinklog_state(request: Request):
+    """查询本房间最近一次 ThinkLogParser 投递状态（页面轮询用）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    room_code = str(request.query_params.get("room_code", "")).upper().strip()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    st = dict(_TLP_STATE.get(room_code) or {})
+    if st.get("started") and st.get("stage") == "uploading":
+        st["elapsed"] = round(time.time() - float(st["started"]), 1)
+    if not st:
+        # 进程重启后回落到数据库里上次成功的记录
+        conn = _db_connect()
+        try:
+            r = conn.execute("SELECT thinklog_log_id, thinklog_url, thinklog_at FROM rooms WHERE room_code=?",
+                             (room_code,)).fetchone()
+        finally:
+            conn.close()
+        if r and r["thinklog_log_id"]:
+            st = {"stage": "done", "log_id": r["thinklog_log_id"], "url": r["thinklog_url"] or "",
+                  "finished_at": r["thinklog_at"] or "", "restored": True}
+    return {"ok": True, "state": st, "search_base": TLP_SEARCH_BASE}
+
+
+@app.post("/api/thinklog/send")
+async def thinklog_send(request: Request):
+    """把本房间日志包投递到 ThinkLogParser（TLP CLI 直传，异步执行，页面轮询 /api/thinklog/state）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if not THINKLOG_ENABLE:
+        return JSONResponse({"error": "ThinkLogParser 投递未启用（THINKLOG_ENABLE=0）"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper().strip()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    if not can_access_room(user, room_code) and (user.get("role") or "") != "admin":
+        return JSONResponse({"error": "无权操作该房间"}, status_code=403)
+    cur = _TLP_STATE.get(room_code) or {}
+    if cur.get("stage") == "uploading":
+        return JSONResponse({"ok": True, "async": True, "stage": "uploading",
+                             "request_id": cur.get("request_id"), "note": "已有投递在进行中"},
+                            status_code=202)
+    conn = _db_connect()
+    try:
+        row = conn.execute("SELECT sn, machine_model, mtm, ticket_no, log_job_id, log_job_name "
+                           "FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return JSONResponse({"error": "房间不存在"}, status_code=404)
+    job_id = (row["log_job_id"] or "").strip()
+    if not job_id:
+        try:
+            job_id = _heal_log_binding(room_code) or ""
+        except Exception as e:
+            run_logger.warning(f"[{room_code}] 日志包绑定自愈失败：{e}")
+    if not job_id:
+        return JSONResponse({"error": "本房间还没有绑定日志包，请先采集并上传"}, status_code=400)
+
+    pkg = _thinklog_pkg(job_id, row["sn"] or "", model=row["machine_model"] or "")
+    if not pkg.get("ok"):
+        return JSONResponse({"error": pkg.get("error") or "准备投递包失败"}, status_code=400)
+
+    src = pathlib.Path(pkg["path"])
+    dest = src
+    # 平台按真实文件名入库，为了列表可读性做一个「同盘硬链接」改名（零拷贝、不占双份空间）
+    try:
+        THINKLOG_DIR.mkdir(parents=True, exist_ok=True)
+        named = THINKLOG_DIR / pkg["name"]
+        if named.exists() and named.stat().st_ino != src.stat().st_ino:
+            named.unlink()
+        if not named.exists():
+            os.link(src, named)     # 硬链接；跨盘失败时退回复制路径（下面 except 处理）
+        dest = named
+    except Exception:
+        dest = src
+
+    request_id = _tlp_request_id(room_code)
+    _tlp_state_put(room_code, stage="uploading", request_id=request_id, name=dest.name,
+                   size_mb=pkg.get("size_mb"), started=time.time(), error="",
+                   search_base=TLP_SEARCH_BASE, user=user.get("username", ""))
+    asyncio.create_task(_tlp_deliver(room_code, dest, src, request_id, row, user))
+    return JSONResponse({"ok": True, "async": True, "stage": "uploading", "request_id": request_id,
+                         "name": dest.name, "size_mb": pkg.get("size_mb"),
+                         "search_base": TLP_SEARCH_BASE}, status_code=202)
+
 @app.post("/api/action/step")
 async def action_step(request: Request):
     """执行作业项的**单个步骤**（只读），返回该步结果。前端逐步调用即可得到真实进度。"""
@@ -10575,11 +12249,29 @@ async def action_step(request: Request):
 
     step = spec[idx]
     began = time.time()
-    _eu, _er = _ev_actor(request)
-    _turn_ev = record_event("diag.step.start",
-                            {"action_key": action_key, "step_index": idx, "label": step["label"]},
+    # 2026-11-09：区分「人点的」与「由该点击自动跑的」
+    #   parent_evt = ui.click 事件 id → 该步骤挂在其下（轨迹缩进）
+    #   origin = ai_plan 表示这份计划是 AI 生成的（人只是点了执行）
+    parent_evt = str(body.get("parent_evt", "") or "")
+    origin = str(body.get("origin", "") or "")
+    _eu, _er = _ev_actor(request, room_code)
+    _w = _trig_get(room_code)
+    _step_data = {"action_key": action_key, "step_index": idx, "label": step["label"]}
+    _who = {k: _w.get(k) for k in ("by", "user", "role", "via", "turn") if _w.get(k)}
+    if origin == "ai_plan":
+        _who = {"by": "ai", "user": "ai", "role": "assistant", "via": "ai_plan",
+                "executed_by": _eu}
+        _eu, _er = "ai", "assistant"
+    elif not _who:
+        _who = {"by": "human", "user": _eu, "role": _er, "via": "preset_card"}
+    if parent_evt:
+        _who["parent_click"] = parent_evt
+    _step_data["_who"] = _who
+    _turn_ev = record_event("diag.step.start", _step_data,
                             room_code=room_code, actor=_eu, actor_role=_er,
-                            turn=f"{action_key}", step=f"{action_key}#{idx}")
+                            turn=(_w.get("turn") or f"{action_key}"), step=f"{action_key}#{idx}",
+                            parent=parent_evt)
+    _STEP_EV[room_code] = _turn_ev or ""   # 本步骤内下发的命令/输出都挂在这一步下
     try:
         out = await asyncio.wait_for(
             execute_bridge_command(room, "RunCommand",
@@ -10618,7 +12310,7 @@ async def action_step(request: Request):
                 break
 
     record_event("diag.step.end",
-                 {"action_key": action_key, "step_index": idx, "label": step["label"],
+                 {**_step_data, "action_key": action_key, "step_index": idx, "label": step["label"],
                   "ok": ok, "ms": round((time.time() - began) * 1000),
                   "rows": _st.get("count", 0), "note": (_st.get("note") or "")[:120],
                   "output_chars": len(text), "preview": text[:600], "error": err[:200],
@@ -10626,7 +12318,9 @@ async def action_step(request: Request):
                   "fields": _st.get("fields") or [],
                   "data_rows": (_st.get("rows") or [])[:50]},
                  room_code=room_code, actor=_eu, actor_role=_er,
-                 turn=f"{action_key}", step=f"{action_key}#{idx}", parent=_turn_ev)
+                 turn=f"{action_key}", step=f"{action_key}#{idx}",
+                 # 与「开始检查」同级：都挂在触发本次执行的那个点击下（2026-11-09）
+                 parent=(parent_evt or _turn_ev))
     save_message(room_code, "tool", f"[步骤 {idx + 1}] {step['label']}\n{text[:800]}", f"step:{action_key}", 1)
     run_logger.info(f"[{room_code}] 步骤执行 {action_key}#{idx + 1} {step['label']} ok={ok} "
                     f"{round((time.time() - began) * 1000)}ms")
@@ -10875,6 +12569,14 @@ async def ws_browser(websocket: WebSocket, room_code: str):
         return
     # 滑动续期（与 _require_user 一致：活跃连接不被打断）
     _ws_sess["exp"] = time.time() + USER_SESSION_TTL
+
+    # 2026-11-06（审查 P1）：此前只校验登录，任何账号拿到房间码就能接管 browser_ws
+    if not can_access_room({"username": _ws_sess.get("username", ""), "role": _ws_sess.get("role", "")},
+                           room_code.upper()):
+        await websocket.send_json({"type": "error", "content": "无权接入该房间（你不是该房间的工程师，也未被升级/邀请）"})
+        await websocket.close(code=4403)
+        run_logger.warning(f"[browser] rejected unauthorized ws to room {room_code} by {_ws_sess.get('username')}")
+        return
 
     room = rooms.get(room_code)
     if not room:
@@ -11367,6 +13069,897 @@ async def ws_bridge(websocket: WebSocket, room_code: str):
                 })
             except Exception:
                 pass
+        # 2026-11-10（B 方案配套）：桥接器掉线时，如果浏览器也不在，重新起一轮
+        # 闲置计时——否则"桥接器在线时保留房间"的循环要等满一个周期才复查，
+        # 房间会白挂很久。
+        try:
+            if room.browser_ws is None:
+                if getattr(room, "idle_task", None):
+                    room.idle_task.cancel()
+                room.idle_task = asyncio.create_task(mark_idle_after(room_code, room))
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 驱动版本对账（2026-11-11 · A 期：只读，不装不卸）
+#   一次调用完成：读本机已装驱动 → 拉官网当前系统清单 → 逐项比对版本 → 给结论
+#   判定口径（主人 2026-11-11 确认）：
+#     · 落后且非定制件 → 建议升级
+#     · 本机版本更高 / 定制件（厂商不一致）→ 只展示，不推荐升级
+#     · 版本串无法比较 → 标「无法比较（人工确认）」，不猜
+#   匹配策略：官网不给硬件 ID，只能 三级降级 —— 型号关键词 → 设备类映射 → 无法比较
+# ══════════════════════════════════════════════════════════════════════
+
+DRIVERS_RECON_CMD = (
+    "Get-CimInstance Win32_PnPSignedDriver -ErrorAction SilentlyContinue | "
+    "Where-Object { $_.DeviceName } | Select-Object -First 1500 | "
+    "ForEach-Object { \"$($_.DeviceName)|$($_.Manufacturer)|$($_.DriverVersion)|$($_.DeviceClass)|$($_.InfName)\" }"
+)
+
+# 官网驱动名/类别 → 本机 DeviceClass + 关键词（可人工校正的映射表）
+_DRV_CLASS_MAP = [
+    (("显卡", "显示适配器", "图形", "Graphics"), ("Display",), ("nvidia", "intel", "amd", "radeon", "graphics", "显卡")),
+    (("无线网卡", "无线", "Wireless", "Wi-Fi"), ("Net", "Network"), ("wireless", "wifi", "wi-fi", "ax2", "ax1", "无线")),
+    (("蓝牙", "Bluetooth"), ("Bluetooth",), ("bluetooth", "蓝牙")),
+    (("网卡", "以太网", "有线", "Ethernet", "LAN"), ("Net", "Network"), ("ethernet", "i219", "i225", "rtl8", "killer", "网卡")),
+    (("声卡", "音频", "Audio"), ("Media", "Audio", "SOUND"), ("audio", "realtek", "sound", "conexant", "声")),
+    (("Serial IO", "Serial-IO"), ("System", "Ports"), ("serial io",)),
+    (("芯片组", "Chipset"), ("System",), ("chipset", "芯片组")),
+    (("RSTe", "RST", "RAID", "Virtual RAID", "存储"), ("SCSIAdapter", "HDC", "StorageVolume", "DiskDrive"), ("raid", "rst", "ahci", "nvme", "storage")),
+    (("电源管理", "电源", "Smart Standby", "散热", "Thermal"), ("System", "Battery"), ("power", "thermal", "电源", "standby")),
+    (("Thunderbolt", "雷电"), ("System", "USB"), ("thunderbolt", "雷电")),
+    (("TXT", "SGX", "安全", "Security"), ("System",), ("txt", "sgx", "security", "安全")),
+    (("摄像头", "Camera"), ("Camera", "Image"), ("camera", "摄像头", "webcam")),
+    (("读卡器", "Card Reader"), ("SDHost", "SmartCardReader"), ("card reader", "读卡器")),
+    (("键盘", "Keyboard"), ("HIDClass", "Keyboard"), ("keyboard", "键盘")),
+    (("鼠标", "Mouse", "触控板", "触摸板"), ("HIDClass", "Mouse"), ("mouse", "鼠标", "touchpad")),
+    (("指纹", "Fingerprint"), ("Biometric", "USB"), ("fingerprint", "指纹")),
+    (("显示器", "Monitor"), ("Monitor",), ("monitor", "显示")),
+    (("打印机", "Print"), ("Printer", "USB"), ("print", "打印")),
+]
+
+
+def _drv_ver_tuple(v: str):
+    nums = re.findall(r"\d+", str(v or ""))
+    if not nums:
+        return None
+    return tuple(int(x) for x in nums[:6])
+
+
+_DRV_VER_RE = re.compile(r"^\d+(\.\d+){1,5}$")
+
+
+def _drv_cmp_ver(local: str, official: str):
+    """返回 -1=本机落后 / 0=一致 / 1=本机更新 / None=无法比较
+
+    2026-11-11：真实官网数据里存在两类「假版本号」，必须判无法比较而非硬比：
+      ① 复合描述：Intel Ethernet 的版本字段是
+         "I210/I350-T2/I350-T4:14.1.22.0;X550:4.1.264.0;X710:1.22.89.0;…"（按硬件型号分段）
+      ② 版本体系不同：本机 30.100.2531.31 vs 官网 2000.2023（差 60 多倍，不是同一套编号）
+    """
+    a_s, b_s = str(local or "").strip(), str(official or "").strip()
+    if not _DRV_VER_RE.match(a_s) or not _DRV_VER_RE.match(b_s):
+        return None
+    a = tuple(int(x) for x in a_s.split("."))
+    b = tuple(int(x) for x in b_s.split("."))
+    lo, hi = min(a[0], b[0]), max(a[0], b[0])
+    if lo and hi / lo > 10:
+        return None
+    # 段数不足且前缀相同视为无法比较（如 1.2 vs 1.2.3.4 之外的情况）
+    n = max(len(a), len(b))
+    a2 = a + (0,) * (n - len(a))
+    b2 = b + (0,) * (n - len(b))
+    if a2 == b2:
+        return 0
+    return -1 if a2 < b2 else 1
+
+
+def _drv_name_tokens(name: str):
+    """从官网驱动名里抽型号级关键词（AX201 / I219 / RST 这类），长度≥4 且含数字优先"""
+    toks = re.findall(r"[A-Za-z]{1,6}\d{2,5}[A-Za-z0-9]*", str(name or ""))
+    return [t.lower() for t in sorted(set(toks), key=len, reverse=True)][:4]
+
+
+_DRV_VENDORS = ("amd", "intel", "nvidia", "realtek", "killer", "broadcom", "conexant",
+                "synaptics", "qualcomm", "marvell", "aspeed", "mellanox", "boardcom", "lsi")
+
+
+def _drv_vendor_in(name: str) -> str:
+    low = str(name or "").lower()
+    for v in _DRV_VENDORS:
+        if v in low:
+            return v
+    return ""
+
+
+def _drv_score(official: dict, local: dict) -> int:
+    """官网条目 × 本机驱动 的匹配分（0 = 不匹配）。分数说明见 _drv_reconcile_match。"""
+    name = (str(official.get("name") or "") + " " + str(official.get("category") or "")).lower()
+    lname = str(local.get("name") or "").lower()
+    manu = str(local.get("manufacturer") or "").lower()
+    want = _drv_vendor_in(name)
+    score = 0
+    # ① 型号关键词命中（AX201 / I219 / 940-8i 这类）——最强证据
+    for tok in _drv_name_tokens(name):
+        if tok in lname:
+            score += 100
+            break
+    # ② 设备类命中
+    classes, vendors = (), ()
+    for keys, cls, vds in _DRV_CLASS_MAP:
+        if any(k.lower() in name for k in keys):
+            classes, vendors = cls, vds
+            break
+    if classes and str(local.get("cls", "")) in classes:
+        score += 30
+    # ③ 厂商命中
+    vendor_ok = bool(want) and (want in manu or want in lname)
+    if vendor_ok:
+        score += 40
+    # 官网名里写了明确的厂商，本机厂商对不上 → 除非型号命中，否则不认
+    if want and not vendor_ok and score < 100:
+        return 0
+    return score
+
+
+def _drv_reconcile_match(official_list: list, locals_all: list):
+    """全局贪心匹配：先给所有 (官网, 本机) 组合打分，再从高分往下配，一个本机项只配一次。
+
+    这样比「按官网顺序逐个取第一个候选」准得多——后者会让靠前的官网条目抢走通用设备，
+    出现「Aspeed 显卡驱动」配上「NVIDIA 显卡」这类错配。
+    """
+    pairs = []
+    for oi, o in enumerate(official_list):
+        for li, r in enumerate(locals_all):
+            sc = _drv_score(o, r)
+            if sc > 0:
+                pairs.append((sc, oi, li))
+    pairs.sort(key=lambda x: (-x[0], x[1], x[2]))
+    used_o, used_l, result = set(), set(), {}
+    for sc, oi, li in pairs:
+        if oi in used_o or li in used_l:
+            continue
+        used_o.add(oi)
+        used_l.add(li)
+        result[oi] = (locals_all[li], sc)
+    return result
+
+
+def _drv_parse_local(raw: str) -> list:
+    rows, seen = [], set()
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if "|" not in line:
+            continue
+        parts = line.split("|")
+        while len(parts) < 5:
+            parts.append("")
+        name, manu, ver, cls, inf = [p.strip() for p in parts[:5]]
+        if not name or name.lower().startswith("devicename"):
+            continue
+        key = (name.lower(), ver)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"name": name, "manufacturer": manu, "version": ver, "cls": cls, "inf": inf})
+    return rows
+
+
+@app.post("/api/drivers/reconcile")
+async def drivers_reconcile(request: Request):
+    """一键对账：本机已装驱动 ↔ 官网当前系统版本驱动（只读）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    room_code = str(body.get("room_code", "")).upper().strip()
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，请确认客户机上的 bridge 已上线"}, status_code=409)
+
+    # ── 机型 / 系统 ──
+    sn = mtm = ""
+    try:
+        conn = _db_connect()
+        r0 = conn.execute("SELECT sn, mtm, machine_model, os FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+        conn.close()
+        if r0:
+            sn, mtm = (r0["sn"] or ""), (r0["mtm"] or "")
+    except Exception:
+        pass
+    mach = getattr(room, "machine", {}) or {}
+    # 2026-11-11：官网接口认 SN，不认 MTM（实测 30FNA005CW/20TH0025CD 返回 101404 no data2，
+    #   而 SN GM09NMT9 返回 88 条、R912PSAJ 返回 36 条）→ 优先 SN，再退 MTM。
+    key = str(body.get("search_key") or "").strip() or sn or mtm
+    if not key:
+        return JSONResponse({"error": "房间缺少 MT/SN，无法查询官网驱动"}, status_code=400)
+
+    # 客户机系统族（用于筛官网适用版本）
+    caption = str(mach.get("os_caption") or mach.get("caption") or "")
+    build = str(mach.get("os_build") or mach.get("build") or "")
+    fam = _os_family_from_caption(caption, build)
+    if not fam:
+        osv = ""
+        try:
+            conn = _db_connect()
+            rr = conn.execute("SELECT os FROM rooms WHERE room_code=?", (room_code,)).fetchone()
+            conn.close()
+            osv = (rr["os"] or "").lower() if rr else ""
+        except Exception:
+            pass
+        fam = "Windows 11" if "win" in osv else ""
+
+    # ── ① 本机 ──
+    began = time.time()
+    try:
+        raw_local = await asyncio.wait_for(
+            execute_bridge_command(room, "RunCommand",
+                                   {"command": DRIVERS_RECON_CMD, "timeout": 120, "cwd": ""},
+                                   f"drvrec_{int(time.time())}", tier=1),
+            timeout=150)
+    except Exception as e:
+        return JSONResponse({"error": f"读取本机驱动失败：{type(e).__name__}: {e}"[:300]}, status_code=502)
+    locals_all = _drv_parse_local(str(raw_local or ""))
+
+    # ── ② 官网 ──
+    try:
+        official, os_options = await _fetch_lenovo_drivers(key)
+    except Exception as e:
+        return JSONResponse({"error": f"获取官网驱动清单失败：{e}"[:300]}, status_code=502)
+    official_total = len(official)
+    if fam:
+        official_use = [d for d in official
+                        if (not d.get("os_family")) or (fam in (d.get("os_family") or []))]
+    else:
+        official_use = official
+
+    # 2026-11-11：① 非驱动条目（BIOS/固件/工具/手册/驱动光盘）不参与版本对账
+    #            ② 同一驱动官网常有多个历史版本 → 只留最高版本，避免清单翻倍、匹配打架
+    _NOT_DRIVER = ("bios", "固件", "firmware", "微码", "microcode", "工具", "utility",
+                   "应用", "ui app", "application", "手册", "说明书", "光盘", "诊断",
+                   "驱动安装程序", "readme", "安装程序")
+    _filtered = [d for d in official_use
+                 if not any(k in (str(d.get("name") or "") + str(d.get("category") or "")).lower()
+                            for k in _NOT_DRIVER)]
+    _best = {}
+    for d in _filtered:
+        nm = _norm_driver_name(d.get("name") or "")
+        v = _drv_ver_tuple(d.get("version") or "")
+        old = _best.get(nm)
+        if old is None or (v and (_drv_ver_tuple(old.get("version") or "") or ()) < v):
+            _best[nm] = d
+    official_use = list(_best.values())
+
+    # ── ③ 比对（全局打分贪心，一个本机项只配一次）──
+    matched_map = _drv_reconcile_match(official_use, locals_all)
+    rows = []
+    for idx_o, d in enumerate(official_use):
+        hit = matched_map.get(idx_o)
+        loc, score = (hit[0], hit[1]) if hit else (None, 0)
+        how = ("型号匹配" if score >= 100 else "设备类+厂商" if score >= 60 else "设备类" if score else "")
+        conf = "high" if score >= 100 else ("mid" if score >= 60 else ("low" if score else ""))
+        o_ver = str(d.get("version") or "")
+        l_ver = str(loc.get("version") or "") if loc else ""
+        if not loc:
+            status, note = "missing", "本机未找到对应设备"
+        else:
+            cmpv = _drv_cmp_ver(l_ver, o_ver)
+            if cmpv is None:
+                _why = ("官网版本为多硬件复合描述" if not _DRV_VER_RE.match(str(o_ver or "").strip())
+                        else "版本体系不同")
+                status, note = "unknown", _why + "，需人工确认"
+            elif cmpv == 0:
+                status, note = "same", ""
+            elif cmpv < 0:
+                status, note = "behind", ""
+            else:
+                status, note = "ahead", "本机版本更高（可能为 OEM 定制版）"
+            # 定制件识别：官网名里的厂商与本机制造商不一致
+            manu = str(loc.get("manufacturer") or "").lower()
+            vendors = []
+            for _k, _c, _v in _DRV_CLASS_MAP:
+                if any(k.lower() in (str(d.get('name') or '') + str(d.get('category') or '')).lower() for k in _k):
+                    vendors = _v
+                    break
+            want = _drv_vendor_in(str(d.get("name") or ""))
+            if want and manu and want not in manu and score < 100:
+                note = (note + "；" if note else "") + "厂商不一致，可能是定制件"
+            if status == "behind" and want and manu and want not in manu:
+                # 官网是通用版、本机是 OEM 定制版：不谎报「本机更新」，单列「定制件」不推荐升级
+                status = "custom"
+                note = "本机为定制件（厂商不一致），不参与自动升级建议"
+        rows.append({
+            "official_name": d.get("name") or d.get("name_raw") or "",
+            "category": d.get("category") or "",
+            "official_version": o_ver,
+            "official_date": d.get("date") or "",
+            "official_size": d.get("size") or "",
+            "os_tags": d.get("os_family") or [],
+            "local_name": loc.get("name") if loc else "",
+            "local_manufacturer": loc.get("manufacturer") if loc else "",
+            "local_version": l_ver,
+            "local_inf": loc.get("inf") if loc else "",
+            "match": how,
+            "confidence": conf,
+            "status": status,
+            "note": note if conf != "low" else ((note + "；" if note else "") + "仅按设备类匹配，需人工确认"),
+            # 只有「落后 + 非低置信 + 非定制件」才推荐升级——宁可漏报，不可误报
+            "recommend_upgrade": status == "behind" and conf in ("high", "mid"),
+        })
+
+    order = {"behind": 0, "custom": 1, "unknown": 2, "missing": 3, "ahead": 4, "same": 5}
+    rows.sort(key=lambda x: (order.get(x["status"], 9), x["category"], x["official_name"]))
+    summary = {
+        "official_total": official_total,
+        "official_used": len(official_use),
+        "local_total": len(locals_all),
+        "matched": sum(1 for r in rows if r["status"] in ("behind", "same", "ahead", "unknown")),
+        "behind": sum(1 for r in rows if r["status"] == "behind"),
+        "same": sum(1 for r in rows if r["status"] == "same"),
+        "ahead": sum(1 for r in rows if r["status"] == "ahead"),
+        "unknown": sum(1 for r in rows if r["status"] == "unknown"),
+        "custom": sum(1 for r in rows if r["status"] == "custom"),
+        "low_confidence": sum(1 for r in rows if r.get("confidence") == "low"),
+        "missing": sum(1 for r in rows if r["status"] == "missing"),
+        "recommend": sum(1 for r in rows if r["recommend_upgrade"]),
+        "os_family": fam,
+        "search_key": key,
+        "sn": sn,
+        "seconds": round(time.time() - began, 1),
+    }
+    try:
+        record_event("driver.reconcile",
+                     {"summary": {k: summary[k] for k in ("behind", "same", "ahead", "unknown", "missing", "recommend")},
+                      "_who": {"by": "human", "user": user.get("username") or "", "role": user.get("role") or ""}},
+                     room_code=room_code, actor=user.get("username") or "field",
+                     actor_role=user.get("role") or "field", stream=f"room:{room_code}")
+    except Exception:
+        pass
+    return {"ok": True, "summary": summary, "rows": rows}
+
+# ══════════════════════════════════════════════════════════════════════
+# 启动项启用 / 禁用（2026-11-11 · 主人要求"能主动点禁用"）
+#   做法与任务管理器「启动 → 禁用」等价：
+#     · Run 项 → 写 StartupApproved\Run 的 12 字节状态（不删注册表值，可逆）
+#     · 计划任务 → Disable-ScheduledTask / Enable-ScheduledTask
+#     · 服务 → Set-Service -StartupType（风险高，前端二次确认）
+#   所有动作：服务端白名单命令 + 参数严格校验 + 轨迹留痕，前端不得传任意命令。
+# ══════════════════════════════════════════════════════════════════════
+
+_STARTUP_NAME_RE = re.compile(r"^[A-Za-z0-9 \._\-\{\}\(\)\[\]]{1,120}$")
+_STARTUP_PATH_RE = re.compile(r"^[A-Za-z0-9 \._\-\\\{\}]{1,200}$")
+
+
+@app.post("/api/startup/toggle")
+async def startup_toggle(request: Request):
+    """禁用 / 启用一个启动项（Run 项、计划任务、自动服务）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    if (user.get("role") or "") == "guest":
+        return JSONResponse({"error": "游客无此权限"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    room_code = str(body.get("room_code", "")).upper().strip()
+    kind = str(body.get("kind", "") or "").lower()
+    action = str(body.get("action", "") or "").lower()
+    name = str(body.get("name", "") or "").strip()
+    path = str(body.get("path", "") or "").strip()
+    hive = str(body.get("hive", "") or "").strip().upper()
+
+    if kind not in ("run", "task", "service"):
+        return JSONResponse({"error": "不支持的启动项类型"}, status_code=400)
+    if action not in ("disable", "enable"):
+        return JSONResponse({"error": "动作只能是 disable / enable"}, status_code=400)
+    if not _STARTUP_NAME_RE.match(name or ""):
+        return JSONResponse({"error": "启动项名称含非法字符"}, status_code=400)
+    if kind == "task" and path and not _STARTUP_PATH_RE.match(path):
+        return JSONResponse({"error": "任务路径含非法字符"}, status_code=400)
+    if hive and hive not in ("HKCU", "HKLM"):
+        return JSONResponse({"error": "hive 只能是 HKCU / HKLM"}, status_code=400)
+
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，无法操作客户机"}, status_code=409)
+
+    q = lambda x: "'" + str(x).replace("'", "''") + "'"      # PowerShell 单引号转义
+    dis = (action == "disable")
+    if kind == "run":
+        if not hive:
+            return JSONResponse({"error": "Run 项需要 hive（HKCU/HKLM）"}, status_code=400)
+        # StartupApproved：首字节 03=禁用、02=启用，其余 11 字节清零
+        head = "3" if dis else "2"
+        cmd = ("$ErrorActionPreference='Stop';"
+               f"$p=\"{hive}:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run\";"
+               "if(-not (Test-Path $p)){New-Item -Path $p -Force|Out-Null};"
+               f"$v=[byte[]]({head},0,0,0,0,0,0,0,0,0,0,0);"
+               f"Set-ItemProperty -Path $p -Name {q(name)} -Value $v -Type Binary -Force;"
+               f"$chk=(Get-Item $p).GetValue({q(name)});"
+               "'OK StartupApproved=' + $(if($chk -and $chk[0] -eq 3){'disabled'}else{'enabled'})")
+    elif kind == "task":
+        verb = "Disable-ScheduledTask" if dis else "Enable-ScheduledTask"
+        cmd = ("$ErrorActionPreference='Stop';"
+               f"$t={verb} -TaskName {q(name)}"
+               + (f" -TaskPath {q(path)}" if path else "") + ";"
+               f"$s=(Get-ScheduledTask -TaskName {q(name)}"
+               + (f" -TaskPath {q(path)}" if path else "") + ").State;"
+               "'OK TaskState=' + $s")
+    else:  # service
+        st = "Disabled" if dis else "Automatic"
+        cmd = ("$ErrorActionPreference='Stop';"
+               f"Set-Service -Name {q(name)} -StartupType {st};"
+               f"$s=(Get-Service -Name {q(name)}).Status;"
+               "'OK ServiceSet=" + st + " Status=' + $s")
+
+    began = time.time()
+    try:
+        out = await asyncio.wait_for(
+            execute_bridge_command(room, "Shell", {"command": cmd, "timeout": 120, "cwd": ""},
+                                   f"startup_{action}_{int(began)}", tier=2),
+            timeout=180)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败：{type(e).__name__}: {e}"[:300]}, status_code=502)
+    ok = str(out or "").strip().startswith("OK")
+    try:
+        record_event("startup.toggle",
+                     {"kind": kind, "action": action, "name": name, "path": path, "hive": hive,
+                      "ok": ok, "seconds": round(time.time() - began, 1),
+                      "output": str(out)[:300],
+                      "_who": {"by": "human", "user": user.get("username") or "",
+                               "role": user.get("role") or ""}},
+                     room_code=room_code, actor=user.get("username") or "field",
+                     actor_role=user.get("role") or "field", stream=f"room:{room_code}")
+    except Exception:
+        pass
+    return {"ok": ok, "kind": kind, "action": action, "name": name,
+            "output": str(out)[:600], "seconds": round(time.time() - began, 1)}
+
+# ══════════════════════════════════════════════════════════════════════
+# 快捷诊断流程（2026-11-11 扩到 4 个现象）
+#   现象：bsod 死机蓝屏 / reboot 自动重启 / slow 性能卡顿 / display 花屏闪屏
+#   流程：① 取证（逐项）→ ② AI 硬/软件判定 → ③ 软件修复（分级审批）→
+#         ④ 复测（按验证指标）→ 出口 A 结单 / 出口 B 采集日志 + 诊断报告
+#   约束：修复命令只来自服务端白名单；AI 只能挑 id；成功与否只看验证指标。
+# ══════════════════════════════════════════════════════════════════════
+
+DIAG_FLOW_LABELS = {
+    "bsod": "死机、蓝屏",
+    "reboot": "自动重启 / 自动关机",
+    "slow": "性能卡顿",
+    "display": "花屏 / 黑屏 / 闪屏",
+}
+
+# 复测时用于「是否新增异常」的采集步骤：action_key → 步骤下标
+DIAG_COUNT_STEP = {
+    "bsod": 0,       # 蓝屏记录（事件 1001）
+    "reboot": 0,     # 重启与关机事件（41/6008/1074）
+    "display": 3,    # 显卡超时（TDR 4101）
+    # slow 无「新增异常」口径，只按修复动作自身指标判定
+}
+
+DIAG_FIX_SPECS = {
+    # ── 死机、蓝屏 ──────────────────────────────────────────────
+    "bsod_sfc": {
+        "label": "系统文件完整性与组件存储修复（SFC + DISM）",
+        "level": "L3", "risk": "中", "timeout": 1800, "applies": ["bsod", "slow"],
+        "cmd": ("$ErrorActionPreference='SilentlyContinue';"
+                "$o=@();"
+                "$o += (sfc /scannow | Out-String);"
+                "$o += (DISM /Online /Cleanup-Image /RestoreHealth | Out-String);"
+                "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+                "$o -join \"`n\""),
+        "verify_kind": "sfc", "verify_cmd": "",
+        "verify_desc": "sfc/DISM 未发现完整性冲突，且复采无新增蓝屏记录",
+    },
+    "bsod_dumpset": {
+        "label": "开启内核内存转储并关闭蓝屏后自动重启",
+        "level": "L2", "risk": "低", "timeout": 300, "applies": ["bsod", "reboot"],
+        "cmd": ("wmic recoveros set DebugInfoType=7 | Out-String;"
+                "wmic recoveros set AutoReboot=False | Out-String;"
+                "$r=Get-CimInstance Win32_OSRecoveryConfiguration;"
+                "\"DebugInfoType=\" + $r.DebugInfoType + \"; AutoReboot=\" + $r.AutoReboot"),
+        "verify_kind": "dumpcfg",
+        "verify_cmd": ("$r=Get-CimInstance Win32_OSRecoveryConfiguration;"
+                       "\"DebugInfoType=\" + $r.DebugInfoType + \"; AutoReboot=\" + $r.AutoReboot"),
+        "verify_desc": "转储类型已开启、自动重启已关闭，且复采无新增异常事件",
+    },
+    # ── 自动重启 / 自动关机 ─────────────────────────────────────
+    "reboot_faststartup": {
+        "label": "关闭快速启动与休眠（排除混合关机干扰）",
+        "level": "L2", "risk": "中", "timeout": 300, "applies": ["reboot"],
+        "cmd": ("powercfg /h off | Out-String;"
+                "$v=(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power' "
+                "-Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled;"
+                "\"HiberbootEnabled=\" + $v"),
+        "verify_kind": "hiberboot",
+        "verify_cmd": ("$v=(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power' "
+                       "-Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled;"
+                       "\"HiberbootEnabled=\" + $v"),
+        "verify_desc": "快速启动已关闭（HiberbootEnabled=0），且复采无新增异常关机事件",
+    },
+    # ── 性能卡顿 ────────────────────────────────────────────────
+    "slow_cleanup": {
+        "label": "清理系统临时文件与更新缓存",
+        "level": "L1", "risk": "低", "timeout": 900, "applies": ["slow"],
+        "cmd": ("$ErrorActionPreference='SilentlyContinue';"
+                "$before=(Get-ChildItem $env:TEMP -Recurse -Force | Measure-Object Length -Sum).Sum;"
+                "Remove-Item (Join-Path $env:TEMP '*') -Recurse -Force -ErrorAction SilentlyContinue;"
+                "Remove-Item 'C:\\Windows\\SoftwareDistribution\\Download\\*' -Recurse -Force -ErrorAction SilentlyContinue;"
+                "$after=(Get-ChildItem $env:TEMP -Recurse -Force | Measure-Object Length -Sum).Sum;"
+                "\"TEMP_MB_BEFORE=\" + [math]::Round($before/1MB,1) + \"; TEMP_MB_AFTER=\" + [math]::Round($after/1MB,1)"),
+        "verify_kind": "cleanup",
+        "verify_cmd": ("$s=(Get-ChildItem $env:TEMP -Recurse -Force -ErrorAction SilentlyContinue | "
+                       "Measure-Object Length -Sum).Sum; \"TEMP_MB=\" + [math]::Round($s/1MB,1)"),
+        "verify_desc": "临时文件已释放（TEMP 体积下降）",
+    },
+    # ── 花屏 / 黑屏 / 闪屏 ──────────────────────────────────────
+    "display_tdrdelay": {
+        "label": "延长显卡超时判定时间（TDR）并保留取证",
+        "level": "L2", "risk": "中", "timeout": 300, "applies": ["display"],
+        "cmd": ("reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers\" /v TdrDelay "
+                "/t REG_DWORD /d 10 /f | Out-String;"
+                "$v=(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers' "
+                "-Name TdrDelay -ErrorAction SilentlyContinue).TdrDelay;"
+                "\"TdrDelay=\" + $v"),
+        "verify_kind": "tdr",
+        "verify_cmd": ("$v=(Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers' "
+                       "-Name TdrDelay -ErrorAction SilentlyContinue).TdrDelay; \"TdrDelay=\" + $v"),
+        "verify_desc": "TdrDelay 已写入（=10），且复采无新增 TDR 记录",
+    },
+    "display_reenum": {
+        "label": "重新扫描显示适配器并列出异常设备",
+        "level": "L2", "risk": "低", "timeout": 300, "applies": ["display"],
+        "cmd": ("pnputil /scan-devices | Out-String;"
+                "Get-PnpDevice -Class Display | ForEach-Object { \"显示设备：\" + $_.FriendlyName + \"｜状态：\" + $_.Status }"),
+        "verify_kind": "pnp",
+        "verify_cmd": ("$bad=Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object {$_.Status -ne 'OK'};"
+                       "\"ERROR_DEVICES=\" + (($bad | Measure-Object).Count)"),
+        "verify_desc": "显示类设备状态全部正常（无 Error 设备），且复采无新增 TDR 记录",
+    },
+}
+
+
+def _diag_fix_public(fid: str, spec: dict) -> dict:
+    return {
+        "id": fid, "label": spec.get("label", ""), "level": spec.get("level", ""),
+        "risk": spec.get("risk", ""), "needs_approval": spec.get("level") in ("L2", "L3"),
+        "verify_desc": spec.get("verify_desc", ""),
+    }
+
+
+def _diag_count_records(raw: str) -> int:
+    """粗解析采集结果里的记录条数（JSON 数组 / 行式 JSON）。"""
+    try:
+        txt = (raw or "").strip()
+        if not txt:
+            return 0
+        if txt.startswith("["):
+            data = json.loads(txt)
+            return len(data) if isinstance(data, list) else 0
+        return len(re.findall(r'"time"|"Time"', txt))
+    except Exception:
+        return 0
+
+
+def _diag_num(pattern: str, output: str, default=None):
+    m = re.search(pattern, output or "", re.I)
+    if not m:
+        return default
+    try:
+        return float(m.group(1))
+    except Exception:
+        return default
+
+
+def _diag_judge(kind: str, output: str, context: dict = None) -> bool:
+    low = (output or "").lower()
+    flat = low.replace(" ", "").replace("\n", "")
+    ctx = context or {}
+    if kind == "sfc":
+        return any(k in low for k in (
+            "did not find any integrity violations", "未发现完整性冲突", "未找到任何完整性冲突",
+            "successfully repaired", "已成功修复", "no component store corruption detected"))
+    if kind == "dumpcfg":
+        return ("debuginfotype=7" in flat) and ("autoreboot=false" in flat)
+    if kind == "hiberboot":
+        return "hiberbootenabled=0" in flat
+    if kind == "tdr":
+        return "tdrdelay=10" in flat
+    if kind == "pnp":
+        n = _diag_num(r"error_devices=(\d+)", output, None)
+        return n == 0 if n is not None else ("error_devices=0" in flat)
+    if kind == "cleanup":
+        after = _diag_num(r"temp_mb=([\d.]+)", output, None)
+        if after is None:
+            after = _diag_num(r"temp_mb_after=([\d.]+)", output, None)
+        before = ctx.get("temp_before")
+        if before is not None and after is not None:
+            return after < before or after <= 200      # 体积下降，或已很小
+        return (after is not None and after <= 200) or ("temp_mb_before" in low and "temp_mb_after" in low)
+    return False
+
+
+@app.post("/api/diag_flow/analyze")
+async def diag_flow_analyze(request: Request):
+    """② AI 硬/软件判定：输入本次取证结果，输出结构化判定（禁止自由发挥）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    action_key = str(body.get("action_key", "") or "bsod")
+    evidence = body.get("evidence") or []
+    if not room_code:
+        return JSONResponse({"error": "缺少房间码"}, status_code=400)
+    if action_key not in DIAG_FLOW_LABELS:
+        return JSONResponse({"error": "该现象未接入诊断流程"}, status_code=400)
+
+    catalog = {fid: s for fid, s in DIAG_FIX_SPECS.items() if action_key in (s.get("applies") or [])}
+    cat_lines = "\n".join(
+        f"- {fid}｜{s['label']}｜分级 {s['level']}｜风险 {s['risk']}"
+        for fid, s in catalog.items()) or "（无）"
+
+    ev_lines = []
+    for e in evidence[:12]:
+        ev_lines.append(f"【{e.get('label', '')}】\n{str(e.get('output', ''))[:1200]}")
+    ev_text = "\n\n".join(ev_lines) or "（本次没有采到任何证据）"
+
+    system = (
+        "你是现场工程师的复核搭档，只做证据判读，不编造。\n"
+        "必须只输出一个 JSON 对象，不要 markdown、不要解释文字。字段：\n"
+        '{"kind":"软件|硬件|不确定","conf":0到1的小数,"basis":["依据1","依据2"],'
+        '"conclusion":"一句话结论","fix_ids":["可选的修复id"]}\n'
+        "判定口径（按顺序）：\n"
+        "1) 有硬件告警（WHEA 非空 / 内存诊断报错 / TDR 4101 出现 / SMART 劣化 / 显示设备异常状态）"
+        "→ kind=硬件，conf 0.7~0.95，fix_ids 必须为空数组；\n"
+        "2) 硬件告警全为空、但存在对应异常记录（蓝屏、非正常关机、启动慢、驱动错误等）"
+        "→ kind=软件，conf 0.6~0.78，属排除性判定，conclusion 里必须写明「未见硬件告警，按软件侧优先排查」；\n"
+        "3) 关键采集项失败/为空且互相矛盾（既无记录也无告警）→ kind=不确定，conf ≤0.5，"
+        "fix_ids 只允许取证保底动作（如开启内存转储），不得给修复类动作；\n"
+        "4) basis 每条必须来自【本次取证】的真实内容，禁止引用没采到的项；\n"
+        "5) fix_ids 只能从【可用修复清单】里挑 id，不得自造；\n"
+        "6) 全文用事实语言，不出现「肯定/必须/一定」这类断言。"
+    )
+    user_msg = (
+        f"现象：{DIAG_FLOW_LABELS.get(action_key, action_key)}\n\n"
+        f"【本次取证】\n{ev_text}\n\n【可用修复清单】\n{cat_lines}\n\n"
+        "请给出判定 JSON。"
+    )
+
+    data = None
+    raw = ""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+            resp = await asyncio.wait_for(client.post(
+                f"{OPENAI_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"},
+                json={"model": OPENAI_MODEL, "temperature": 0.1,
+                      "messages": [{"role": "system", "content": system},
+                                   {"role": "user", "content": user_msg}]},
+            ), timeout=130)
+            payload = resp.json()
+            raw = (payload.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
+            m = re.search(r"\{[\s\S]*\}", raw)
+            if m:
+                data = json.loads(m.group(0))
+    except Exception as e:
+        run_logger.warning(f"[{room_code}] diag_flow analyze 失败: {e}")
+
+    if not isinstance(data, dict):
+        return {
+            "ok": False, "kind": "不确定", "conf": 0.0,
+            "basis": ["AI 未按结构化格式返回，判定不可用"],
+            "conclusion": "本次未能给出可用判定，建议补充取证后重试或直接采集日志。",
+            "fixes": [], "degraded": True,
+        }
+
+    kind = str(data.get("kind") or "不确定")
+    if kind not in ("软件", "硬件", "不确定"):
+        kind = "不确定"
+    try:
+        conf = max(0.0, min(1.0, float(data.get("conf") or 0)))
+    except Exception:
+        conf = 0.0
+    basis = [str(x)[:220] for x in (data.get("basis") or []) if str(x).strip()][:5]
+    conclusion = str(data.get("conclusion") or "")[:400]
+    fix_ids = data.get("fix_ids") or []
+    fixes = []
+    if kind == "软件":
+        for fid in fix_ids:
+            spec = catalog.get(str(fid))
+            if spec:
+                fixes.append(_diag_fix_public(str(fid), spec))
+    if not basis:
+        fixes = []
+    # 不确定时只允许「取证保底」类动作（如开启内存转储），不给修复类动作
+    if kind == "不确定":
+        fixes = [f for f in fixes if str(f.get("id", "")).endswith("_dumpset")]
+
+    try:
+        record_event("ai.diag_judge",
+                     {"action_key": action_key, "kind": kind, "conf": conf,
+                      "conclusion": conclusion[:200], "fix_ids": [f["id"] for f in fixes],
+                      "_who": {"by": "ai", "role": "assistant"}},
+                     room_code=room_code, actor="ai", actor_role="assistant",
+                     stream=f"room:{room_code}")
+    except Exception:
+        pass
+
+    return {"ok": True, "kind": kind, "conf": conf, "basis": basis,
+            "conclusion": conclusion, "fixes": fixes}
+
+
+@app.post("/api/diag_flow/fix")
+async def diag_flow_fix(request: Request):
+    """③ 执行白名单修复动作（命令来自服务端，不接受前端/模型传命令）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    fix_id = str(body.get("fix_id", ""))
+    spec = DIAG_FIX_SPECS.get(fix_id)
+    if not spec:
+        return JSONResponse({"error": "未知的修复动作"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，无法执行修复"}, status_code=409)
+
+    began = time.time()
+    try:
+        out = await asyncio.wait_for(execute_bridge_command(
+            room, "Shell",
+            {"command": spec["cmd"], "timeout": spec.get("timeout", 600), "cwd": ""},
+            f"fix_{fix_id}_{int(began)}", tier=2), timeout=float(spec.get("timeout", 600)) + 60)
+    except Exception as e:
+        return JSONResponse({"error": f"执行失败：{e}"}, status_code=500)
+    secs = round(time.time() - began, 1)
+    try:
+        record_event("diag.fix.exec",
+                     {"fix_id": fix_id, "label": spec.get("label", ""), "level": spec.get("level", ""),
+                      "seconds": secs, "chars": len(str(out)), "preview": str(out)[:300],
+                      "_who": {"by": "human"}},
+                     room_code=room_code, actor=user.get("username") or "field",
+                     actor_role=user.get("role") or "field", stream=f"room:{room_code}")
+    except Exception:
+        pass
+    return {"ok": True, "fix_id": fix_id, "seconds": secs, "tail": str(out)[-1500:]}
+
+
+@app.post("/api/diag_flow/verify")
+async def diag_flow_verify(request: Request):
+    """④ 复测：按修复动作的验证指标判定成功与否（不看 exit_code）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    action_key = str(body.get("action_key", "") or "bsod")
+    fix_id = str(body.get("fix_id", ""))
+    baseline = body.get("baseline") or {}
+    fix_output = str(body.get("fix_output") or "")
+    spec = DIAG_FIX_SPECS.get(fix_id)
+    if not spec:
+        return JSONResponse({"error": "未知的修复动作"}, status_code=400)
+    room = rooms.get(room_code)
+    if not room or not room.bridge_ws:
+        return JSONResponse({"error": "桥接器未连接，无法复测"}, status_code=409)
+
+    ctx = {"temp_before": _diag_num(r"temp_mb_before=([\d.]+)", fix_output, None)}
+    detail = []
+    fix_ok = True
+
+    if spec.get("verify_cmd"):
+        try:
+            vout = await execute_bridge_command(
+                room, "Shell", {"command": spec["verify_cmd"], "timeout": 240, "cwd": ""},
+                f"vfy_{fix_id}_{int(time.time())}", tier=1)
+        except Exception as e:
+            vout = f"复测命令失败：{e}"
+        fix_ok = _diag_judge(spec.get("verify_kind", ""), str(vout), ctx)
+        detail.append({"item": "修复动作自检", "ok": fix_ok, "output": str(vout)[:400]})
+    else:
+        fix_ok = _diag_judge(spec.get("verify_kind", ""), fix_output, ctx)
+        detail.append({"item": "修复输出自检", "ok": fix_ok, "output": fix_output[:400]})
+
+    # 复采「异常记录」步骤，比对是否新增（不同现象口径不同）
+    step_idx = DIAG_COUNT_STEP.get(action_key)
+    step_cmd = None
+    step_label = ""
+    if step_idx is not None:
+        try:
+            st = ACTION_STEP_SPECS[action_key][step_idx]
+            step_cmd = st["cmd"]
+            step_label = st["label"]
+        except Exception:
+            step_cmd = None
+    if step_cmd:
+        try:
+            sout = await execute_bridge_command(
+                room, "Shell", {"command": step_cmd, "timeout": 180, "cwd": ""},
+                f"vfy_cnt_{int(time.time())}", tier=1)
+        except Exception:
+            sout = ""
+        now_cnt = _diag_count_records(str(sout))
+        base_cnt = int(baseline.get("count") or 0)
+        no_new = now_cnt <= base_cnt
+        detail.append({"item": step_label + "是否新增", "ok": no_new,
+                       "output": f"修复前 {base_cnt} 条 · 复测 {now_cnt} 条"})
+        fix_ok = fix_ok and no_new
+
+    try:
+        record_event("diag.fix.verify",
+                     {"fix_id": fix_id, "action_key": action_key, "pass": fix_ok, "detail": detail[:3],
+                      "_who": {"by": "system", "role": "system"}},
+                     room_code=room_code, actor="system", actor_role="system",
+                     stream=f"room:{room_code}")
+    except Exception:
+        pass
+    return {"ok": True, "pass": bool(fix_ok), "detail": detail}
+
+
+@app.post("/api/diag_flow/finish")
+async def diag_flow_finish(request: Request):
+    """出口：closed = 结单；escort = 转现场（日志与报告由前端已有链路补齐）。"""
+    user = _require_user(request)
+    if not user:
+        return JSONResponse({"error": "未登录"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    room_code = str(body.get("room_code", "")).upper()
+    outcome = str(body.get("outcome") or "")
+    action_key = str(body.get("action_key") or "bsod")
+    if outcome not in ("closed", "escort"):
+        return JSONResponse({"error": "未知出口"}, status_code=400)
+    payload = {
+        "action_key": action_key, "phenomenon": DIAG_FLOW_LABELS.get(action_key, action_key),
+        "outcome": outcome,
+        "kind": str(body.get("kind") or "")[:8],
+        "conf": body.get("conf") or 0,
+        "fix_id": str(body.get("fix_id") or ""),
+        "conclusion": str(body.get("conclusion") or "")[:300],
+        "_who": {"by": "human", "user": user.get("username") or "",
+                 "role": user.get("role") or ""},
+    }
+    try:
+        record_event("case.closed" if outcome == "closed" else "case.escort",
+                     payload, room_code=room_code,
+                     actor=user.get("username") or "field",
+                     actor_role=user.get("role") or "field",
+                     stream=f"room:{room_code}")
+    except Exception:
+        pass
+    return {"ok": True, "outcome": outcome, "report_url": f"/api/report/{room_code}"}
+
+
+@app.get("/api/diag_flow/spec")
+async def diag_flow_spec(action_key: str = "bsod"):
+    """前端取流程规格：现象名、步骤清单、复测口径下标。"""
+    key = (action_key or "bsod").strip()
+    steps = [s.get("label", "") for s in ACTION_STEP_SPECS.get(key, [])]
+    return {"action_key": key, "label": DIAG_FLOW_LABELS.get(key, key),
+            "steps": steps, "count_step": DIAG_COUNT_STEP.get(key),
+            "supported": key in DIAG_FLOW_LABELS and bool(steps)}
 
 
 # ============================================================
@@ -11392,7 +13985,41 @@ async def _dead_conn_reaper():
                     room.busy_since = None
                 hb = room.last_heartbeat
                 if hb and (now - hb).total_seconds() > 120:
-                    run_logger.info(f"[reaper] bridge 心跳超时，断开半死连接: {code}（等待自动重连）")
+                    # 2026-11-10（配套 bridge v1.4.5）：探活 + 两振出局，避免误杀。
+                    # 背景：ps1 的心跳是 piggy-back（收到消息才回），桥接器被长命令/上传
+                    # 占住或服务端 ping 有闪失时 last_heartbeat 会变旧，老逻辑直接
+                    # close(1001) → 服务端认为离线、客户机窗口却还显示 Connected
+                    # （CEAAF3XM 16:23:17 复现，正是日志采集刚结束的时刻）。
+                    # 现在：发 probe ping，8 秒内收到任何回包就续命；连续两次探活失败
+                    # 才真正断开（最多多给 60 秒宽限）。
+                    replied = False
+                    try:
+                        before = room.last_heartbeat
+                        await room.bridge_ws.send_json(
+                            {"type": "ping", "ts": int(time.time()), "probe": 1})
+                        for _ in range(16):          # 最多 ~8 秒
+                            await asyncio.sleep(0.5)
+                            cur = room.last_heartbeat
+                            if cur and (before is None or cur > before):
+                                replied = True
+                                break
+                    except Exception:
+                        replied = False
+
+                    if replied:
+                        room.dead_probe_strikes = 0
+                        room.last_heartbeat = datetime.now(timezone.utc)
+                        continue
+
+                    strikes = int(getattr(room, "dead_probe_strikes", 0)) + 1
+                    room.dead_probe_strikes = strikes
+                    if strikes < 2:
+                        run_logger.warning(
+                            f"[reaper] {code} 探活无回应（第 {strikes} 次），再给 60 秒宽限")
+                        continue
+
+                    run_logger.info(f"[reaper] bridge 心跳超时且两次探活无回应，断开半死连接: {code}（等待自动重连）")
+                    room.dead_probe_strikes = 0
                     try:
                         await room.bridge_ws.close(code=1001)
                     except Exception:

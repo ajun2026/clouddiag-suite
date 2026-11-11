@@ -42,6 +42,25 @@ body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--
 .role.field{color:var(--brand);border-color:var(--brand-line);background:var(--brand-tint)}
 .role.expert{color:#7A4BD0;border-color:#E2D8F8;background:#F5F1FD}
 .role.ai{color:#0C7C86;border-color:#CBE9EC;background:#EDF8F9}
+.role.human{color:#1D4ED8;border-color:#BFDBFE;background:#EFF6FF}
+.sumbar{margin:0 0 10px;padding:8px 12px;border:1px solid #E4E7EC;border-radius:8px;background:#FBFCFD;
+  color:#344054;font-size:12.5px;display:flex;gap:14px;flex-wrap:wrap}
+.sumbar b{color:#101828}
+.sumbar .seg{white-space:nowrap}
+.sumbar em{font-style:normal;color:#667085;font-size:11.5px}
+.ev.click .desc{font-weight:600}
+.ev.click{background:#F8FAFF}
+.ev.child .desc::before{content:'↳ ';color:#98A2B3}
+.badge-auto{display:inline-block;font-size:10.5px;padding:0 5px;border-radius:4px;background:#F2F4F7;
+  color:#475467;margin-left:6px;border:1px solid #E4E7EC}
+.badge-h{display:inline-block;font-size:10.5px;padding:0 5px;border-radius:4px;background:#EFF6FF;color:#1D4ED8;margin-left:6px;border:1px solid #BFDBFE}
+.badge-ai{display:inline-block;font-size:10.5px;padding:0 5px;border-radius:4px;background:#EDF8F9;
+  color:#0C7C86;margin-left:6px;border:1px solid #CBE9EC}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.split .col{min-width:0}
+.split .col h4{margin:0 0 6px;font-size:12px;color:#475467;font-weight:600}
+.split .col.ai h4{color:#0C7C86}
+.split .col.human h4{color:#1D4ED8}
 .role.system{color:var(--text-3)}
 .desc{font-size:13px;color:var(--text);line-height:1.55}
 .desc .mono{font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;color:var(--text-2)}
@@ -80,11 +99,13 @@ body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--
   <button class="chip" data-f="ai">AI</button>
   <button class="chip" data-f="system">系统</button>
   <span class="spacer"></span>
+  <button class="chip" id="viewSplit" title="左列人、右列 AI，同一时间轴对照">人机对照</button>
   <button class="chip" id="viewClient" title="客户版：隐藏命令、路径与账号，用于对外展示与报告">客户版视图</button>
   <span class="sub" id="count">—</span>
 </div>
 
 <div class="wrap">
+  <div class="sumbar" id="sumBar">—</div>
   <div class="clientbar hidden" id="clientBar">
     客户版视图：命令原文、文件路径、账号与附件已隐藏，仅保留时间、角色、动作与结果规模。
   </div>
@@ -106,7 +127,7 @@ body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--
     'op.result':       {t:'命令输出',            i:'out'},
     'artifact.uploaded':{t:'上传日志包',          i:'up'},
     'im.message':      {t:'协作消息',            i:'chat'},
-    'ai.turn':         {t:'AI 提问',             i:'ask'},
+    'ai.turn':         {t:'人向 AI 提问',           i:'ask'},
     'ai.answer':       {t:'AI 回答',             i:'ai'},
     'room.created':    {t:'创建房间',            i:'plus'},
     'bridge.connect':  {t:'客户机接入',          i:'link'},
@@ -126,16 +147,58 @@ body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--
     'file.deleted':    {t:'删除附件',            i:'trash'},
     'report.viewed':   {t:'查看报告',            i:'file'},
     'report.archived': {t:'报告定稿',            i:'file'},
+    'ui.click':        {t:'人点击',              i:'user'},
+    'ai.log_read':     {t:'AI 读日志',           i:'file'},
+    'thinklog.sent':   {t:'投递 ThinkLogParser', i:'up'},
+    'log.uploaded':    {t:'上传日志包',          i:'up'},
     'op.error':        {t:'执行失败',            i:'alert'},
     'ui.note':         {t:'备注',                i:'dot'},
     'correction':      {t:'修正',                i:'edit'}
   };
-  const ROLE_CN = {field:'现场', cc:'渠道', expert:'二线', admin:'管理员', ai:'AI', bridge:'客户机', system:'系统', guest:'游客'};
+  const ROLE_CN = {human:'人', field:'现场', cc:'渠道', expert:'二线', admin:'管理员',
+                   ai:'AI', bridge:'客户机', system:'系统', guest:'游客'};
 
+  /* 2026-11-09：三类归属 —— 人点击 / 预设执行（人点后程序机械跑）/ AI 动作 */
+  function whoOf(e){ return (e.data && e.data._who) || {}; }
   function roleKey(e){
+    const w = whoOf(e);
+    if (w.by === 'ai') return 'ai';
+    if (e.kind === 'ai.turn') return 'human';        /* 人向 AI 提问 = 人的动作 */
+    if (e.kind === 'ui.click') return 'human';
+    if (w.by === 'human') return 'human';
     if (e.kind.startsWith('ai.')) return 'ai';
     if (e.actor === 'bridge') return 'system';
     return e.role || 'system';
+  }
+  /* 分类：click(人点击) / auto(预设执行) / ai(AI 动作) / system */
+  function catOf(e){
+    if (e.kind === 'ui.click') return 'click';
+    const w = whoOf(e);
+    if (w.by === 'ai' || e.kind === 'ai.answer' || e.kind === 'ai.log_read') return 'ai';
+    if (e.kind === 'ai.turn') return 'ai';           /* AI 回合入口（含人提问） */
+    if (w.parent_click || e.parent) return 'auto';
+    if (roleKey(e) === 'system') return 'system';
+    return 'human';
+  }
+  function byId(id){ return ALL_BY_ID[id] || null; }
+  /* 沿父链找最近的一次「人点击」，并给出该行是这张卡里的第几项 */
+  function ancestorClick(e){
+    let cur = e, guard = 0;
+    while (cur && guard++ < 5){
+      if (cur.kind === 'ui.click') return cur;
+      cur = cur.parent ? byId(cur.parent) : null;
+    }
+    return null;
+  }
+  /* 沿 parent 链算缩进层级（最多 3 层） */
+  function depthOf(e){
+    let d = 0, cur = e, guard = 0;
+    while (cur && cur.parent && guard++ < 4){
+      const up = byId(cur.parent);
+      if (!up) break;
+      d++; cur = up;
+    }
+    return Math.min(d, 3);
   }
   function hhmmss(ms){
     const d = new Date(ms); const p = n => String(n).padStart(2,'0');
@@ -145,6 +208,12 @@ body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--
 
   function title(e){
     const d = e.data || {};
+    /* 2026-11-09：人点击要写清「点了什么」，而不是显示 ui.click 这个内部类型名 */
+    if (e.kind === 'ui.click'){
+      const kindCn = {plan_run:'预设卡', batch:'批量', collect:'日志抓取', ai_accept:'让 AI 执行', manual:'手动'}[d.kind] || '';
+      return '点击「' + esc(d.label || '未命名操作') + '」'
+        + (kindCn ? '　<span class="sub">' + kindCn + (d.tier ? ' · Tier ' + esc(d.tier) : '') + '</span>' : '');
+    }
     switch(e.kind){
       case 'auth.login': return '登录系统'
         + ((view !== 'client' && d.ip) ? '　<span class="sub">IP '+esc(d.ip)+'</span>' : '');
@@ -205,7 +274,11 @@ body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--
                                        : esc((d.text||'').slice(0,80)) + '　<span class="sub">附件</span>';
         return tag + '：' + body;
       }
-      case 'ai.turn': return 'AI 提问　'+esc((d.q||'').slice(0,140));
+      case 'ai.turn': return '人问 AI　'+esc((d.q||'').slice(0,140));
+      case 'ai.log_read': return 'AI 读日志　<span class="sub">'+esc(d.tool||'')+' · '+esc(d.chars||0)+' 字</span>';
+      case 'thinklog.sent': return (d.ok ? '已投递 ThinkLogParser　' : '投递 ThinkLogParser 失败　')
+        + '<span class="sub">' + (d.ok ? ('任务 ' + esc(d.log_id||'') + ' · ' + (d.mode==='slim'?'精简包':'完整包')
+            + ' · ' + esc(d.size_mb||'?') + ' MB · ' + esc(d.seconds||'?') + ' 秒') : esc(d.note||'')) + '</span>';
       case 'ai.answer': return 'AI 回答　<span class="sub">'+esc(d.chars||0)+' 字</span>　'
         + esc((d.preview||'').slice(0,110)) + ((d.preview||'').length>110?'…':'');
       default: return esc(e.kind);
@@ -231,26 +304,74 @@ body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--
       + '<dt>流 / 序号</dt><dd class="sub">'+esc(e.stream)+' · #'+esc(e.seq)+'</dd></dl>';
   }
 
+  function rowHtml(e, opts){
+    opts = opts || {};
+    const k = KIND[e.kind] || {t:e.kind, i:'dot'};
+    const rk = roleKey(e), cat = catOf(e), w = whoOf(e);
+    const d = depthOf(e);
+    const isClick = e.kind === 'ui.click';
+    let badge = '';
+    if (isClick) badge = '<span class="badge-h">👤 人点击</span>';
+    else if (cat === 'auto') badge = '<span class="badge-auto">⚙️ 预设执行</span>';
+    else if (e.kind === 'ai.turn') badge = '<span class="badge-ai">🤖 AI 回合</span>';
+    else if (cat === 'ai') badge = '<span class="badge-ai">🤖 AI</span>';
+    let sub = '';
+    if (cat === 'auto' && d > 0){
+      const ck = ancestorClick(e);
+      const cname = ck ? ((ck.data || {}).label || '') : '';
+      const idx = ((e.data || {}).step_index);
+      let tail = '';
+      if (typeof idx === 'number') tail = ' · 第 ' + (idx + 1) + ' 项';
+      sub = '<div class="sub">↳ ' + (cname ? '归属于点击「' + esc(cname) + '」' : '由上一次点击触发')
+          + tail + '　程序按计划执行（非 AI）</div>';
+    }
+    return '<div class="ev' + (isClick ? ' click' : '') + (cat === 'auto' ? ' child' : '') + '"'
+      + ' data-id="' + e.id + '" style="margin-left:' + (d * 18) + 'px">'
+      + '<div class="t">' + hhmmss(e.ts) + '</div>'
+      + '<div class="who"><span class="role ' + rk + '">' + (ROLE_CN[rk] || rk) + '</span>'
+      +   (view === 'client' ? '' : '<span class="sub">' + esc(e.actor || '') + '</span>') + '</div>'
+      + '<div class="desc">' + title(e) + badge + sub + '</div>'
+      + '<div class="meta">' + meta(e) + '</div>'
+      + '</div>'
+      + '<div class="detail" id="d-' + e.id + '">' + detail(e) + '</div>';
+  }
+
+  function summaryHtml(list){
+    const cats = {click:[], auto:[], ai:[], system:[], human:[]};
+    list.forEach(e => { (cats[catOf(e)] || cats.human).push(e); });
+    const clicks = cats.click;
+    const whoCli = {};
+    clicks.forEach(e => { const u = e.actor || '—'; whoCli[u] = (whoCli[u] || 0) + 1; });
+    const whoTxt = Object.keys(whoCli).map(u => u + ' ' + whoCli[u] + ' 次').join('、') || '无';
+    const aiTurns = cats.ai.filter(e => e.kind === 'ai.turn').length;
+    const aiActs  = cats.ai.filter(e => e.kind !== 'ai.turn').length;
+    return '<span class="seg">👤 人点击 <b>' + clicks.length + '</b> 次（' + esc(whoTxt) + '）</span>'
+      + '<span class="seg">⚙️ 预设执行 <b>' + cats.auto.length + '</b> 条<em>（人点后程序自动跑，非 AI）</em></span>'
+      + '<span class="seg">🤖 AI 回合 <b>' + aiTurns + '</b> · AI 动作 <b>' + aiActs + '</b></span>'
+      + '<span class="seg">🖥 系统/桥接 <b>' + (cats.system.length + cats.human.length) + '</b></span>';
+  }
+
+  let ALL_BY_ID = {};
+
   function render(){
     const box = document.getElementById('list');
+    ALL_BY_ID = {}; all.forEach(e => { if (e.id) ALL_BY_ID[e.id] = e; });
     const list = all.filter(e => filter === 'all' || roleKey(e) === filter);
     document.getElementById('count').textContent = list.length + ' 条事件' + (filter==='all' ? '' : '（已过滤）');
+    const sb = document.getElementById('sumBar');
+    if (sb) sb.innerHTML = all.length ? summaryHtml(all) : '—';
     if (!list.length){ box.innerHTML = '<div class="empty">' + (room ? '这个房间还没有事件记录' : '请在地址后加 ?room=房间号') + '</div>'; return; }
-    box.innerHTML = list.map(e => {
-      const k = KIND[e.kind] || {t:e.kind,i:'dot'};
-      const rk = roleKey(e);
-      const child = !!e.parent;
-      return '<div class="ev'+(child?' child':'')+'" data-id="'+e.id+'">'
-        + '<div class="t">'+hhmmss(e.ts)+'</div>'
-        + '<div class="who"><span class="role '+rk+'">'+(ROLE_CN[rk]||rk)+'</span>'
-        +   (view === 'client' ? '' : '<span class="sub">'+esc(e.actor||'')+'</span>') + '</div>'
-        + '<div class="desc">'+title(e)
-        +   (child ? '<div class="sub">↳ 由上一条记录触发</div>' : '')
-        + '</div>'
-        + '<div class="meta">'+meta(e)+'</div>'
-        + '</div>'
-        + '<div class="detail" id="d-'+e.id+'">'+detail(e)+'</div>';
-    }).join('');
+
+    if (view === 'split') {
+      const human = list.filter(e => roleKey(e) !== 'ai');
+      const ai    = list.filter(e => roleKey(e) === 'ai');
+      box.innerHTML = '<div class="split">'
+        + '<div class="col human"><h4>👤 人 / 系统（' + human.length + '）</h4>' + human.map(e => rowHtml(e)).join('') + '</div>'
+        + '<div class="col ai"><h4>🤖 AI（' + ai.length + '）</h4>' + (ai.length ? ai.map(e => rowHtml(e)).join('') : '<div class="empty">暂无 AI 动作</div>') + '</div>'
+        + '</div>';
+    } else {
+      box.innerHTML = list.map(e => rowHtml(e)).join('');
+    }
     syncEarlierBtn();
     box.querySelectorAll('.ev').forEach(el=>{
       el.addEventListener('click', ()=>{
@@ -275,10 +396,19 @@ body{margin:0;background:var(--surface-2);color:var(--text);font:14px/1.6 var(--
     }
   }
 
+  // 人机对照视图（2026-11-09）
+  (function(){
+    const sp = document.getElementById('viewSplit');
+    if (sp) sp.addEventListener('click', () => {
+      view = (view === 'split') ? 'full' : 'split';
+      sp.classList.toggle('on', view === 'split');
+      load();
+    });
+  })();
   // 角色筛选：排除「客户版视图」开关（它不是筛选器，2026-11-03）
-  document.querySelectorAll('.chip:not(#viewClient)').forEach(c=>{
+  document.querySelectorAll('.chip:not(#viewClient):not(#viewSplit)').forEach(c=>{
     c.addEventListener('click', ()=>{
-      document.querySelectorAll('.chip:not(#viewClient)').forEach(x=>x.classList.remove('on'));
+      document.querySelectorAll('.chip:not(#viewClient):not(#viewSplit)').forEach(x=>x.classList.remove('on'));
       c.classList.add('on'); filter = c.dataset.f || 'all'; render();
     });
   });

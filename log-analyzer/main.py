@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Log Analyzer — FastAPI entry point."""
-import json, os, uuid, threading, subprocess, shutil, re, asyncio
+import json
+import time
+import threading
+import shutil
+import os, os, uuid, threading, subprocess, shutil, re, asyncio, time
 from dotenv import load_dotenv
 # 加载 .env（AI key/BASE_URL——2026-09-08 修复：之前 main.py 不加载 .env → AI 分析 Bearer 空 key → 总结卡 analyzing_summary）
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
@@ -12,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 import jinja2, aiofiles, httpx
 
 from detectors import (load_history, save_history, add_to_history,
+    run_logger as run_logger,
     detect_encoding, extract_archive, extract_zip_safe, extract_7z, find_log_dir,
     normalize_log_structure,
     find_tslog_dir, iter_evtx_cached, MAX_EVENTS, UPLOAD_DIR, REPORT_DIR, BASE_DIR)
@@ -38,6 +43,10 @@ import chat.function_call as _fc
 _fc.jobs = jobs
 _fc.chat_sessions = chat_sessions
 
+# 2026-11-10：解压目录自动清理（方案A）——每个包解压后约 400MB，分析完不再需要就别留着
+EXTRACT_KEEP_DAYS = float(os.getenv("EXTRACT_KEEP_DAYS", "3"))    # 保留天数（留几天便于重跑分析）
+EXTRACT_CLEAN_INTERVAL = float(os.getenv("EXTRACT_CLEAN_INTERVAL", "21600"))  # 每 6 小时扫一次
+
 ANALYZERS = {
     "overview": analyze_overview,
     "diagnostics": analyze_system_diagnostics,
@@ -52,20 +61,111 @@ ANALYZERS = {
 }
 
 # Map of standard analysis types for summary
+# 2026-11-08：机器间调用令牌（主服务 → 日志分析服务的工具调用/上传代理）
+LOG_INTERNAL_TOKEN = os.getenv("LOG_INTERNAL_TOKEN", "")
+
+_MAIN_API = os.getenv("CLOUDDIAG_API", "http://127.0.0.1:8000")
+
 _STANDARD_TYPES = ["overview", "diagnostics", "dump", "siolog"]
 _LINUX_TYPES = ["linux_overview", "linux_kernel", "linux_syslog"]
 
 
 # ─── Background Analysis ─────────────────────────────────────
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 解压目录清理（2026-11-10 · 方案A）
+#   uploads/extract_<job> 每个约 400MB，分析报告写完后就不再需要；
+#   保留 EXTRACT_KEEP_DAYS 天便于重跑，之后自动删除，原始压缩包保留不动。
+#   删掉后若要重跑分析，_rehydrate() 会用压缩包重新解压。
+# ══════════════════════════════════════════════════════════════════════
+_active_jobs: set = set()
+_active_lock = threading.Lock()
+
+
+def _job_archive(job_id: str):
+    """按 job_id 找原始压缩包。"""
+    for p in UPLOAD_DIR.glob(job_id + ".*"):
+        if p.is_file() and not p.name.startswith("extract_"):
+            return p
+    return None
+
+
+def _rehydrate(job_id: str):
+    """解压目录被清理后，用压缩包重新解压，返回 tslog 路径（失败返回 None）。"""
+    try:
+        arc = _job_archive(job_id)
+        if not arc:
+            return None
+        d = extract_archive(arc)
+        if not d or not Path(d).exists():
+            return None
+        jobs.setdefault(job_id, {})["tslog_path"] = str(d)
+        run_logger.info(f"[cleanup] {job_id} 已从压缩包重新解压：{d}")
+        return str(d)
+    except Exception as e:
+        run_logger.warning(f"[cleanup] {job_id} 重新解压失败：{e}")
+        return None
+
+
+def cleanup_extracts(keep_days: float = None) -> dict:
+    """删除过期的 extract_<job> 解压目录（跳过正在分析的任务）。"""
+    keep_days = EXTRACT_KEEP_DAYS if keep_days is None else keep_days
+    cutoff = time.time() - keep_days * 86400
+    freed, removed, skipped = 0, 0, 0
+    with _active_lock:
+        actives = set(_active_jobs)
+    for d in UPLOAD_DIR.glob("extract_*"):
+        if not d.is_dir():
+            continue
+        jid = d.name[len("extract_"):].split("_")[0]
+        if jid in actives:
+            skipped += 1
+            continue
+        st = jobs.get(jid) or {}
+        if str(st.get("status") or "").startswith("analyzing"):
+            skipped += 1
+            continue
+        try:
+            if d.stat().st_mtime > cutoff:
+                skipped += 1
+                continue
+            size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+            shutil.rmtree(d, ignore_errors=True)
+            if not d.exists():
+                freed += size
+                removed += 1
+        except Exception as e:
+            run_logger.warning(f"[cleanup] 删除 {d} 失败：{e}")
+    if removed:
+        run_logger.info(f"[cleanup] 清理解压目录 {removed} 个，释放 {freed/1048576:.0f} MB（保留 {keep_days} 天）")
+    return {"removed": removed, "skipped": skipped, "freed_mb": round(freed / 1048576, 1)}
+
+
+def _cleanup_loop():
+    """启动后先等一会儿（避开启动高峰），之后定期清理。"""
+    time.sleep(45)
+    while True:
+        try:
+            cleanup_extracts()
+        except Exception as e:
+            run_logger.warning(f"[cleanup] 周期清理异常：{e}")
+        time.sleep(EXTRACT_CLEAN_INTERVAL)
+
 def run_analysis_bg(job_id: str, analysis_type: str):
     """Run a specific analysis in background thread."""
     try:
         j = jobs[job_id]
         tslog_path = j.get("tslog_path")
         if not tslog_path or not Path(tslog_path).exists():
+            # 2026-11-10：解压目录可能已被清理 → 用压缩包自动重新解压，用户无感
+            tslog_path = _rehydrate(job_id)
+        if not tslog_path or not Path(tslog_path).exists():
             jobs[job_id]["status"] = "error"
-            jobs[job_id]["error"] = "日志目录不存在，请重新上传"
+            jobs[job_id]["error"] = "日志目录不存在，且无法从压缩包重新解压"
             return
+        with _active_lock:
+            _active_jobs.add(job_id)
 
         tslog = Path(tslog_path)
         jobs[job_id]["status"] = f"analyzing_{analysis_type}"
@@ -88,8 +188,12 @@ def run_analysis_bg(job_id: str, analysis_type: str):
         jobs[job_id]["progress"] = 100
         jobs[job_id]["status"] = "done"
         jobs[job_id][f"report_{analysis_type}"] = str(report_path)
+        with _active_lock:
+            _active_jobs.discard(job_id)
 
     except Exception as e:
+        with _active_lock:
+            _active_jobs.discard(job_id)
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"] = str(e)
 
@@ -170,6 +274,13 @@ def _clean_name(s: str) -> str:
 # 2026-09-27 新增（P3-4）：健康检查端点——与 clouddiag-server 接口命名保持一致，
 # 便于统一监控与部署自检（deploy/doctor.sh 可做端到端断言）。
 APP_VERSION = "1.3.0"
+
+
+try:
+    threading.Thread(target=_cleanup_loop, daemon=True, name="extract-cleanup").start()
+    run_logger.info(f"[cleanup] 解压目录清理线程已启动（保留 {EXTRACT_KEEP_DAYS} 天，每 {EXTRACT_CLEAN_INTERVAL/3600:.0f} 小时）")
+except Exception as _e:
+    run_logger.warning(f"[cleanup] 清理线程启动失败：{_e}")
 
 
 @app.get("/api/health")
@@ -416,7 +527,8 @@ async def get_dump_detail(request: Request, job_id: str, file: str = ""):
 
 
 @app.post("/api/upload")
-async def upload_file(request: Request, file: UploadFile = File(...), sn: str = Form("")):
+async def upload_file(request: Request, file: UploadFile = File(...), sn: str = Form(""),
+                      room_code: str = Form("")):
     """上传日志包，仅保存+解压，不分析。支持 Windows (.7z/.zip/.rar) 和 Linux (.tar.gz/.tgz/.tar)"""
     user = await get_current_user(request)
     if not user:
@@ -539,6 +651,8 @@ async def upload_file(request: Request, file: UploadFile = File(...), sn: str = 
         "evtx_count": evtx_count,
         "os_type": os_type,
         "sn": sn,
+        "room_code": (room_code or "").strip().upper(),      # 2026-11-08：绑定诊断房间
+        "tool_stats": {},                                    # 工具调用统计（不设上限，只记录）
         "created_at": datetime.now(CHINA_TZ).isoformat(),
     }
 
@@ -565,8 +679,75 @@ async def upload_file(request: Request, file: UploadFile = File(...), sn: str = 
         "evtx_count": evtx_count,
         "os_type": os_type,
         "sn": sn,
+        "room_code": (room_code or "").strip().upper(),
         "message": friendly_msg,
     })
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 2026-11-08：日志工具直调（供 CloudDiag 房间「自由模式」AI 使用）
+#   · 不经 LLM，只执行 chat/function_call.py 里那 5 个工具（列文件/读文本/读EVTX/读报告/读转储）
+#   · 身份：主服务代理注入的 X-Log-Analyzer-User/Role + X-Internal-Token 双校验
+#   · 按主人要求「先不设上限」：只统计调用次数与字符量，超阈值仅告警不拦截
+# ══════════════════════════════════════════════════════════════════════
+LOG_TOOL_NAMES = {"list_files", "read_text_file", "read_evtx_events", "read_report", "read_dump_file", "run_analysis"}
+LOG_TOOL_WARN_CHARS = int(os.getenv("LOG_TOOL_WARN_CHARS", "60000"))
+LOG_TOOL_WARN_CALLS = int(os.getenv("LOG_TOOL_WARN_CALLS", "12"))
+
+
+@app.post("/api/tool_exec")
+async def tool_exec(request: Request, body: dict):
+    # 机器间鉴权
+    tok = request.headers.get("x-internal-token", "")
+    if not LOG_INTERNAL_TOKEN or tok != LOG_INTERNAL_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    job_id = str((body or {}).get("job_id") or "").strip()
+    tool = str((body or {}).get("tool") or "").strip()
+    args = body.get("arguments") or {}
+    if job_id not in jobs:
+        return JSONResponse({"error": f"任务不存在: {job_id}"}, status_code=404)
+    if tool not in LOG_TOOL_NAMES:
+        return JSONResponse({"error": f"不允许的工具: {tool}，可用: {sorted(LOG_TOOL_NAMES)}"}, status_code=400)
+    if not isinstance(args, dict):
+        args = {}
+
+    from chat.function_call import _execute_tool
+    from starlette.concurrency import run_in_threadpool
+
+    t0 = time.time()
+    try:
+        out = await run_in_threadpool(_execute_tool, job_id, tool, args)
+    except Exception as e:
+        out = f"工具执行异常：{type(e).__name__}: {e}"
+    ms = int((time.time() - t0) * 1000)
+    out = str(out or "")
+
+    # 用量统计（不拦截，只记录 + 超阈值告警）
+    st = jobs[job_id].setdefault("tool_stats", {})
+    st["calls"] = int(st.get("calls", 0)) + 1
+    st["chars"] = int(st.get("chars", 0)) + len(out)
+    per = st.setdefault("by_tool", {})
+    pt = per.setdefault(tool, {"calls": 0, "chars": 0})
+    pt["calls"] += 1
+    pt["chars"] += len(out)
+    st["last_tool"] = tool
+    st["last_at"] = datetime.now(CHINA_TZ).isoformat()
+    if len(out) > LOG_TOOL_WARN_CHARS or st["calls"] > LOG_TOOL_WARN_CALLS:
+        print(f"[tool_exec][WARN] {job_id} 用量偏大：calls={st['calls']} chars={st['chars']} "
+              f"last={tool}({len(out)} chars) room={jobs[job_id].get('room_code','')}", flush=True)
+
+    return JSONResponse({"ok": True, "tool": tool, "job_id": job_id,
+                         "result": out, "chars": len(out), "ms": ms,
+                         "stats": {"calls": st["calls"], "chars": st["chars"]}})
+
+
+@app.get("/api/tool_stats/{job_id}")
+async def tool_stats(request: Request, job_id: str):
+    """工具调用用量（给运维看，不做拦截）"""
+    if job_id not in jobs:
+        return JSONResponse({"error": "任务不存在"}, status_code=404)
+    return {"job_id": job_id, "room_code": jobs[job_id].get("room_code", ""),
+            "stats": jobs[job_id].get("tool_stats", {})}
 
 
 @app.post("/api/analyze/{job_id}")

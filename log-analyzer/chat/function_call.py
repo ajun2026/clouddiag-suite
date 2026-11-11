@@ -131,11 +131,45 @@ CHAT_TOOLS = [
 
 
 def _get_tslog(job_id: str) -> Optional[Path]:
-    """Get tslog path for a job"""
-    if job_id not in jobs or not jobs[job_id].get("tslog_path"):
-        return None
-    p = Path(jobs[job_id]["tslog_path"])
-    return p if p.exists() else None
+    """Get tslog path for a job
+
+    2026-11-10：原来只查内存 jobs 字典，服务一重启 / 解压目录被清理，AI 就一律
+    报「日志目录不存在」，明明磁盘上有压缩包也读不到（踩过：房间已上传日志，
+    AI 却说"没采过任何数据"）。改为三级兜底：
+      ① 内存 jobs 里的 tslog_path
+      ② 磁盘上的 uploads/extract_<job_id>
+      ③ 从原始压缩包重新解压（复用 main._rehydrate）
+    兜底成功后回填 jobs，后续调用走快路径。
+    """
+    try:
+        if job_id in jobs and jobs[job_id].get("tslog_path"):
+            p = Path(jobs[job_id]["tslog_path"])
+            if p.exists():
+                return p
+    except Exception:
+        pass
+
+    # ② 磁盘兜底：解压目录还在（服务重启后 jobs 是空的，但目录通常还在）
+    try:
+        from main import UPLOAD_DIR  # 延迟导入避免循环依赖
+        d = Path(UPLOAD_DIR) / f"extract_{job_id}"
+        if d.is_dir():
+            jobs.setdefault(job_id, {})["tslog_path"] = str(d)
+            return d
+    except Exception:
+        pass
+
+    # ③ 从压缩包重新解压
+    try:
+        from main import _rehydrate
+        got = _rehydrate(job_id)
+        if got and Path(got).exists():
+            jobs.setdefault(job_id, {})["tslog_path"] = str(got)
+            return Path(got)
+    except Exception:
+        pass
+
+    return None
 
 
 def _execute_tool(job_id: str, tool_name: str, arguments: dict) -> str:
@@ -145,6 +179,36 @@ def _execute_tool(job_id: str, tool_name: str, arguments: dict) -> str:
         return "错误：日志目录不存在，请重新上传文件"
 
     try:
+        if tool_name == "run_analysis":
+            # 2026-11-10：让 AI 能按需触发本地分析器（页面按钮去掉后，分析能力改由这里提供）
+            atype = str(arguments.get("type") or "overview").strip()
+            try:
+                from main import ANALYZERS  # 延迟导入避免循环
+            except Exception:
+                ANALYZERS = {}
+            fn = ANALYZERS.get(atype)
+            if not fn:
+                return f"未知分析类型：{atype}，可用：{', '.join(ANALYZERS.keys()) or '无'}"
+            try:
+                res = fn(tslog)
+            except Exception as e:
+                return f"分析器 {atype} 执行失败：{type(e).__name__}: {e}"
+            # 只回摘要，避免把整份 JSON 灌给模型
+            def _brief(d, depth=0):
+                if not isinstance(d, dict):
+                    return str(d)[:200]
+                out = []
+                for k, v in list(d.items())[:12]:
+                    if isinstance(v, list):
+                        out.append(f"{k}: {len(v)} 条")
+                    elif isinstance(v, dict):
+                        out.append(f"{k}: {{...{len(v)} 键}}")
+                    else:
+                        sv = str(v)
+                        out.append(f"{k}: {sv[:120]}")
+                return "；".join(out)
+            return f"已运行本地分析器「{atype}」→ " + _brief(res)
+
         if tool_name == "list_files":
             files = []
             for f in sorted(tslog.rglob("*")):

@@ -372,12 +372,12 @@ def analyze_system_diagnostics(tslog: Path) -> dict:
     app_dist = defaultdict(int)  # Application.evtx 分布
     app_total = 0
     lke_events = []             # LiveKernelEvent
+    crash_events = []           # [(time, event_id, desc)]（2026-11-10：提到 if 外，否则无 System.evtx 时下方 UnboundLocalError）
 
     # ═══ Pass 1: System.evtx (one pass for everything) ═══
     if system_evtx.exists():
         # Track service/update installations near crashes
         recent_installs = []  # [(time, event_id, desc)]
-        crash_events = []     # [(time, event_id, desc)]
 
         for eid, lvl, ts, prov, root in iter_evtx_cached(system_evtx):
             syst_total += 1

@@ -522,8 +522,13 @@ def repair(sn: str) -> dict:
     }}
 
 
+_fail_cache: dict = {}      # sn → (ts, 结果)；失败结果只留 60 秒，便于重试但不重复等 50 秒
+
 def factory(sn: str) -> dict:
     """出厂配置：不依赖保修查询，独立会话独立缓存——两者可并行，省一轮等待。"""
+    _f = _fail_cache.get(sn)
+    if _f and time.time() - _f[0] < 60:
+        return _f[1]
     r = _cache.get(sn) or {}
     cfg = (r.get("config") or {})
     if not cfg or time.time() - cfg.get("at", 0) > CACHE_TTL:
@@ -532,13 +537,37 @@ def factory(sn: str) -> dict:
             ensure_session(force=True)
             res = ask(f"查询配置信息：SN {sn}", chat_key=f"config-{sn}")
         txt = res.get("answer") or ""
-        if not txt or "没有查询到" in txt[:200]:
-            return {"ok": False, "summary": res.get("error") or "未返回配置信息", "detail": {}}
+        # 2026-11-10：失败分档，别把三种情况说成一句"未返回可解析的装箱单"
+        #   ① 完全没响应/超时 ② 响应了但说没查到 ③ 有内容但解析不出物料行（附原文摘要）
+        if not txt:
+            _fail_cache[sn] = (time.time(), {"ok": False,
+                                             "summary": "魔方未响应（超时或未登录）：" + (res.get("error") or "无返回"),
+                                             "detail": {}})
+            return _fail_cache[sn][1]
+        if "没有查询到" in txt[:300] or "未查询到" in txt[:300]:
+            _fail_cache[sn] = (time.time(), {"ok": False, "summary": "魔方查无此 SN 的装箱单（IPS 无记录）",
+                                             "detail": {"原始回答": txt[:800]}})
+            return _fail_cache[sn][1]
         _p = parse_bom(txt)
         if not _p.get("rows"):
             print(f"[mofang] {sn} 配置信息无法解析 txt={txt[:200]!r}", flush=True)
-            return {"ok": False, "summary": "魔方未返回可解析的装箱单", "detail": {}}
+            _rows_hint = ""
+            _cells = []
+            for _a, _b in re.findall(r"\|\s*([^|\n]{1,24})\s*\|\s*([^|\n]{1,60})\s*\|", txt):
+                _a, _b = _a.strip("* ").strip(), _b.strip("* ").strip()
+                if not _a or not _b or set(_a) <= set("-: ") or set(_b) <= set("-: "):
+                    continue
+                if _a in ("类别", "配置"):
+                    continue
+                _cells.append(f"{_a}：{_b}")
+            if _cells:
+                _rows_hint = "；返回里只有 " + "；".join(_cells[:2])
+            _fail_cache[sn] = (time.time(), {"ok": False,
+                                             "summary": "魔方有返回，但没有物料明细" + _rows_hint,
+                                             "detail": {"原始回答": txt[:1200], "解析到行数": len(_p.get("rows") or [])}})
+            return _fail_cache[sn][1]
         cfg = {"at": time.time(), "parsed": _p}
+        _fail_cache.pop(sn, None)
         _cache.setdefault(sn, {"at": time.time()})
         _cache[sn]["config"] = cfg
     p = cfg["parsed"]
@@ -554,6 +583,113 @@ def factory(sn: str) -> dict:
                        "电源": p.get("psu"), "电源物料": p.get("psu_pn"),
                        "装箱单": p.get("rows")}}
 
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 当前工单（2026-11-08）
+#   关键发现：魔方工作流「按问句决定返回哪一块」。
+#     · 「查询SN：x 保修」→ 不含进行中工单段（旧逻辑据此判"工单不可信"，是问错了句子）
+#     · 「查询SN：x 工单」→ 明确返回「该设备当前进行中工单数为 N」+「进行中工单i工单号/开单时间/故障描述/解决方案/企业名称」
+#   真值验证：GM0DLHEH 内部系统有活动工单 → 魔方 1 单；PC0WZMAB 无 → 魔方 0 单（2/2 一致）。
+#   注意多单时字段带序号：进行中工单1工单号…、进行中工单2工单号…，正则必须带 (\d*)
+# ══════════════════════════════════════════════════════════════════════
+TICKET_CACHE_TTL = int(os.getenv("MOFANG_TICKET_TTL", "600"))   # 工单状态变化快，缓存 10 分钟
+_ticket_cache: dict = {}
+_ticket_lock = threading.Lock()
+
+
+def parse_ticket(text: str) -> dict:
+    """从「工单」问句的回答里抠进行中工单。返回 {count, tickets[], warranty{}}"""
+    flat = text or ""
+    out = {"count": None, "tickets": [], "warranty": {}}
+    m = re.search(r"进行中工单数为?[：:\s]*([0-9]+)", flat)
+    if not m:
+        m = re.search(r"当前进行中工单[^0-9]{0,6}([0-9]+)", flat)
+    if m:
+        out["count"] = int(m.group(1))
+    # 每条工单：优先带序号的完整字段块
+    # 多单时字段带序号；单张时常见无序号写法（进行中工单工单号：…）
+    idxs = sorted({int(x) for x in re.findall(r"进行中工单(\d+)工单号", flat)})
+    if not idxs and out["count"]:
+        idxs = [1]
+    for i in idxs:
+        def g(label: str) -> str:
+            pats = [rf"进行中工单{i}{label}[：:\s]*(.*)"]
+            if i == 1:
+                pats.append(rf"进行中工单{label}[：:\s]*(.*)")
+            for p in pats:
+                mm = re.search(p, flat)
+                if mm:
+                    return mm.group(1).strip().strip("*｜| ").strip()
+            return ""
+        no = g("工单号")
+        if not re.match(r"^[0-9]{6,}$", no or ""):
+            continue
+        out["tickets"].append({
+            "工单号": no,
+            "开单时间": g("开单时间"),
+            "故障描述": g("故障描述"),
+            "解决方案": g("解决方案"),
+            "企业名称": g("企业名称"),
+            "SDM": g("SDM"),
+        })
+    # 附带信息（同一回答里就有，省一次保修问句）
+    # 注意：_val 自己会补「为/*/：」分隔符，这里只能传标签本身，不能再塞冒号
+    out["warranty"] = {
+        "产品型号": _val(flat, r"产品型号"),
+        "生产日期": _val(flat, r"生产日期"),
+        "保修截止": _val(flat, r"保修截止日期") or _val(flat, r"保修到期日期"),
+        "保修状态": _val(flat, r"保修状态"),
+        "销售通路": _val(flat, r"销售通路"),
+        "历史维修次数": _val(flat, r"历史维修次数"),
+        "升级单数": _val(flat, r"升级单数"),
+    }
+    return out
+
+
+def ticket(sn: str) -> dict:
+    """查询当前进行中工单（走「查询SN：{sn} 工单」问句）。"""
+    sn = (sn or "").strip().upper()
+    if not sn:
+        return {"ok": False, "summary": "SN 为空", "detail": {}}
+    hit = _ticket_cache.get(sn)
+    if hit and hit.get("ok") and time.time() - hit["at"] < TICKET_CACHE_TTL:
+        d = dict(hit["data"])
+        d["cache"] = True
+        return d
+    with _ticket_lock:                                  # 同 SN 串行，避免并发打同一问句
+        hit = _ticket_cache.get(sn)
+        if hit and hit.get("ok") and time.time() - hit["at"] < TICKET_CACHE_TTL:
+            d = dict(hit["data"])
+            d["cache"] = True
+            return d
+        res = ask(f"查询SN：{sn} 工单", chat_key=f"ticket-{sn}")
+        if res.get("need_login"):
+            ensure_session(force=True)
+            res = ask(f"查询SN：{sn} 工单", chat_key=f"ticket-{sn}")
+        blob = (res.get("device_info") or "") + "\n" + (res.get("answer") or "")
+        if not blob.strip():
+            return {"ok": False, "summary": res.get("error") or "魔方未返回工单信息", "detail": {}}
+        p = parse_ticket(blob)
+        items = p["tickets"]
+        if p["count"] is None and not items:
+            # 既没数量也没明细：不判成功、不缓存（与保修同一纪律）
+            return {"ok": False, "summary": "魔方返回内容无法解析工单信息（已丢弃，未缓存）",
+                    "detail": {"原文": blob[:1200]}}
+        cnt = p["count"] if p["count"] is not None else len(items)
+        if items:
+            summary = f"{cnt} 个进行中 · {items[0]['工单号']}"
+            if items[0].get("开单时间"):
+                summary += f"（{items[0]['开单时间']} 开单）"
+        else:
+            summary = "无进行中工单"
+        data = {"ok": True, "cache": False,
+                "summary": summary,
+                "detail": {"进行中工单数": cnt, "工单明细": items or "无进行中工单",
+                           "附带保修": p["warranty"], "原文": blob[:2000]},
+                "count": cnt, "tickets": items, "warranty": p["warranty"]}
+        _ticket_cache[sn] = {"at": time.time(), "ok": True, "data": data}
+        return data
 
 def status() -> dict:
     tok = bool((_state.get("cookies") or {}).get("fastgpt_token"))
